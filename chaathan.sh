@@ -9,7 +9,7 @@ GREEN=$(tput setaf 2)
 BLUE=$(tput setaf 4)
 RESET=$(tput sgr0)
 
-# variables
+# Variables
 TOOLS_DIR="$HOME/tools"
 VENV_DIR="$HOME/bugbounty_venv"
 GO_VERSION="1.24.1"
@@ -74,10 +74,18 @@ install_packages() {
     esac
 }
 
-# Function to clone and setup Git repo
+# Function to clone and setup Git repo (simplified, no checks)
 clone_and_setup() {
     local repo="$1" dir="$2" setup_cmd="$3"
+    
+    # If directory exists, remove it; then clone
+    if [ -d "$dir" ]; then
+        log "${BLUE}[+] Removing existing directory $dir for fresh clone${RESET}"
+        execute "rm -rf $dir" "Removing $dir" || return 1
+    fi
     execute "git clone $repo $dir" "Cloning $repo" || return 1
+    
+    # Run setup command if provided
     if [ -n "$setup_cmd" ]; then
         cd "$dir" || return 1
         execute "$setup_cmd" "Setting up $dir" || return 1
@@ -141,7 +149,6 @@ main() {
     # Basic Tools
     install_packages pip "py-altdns" "py-altdns installation"
     install_packages apt "nmap sqlmap" "nmap and sqlmap installation"
-    clone_and_setup "https://github.com/jobertabma/virtual-host-discovery.git" "vhd"
     clone_and_setup "https://github.com/guelfoweb/knock.git" "knockpy" "$PYTHON_CMD setup.py install"
     install_packages go "github.com/harleo/knockknock" "knockknock installation"
     clone_and_setup "https://github.com/yassineaboukir/asnlookup.git" "asnlookup" "$PIP_CMD install -r requirements.txt"
@@ -154,7 +161,7 @@ main() {
     
     # Domain Enum Tools
     clone_and_setup "https://github.com/nsonaniya2010/SubDomainizer.git" "SubDomainizer" "$PIP_CMD install -r requirements.txt"
-    clone_and_setup "https://github.com/eldraco/domain_analyzer.git" "domain_analyzer"
+    clone_and_setup "https://github.com/eldraco/domain_analyzer.git" "domain_analyzer" ""
     clone_and_setup "https://github.com/blechschmidt/massdns.git" "massdns" "make && sudo cp bin/massdns /usr/local/bin/"
     clone_and_setup "https://github.com/cihanmehmet/sub.sh.git" "subsh" "chmod +x sub.sh"
     install_packages go "github.com/haccer/subjack" "subjack installation"
@@ -175,23 +182,23 @@ main() {
     
     # Cloud Workflow Tools
     execute "curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip && unzip -q awscliv2.zip && sudo ./aws/install && rm -rf aws awscliv2.zip" "AWS CLI installation"
-    clone_and_setup "https://github.com/gwen001/s3-buckets-finder.git" "s3-buckets-finder"
-    clone_and_setup "https://github.com/nahamsec/lazys3.git" "lazys3"
+    clone_and_setup "https://github.com/gwen001/s3-buckets-finder.git" "s3-buckets-finder" ""
+    clone_and_setup "https://github.com/nahamsec/lazys3.git" "lazys3" ""
     clone_and_setup "https://github.com/securing/DumpsterDiver.git" "DumpsterDiver" "$PIP_CMD install -r requirements.txt"
     clone_and_setup "https://github.com/sa7mon/S3Scanner.git" "S3Scanner" "$PIP_CMD install -r requirements.txt"
     clone_and_setup "https://github.com/christophetd/CloudFlair.git" "CloudFlair" "$PIP_CMD install -r requirements.txt"
-    clone_and_setup "https://github.com/greycatz/CloudUnflare.git" "CloudUnflare"
-    clone_and_setup "https://github.com/fellchase/flumberboozle.git" "flumberboozle"
+    clone_and_setup "https://github.com/greycatz/CloudUnflare.git" "CloudUnflare" ""
+    clone_and_setup "https://github.com/fellchase/flumberboozle.git" "flumberboozle" ""
     clone_and_setup "https://github.com/RhinoSecurityLabs/GCPBucketBrute.git" "GCPBucketBrute" "$PIP_CMD install -r requirements.txt"
     
     # CMS Tools
     clone_and_setup "https://github.com/Dionach/CMSmap.git" "CMS/CMSmap" "$PIP_CMD install ."
     clone_and_setup "https://github.com/jekyc/wig.git" "CMS/wig" "$PYTHON_CMD setup.py install"
-    clone_and_setup "https://github.com/rezasp/joomscan.git" "CMS/Joomscan"
+    clone_and_setup "https://github.com/rezasp/joomscan.git" "CMS/Joomscan" ""
     install_packages gem "wpscan" "wpscan installation"
     install_packages pip "droopescan" "droopescan installation"
     clone_and_setup "https://github.com/immunIT/drupwn.git" "CMS/drupwn" "$PYTHON_CMD setup.py install"
-    clone_and_setup "https://github.com/0ang3el/aem-hacker.git" "CMS/aem-hacker"
+    clone_and_setup "https://github.com/0ang3el/aem-hacker.git" "CMS/aem-hacker" ""
     
     # Git Tools
     clone_and_setup "https://github.com/HightechSec/git-scanner.git" "GIT/git-scanner" "chmod +x gitscanner.sh"
@@ -200,11 +207,11 @@ main() {
     clone_and_setup "https://github.com/gwen001/github-search.git" "GIT/github-search" "$PIP_CMD install -r requirements.txt"
     
     # Frameworks
-    clone_and_setup "https://github.com/1N3/Sn1per.git" "Frameworks/Sn1per"
-    clone_and_setup "https://github.com/j3ssie/Osmedeus.git" "Frameworks/osmedeus"
-    clone_and_setup "https://github.com/WhaleShark-Team/cobra.git" "Frameworks/Cobra"
+    clone_and_setup "https://github.com/1N3/Sn1per.git" "Frameworks/Sn1per" ""
+    clone_and_setup "https://github.com/j3ssie/Osmedeus.git" "Frameworks/osmedeus" ""
+    clone_and_setup "https://github.com/WhaleShark-Team/cobra.git" "Frameworks/Cobra" ""
     clone_and_setup "https://github.com/0xinfection/tidos-framework.git" "Frameworks/TIDoS-Framework" "chmod +x install"
-    clone_and_setup "https://github.com/1N3/BlackWidow.git" "Frameworks/BlackWidow"
+    clone_and_setup "https://github.com/1N3/BlackWidow.git" "Frameworks/BlackWidow" ""
     clone_and_setup "https://github.com/screetsec/Sudomy.git" "Frameworks/Sudomy" "$PIP_CMD install -r requirements.txt && sudo npm i -g wappalyzer"
     execute "wget -q https://github.com/Edu4rdSHL/findomain/releases/latest/download/findomain-linux -O findomain && chmod +x findomain && sudo mv findomain /usr/local/bin/" "findomain installation"
     
@@ -229,7 +236,7 @@ main() {
     
     # Wordlists
     for repo in "assetnote/commonspeak2-wordlists" "fuzzdb-project/fuzzdb" "1N3/IntruderPayloads" "swisskyrepo/PayloadsAllTheThings" "danielmiessler/SecLists"; do
-        clone_and_setup "https://github.com/$repo.git" "Wordlists/$(basename $repo)"
+        clone_and_setup "https://github.com/$repo.git" "Wordlists/$(basename $repo)" ""
     done
     cd Wordlists/SecLists/Discovery/DNS && execute "cat dns-Jhaddix.txt | head -n -14 > clean-jhaddix-dns.txt" "Cleaning jhaddix DNS list" && cd ../../..
     
