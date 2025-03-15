@@ -87,9 +87,9 @@ clone_and_setup() {
 
 # Display banner 
 banner() {
-    log "${RED} ######################################################### ${RESET}"
-    log "${RED} #                 TOOLS FOR BUG BOUNTY                  # ${RESET}"
-    log "${RED} ######################################################### ${RESET}"
+    echo "${RED} ######################################################### ${RESET}"
+    echo "${RED} #                 TOOLS FOR BUG BOUNTY                  # ${RESET}"
+    echo "${RED} ######################################################### ${RESET}"
     echo "${BLUE}
               
  .----------------.  .----------------.  .----------------.  .----------------.  .----------------.  .----------------.  .----------------.  .-----------------.
@@ -98,13 +98,13 @@ banner() {
 | |   .' ___  |  | || | |_   ||   _| | || |     /  \     | || |     /  \     | || | |  _   _  |  | || | |_   ||   _| | || |     /  \     | || ||_   \|_   _| | |
 | |  / .'   \_|  | || |   | |__| |   | || |    / /\ \    | || |    / /\ \    | || | |_/ | | \_|  | || |   | |__| |   | || |    / /\ \    | || |  |   \ | |   | |
 | |  | |         | || |   |  __  |   | || |   / ____ \   | || |   / ____ \   | || |     | |      | || |   |  __  |   | || |   / ____ \   | || |  | |\ \| |   | |
-| |  \ `.___.'\  | || |  _| |  | |_  | || | _/ /    \ \_ | || | _/ /    \ \_ | || |    _| |_     | || |  _| |  | |_  | || | _/ /    \ \_ | || | _| |_\   |_  | |
+| |  \ \`.___.'\  | || |  _| |  | |_  | || | _/ /    \ \_ | || | _/ /    \ \_ | || |    _| |_     | || |  _| |  | |_  | || | _/ /    \ \_ | || | _| |_\   |_  | |
 | |   `._____.'  | || | |____||____| | || ||____|  |____|| || ||____|  |____|| || |   |_____|    | || | |____||____| | || ||____|  |____|| || ||_____|\____| | |
 | |              | || |              | || |              | || |              | || |              | || |              | || |              | || |              | |
 | '--------------' || '--------------' || '--------------' || '--------------' || '--------------' || '--------------' || '--------------' || '--------------' |
  '----------------'  '----------------'  '----------------'  '----------------'  '----------------'  '----------------'  '----------------'  '----------------'  ${RESET}"
-    log "${GREEN} Tools created by the best people in the InfoSec Community ${RESET}"
-    log "${GREEN}                   Thanks to everyone!                     ${RESET}"
+    echo "${GREEN} Tools created by the best people in the InfoSec Community ${RESET}"
+    echo "${GREEN}                   Thanks to everyone!                     ${RESET}"
 }
 
 # Main installation logic
@@ -126,10 +126,6 @@ main() {
         log "${BLUE}Golang is already installed${RESET}"
     fi
     source ~/.bash_profile
-
-    # Set bash aliases
-    execute "curl -s https://raw.githubusercontent.com/unethicalnoob/aliases/master/bashprofile > ~/.bash_profile" "Downloading aliases" || log "${BLUE}Aliases download failed, set manually${RESET}"
-    source ~/.bash_profile || log "${BLUE}If aliases don’t work, set them manually${RESET}"
 
     # Create tools directory
     mkdir -p "$TOOLS_DIR" && cd "$TOOLS_DIR" || exit 1
