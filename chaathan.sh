@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Exit on error
-set -e
 
 # Define colors
 RED=$(tput setaf 1)
@@ -14,7 +12,7 @@ TOOLS_DIR="$HOME/tools"
 VENV_DIR="$HOME/bugbounty_venv"
 GO_VERSION="1.24.1"
 LOG_FILE="$HOME/chaathan_install.log"
-APT_PACKAGES="apt-transport-https curl git jq ruby-full build-essential libcurl4-openssl-dev libssl-dev libxml2-dev libxslt1-dev libgmp-dev zlib1g-dev libffi-dev python3-dev python3-pip npm nmap perl parallel ffuf wfuzz"
+APT_PACKAGES="apt-transport-https curl git jq ruby-full build-essential libcurl4-openssl-dev libssl-dev libxml2-dev libxslt1-dev libgmp-dev zlib1g-dev libffi-dev python3-dev python3-pip python3-venv npm nmap perl parallel ffuf wfuzz"
 
 # Function to log messages
 log() {
@@ -33,7 +31,7 @@ execute() {
         ((attempt++))
         sleep 5
     done
-    log "${RED}Error: $desc failed after $retries retries${RESET}"
+    log "${RED}Error: $desc failed after $retries retries, skipping...${RESET}"
     return 1
 }
 
@@ -50,13 +48,14 @@ setup_environment() {
     
     if [ "$OS" = "ubuntu" ]; then
         log "${GREEN}[+] Setting up virtual environment for Ubuntu${RESET}"
-        execute "python3 -m venv $VENV_DIR" "Virtual environment creation" || exit 1
+        execute "python3 -m venv $VENV_DIR" "Virtual environment creation" || return 1
         source "$VENV_DIR/bin/activate"
         PIP_CMD="$VENV_DIR/bin/pip"
         PYTHON_CMD="$VENV_DIR/bin/python3"
+        execute "$PIP_CMD install --upgrade pip setuptools" "pip and setuptools upgrade" || return 1
     else
         log "${GREEN}[+] Using system Python for $OS${RESET}"
-        execute "python3 -m ensurepip --upgrade && python3 -m pip install --upgrade pip" "pip setup" || exit 1
+        execute "python3 -m ensurepip --upgrade && python3 -m pip install --upgrade pip setuptools" "pip and setuptools setup" || return 1
         PIP_CMD="pip3"
         PYTHON_CMD="python3"
     fi
@@ -72,9 +71,10 @@ install_packages() {
         npm) execute "sudo npm install -g $packages" "$desc" ;;
         go) execute "go install -v $packages@latest" "$desc" && [ -f "$HOME/go/bin/$(basename $packages)" ] && sudo cp "$HOME/go/bin/$(basename $packages)" /usr/local/bin/ ;;
     esac
+    # No exit on failure, just proceed
 }
 
-# Function to clone and setup Git repo (simplified, no checks)
+# Function to clone and setup Git repo
 clone_and_setup() {
     local repo="$1" dir="$2" setup_cmd="$3"
     
@@ -83,14 +83,15 @@ clone_and_setup() {
         log "${BLUE}[+] Removing existing directory $dir for fresh clone${RESET}"
         execute "rm -rf $dir" "Removing $dir" || return 1
     fi
-    execute "git clone $repo $dir" "Cloning $repo" || return 1
-    
-    # Run setup command if provided
-    if [ -n "$setup_cmd" ]; then
-        cd "$dir" || return 1
-        execute "$setup_cmd" "Setting up $dir" || return 1
-        cd - || return 1
+    if execute "git clone $repo $dir" "Cloning $repo"; then
+        # Run setup command if provided and cloning succeeded
+        if [ -n "$setup_cmd" ]; then
+            cd "$dir" || return 1
+            execute "$setup_cmd" "Setting up $dir" || return 1
+            cd - || return 1
+        fi
     fi
+    # No exit on failure, just proceed
 }
 
 # Display banner
@@ -118,14 +119,14 @@ main() {
     setup_environment
     
     # Update system and install base dependencies
-    execute "sudo apt -y update && sudo apt -y upgrade" "System update/upgrade" || exit 1
-    install_packages apt "$APT_PACKAGES" "Base dependencies installation" || exit 1
-    execute "curl -sL https://git.io/vokNn | sudo bash -" "apt-fast installation" || exit 1
+    execute "sudo apt -y update && sudo apt -y upgrade" "System update/upgrade"
+    install_packages apt "$APT_PACKAGES" "Base dependencies installation"
+    execute "curl -sL https://git.io/vokNn | sudo bash -" "apt-fast installation"
     
     # Install Go
     if [ ! -d "/usr/local/go" ]; then
-        execute "wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O go.tar.gz" "Downloading Go" || exit 1
-        execute "sudo tar -C /usr/local -xzf go.tar.gz && rm go.tar.gz" "Extracting Go" || exit 1
+        execute "wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O go.tar.gz" "Downloading Go"
+        execute "sudo tar -C /usr/local -xzf go.tar.gz && rm go.tar.gz" "Extracting Go"
         echo '# Set Go environment variables
         export GOROOT=/usr/local/go
         export GOPATH=$HOME/go
@@ -141,7 +142,7 @@ main() {
     fi
     
     # Create tools directory
-    mkdir -p "$TOOLS_DIR" && cd "$TOOLS_DIR" || exit 1
+    mkdir -p "$TOOLS_DIR" && cd "$TOOLS_DIR" || return 1
     
     # Install tools
     log "${RED} #################### Installing Tools #################### ${RESET}"
