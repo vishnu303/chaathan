@@ -1,9 +1,17 @@
 #!/bin/bash
 
+# Script version
+VERSION="1.1.0"
+START_TIME=$(date +%s)
+
+# Enable debug mode with --debug flag
+DEBUG_MODE=0
+[ "$1" = "--debug" ] && DEBUG_MODE=1
 
 # Define colors
 RED=$(tput setaf 1)
 GREEN=$(tput setaf 2)
+YELLOW=$(tput setaf 3)
 BLUE=$(tput setaf 4)
 RESET=$(tput sgr0)
 
@@ -13,55 +21,94 @@ VENV_DIR="$HOME/bugbounty_venv"
 GO_VERSION="1.24.1"
 LOG_FILE="$HOME/chaathan_install.log"
 APT_PACKAGES="apt-transport-https curl git jq ruby-full build-essential libcurl4-openssl-dev libssl-dev libxml2-dev libxslt1-dev libgmp-dev zlib1g-dev libffi-dev python3-dev python3-pip python3-venv npm nmap perl parallel ffuf wfuzz"
+FAILED_TOOLS=()
+SUCCESSFUL_TOOLS=()
 
-# Function to log messages
+# Centralized logging function with levels
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+    local level="$1" msg="$2"
+    local color timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    case "$level" in
+        INFO)  color="$GREEN" ;;
+        WARN)  color="$YELLOW" ;;
+        ERROR) color="$RED" ;;
+        DEBUG) color="$BLUE" ;;
+        *)     color="$RESET" ;;
+    esac
+    
+    # Only log DEBUG if debug mode is enabled
+    [ "$level" = "DEBUG" ] && [ "$DEBUG_MODE" -ne 1 ] && return
+    
+    echo "$timestamp [$level] $msg" | tee -a "$LOG_FILE"
+    printf "${color}%s${RESET}\n" "$timestamp [$level] $msg" >&2
 }
 
-# Function to execute commands with retries
+# Trap unexpected errors
+trap 'log ERROR "Unexpected error occurred at line $LINENO. Exiting."; exit 1' ERR
+
+# Execute command with retries
 execute() {
-    local cmd="$1" desc="$2" retries=${3:-3} attempt=1
+    local cmd="$1" desc="$2" retries=${3:-3}
+    local attempt=1 rc=0
+    log DEBUG "Executing: $cmd"
+    
     while [ $attempt -le $retries ]; do
-        if eval "$cmd"; then
-            log "${GREEN}[+] $desc succeeded${RESET}"
+        if eval "$cmd" 2>>"$LOG_FILE"; then
+            log INFO "$desc succeeded"
             return 0
         fi
-        log "${RED}[-] Attempt $attempt/$retries failed for $desc${RESET}"
+        rc=$?
+        log WARN "Attempt $attempt/$retries failed for $desc (exit code: $rc)"
         ((attempt++))
         sleep 5
     done
-    log "${RED}Error: $desc failed after $retries retries, skipping...${RESET}"
+    log ERROR "$desc failed after $retries retries, skipping..."
     return 1
 }
 
-# Function to detect OS and set Python environment
+# Check for critical dependencies
+check_prerequisites() {
+    local deps=("git" "curl" "python3" "pip3")
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &>/dev/null; then
+            log ERROR "Missing critical dependency: $dep. Please install it manually."
+            exit 1
+        fi
+        log DEBUG "$dep is installed"
+    done
+}
+
+# Setup Python environment
 setup_environment() {
+    local os
     if [ -f /etc/os-release ]; then
         . /etc/os-release
-        OS=$ID
-        log "${GREEN}Detected OS: $OS${RESET}"
+        os=$ID
+        log INFO "Detected OS: $os"
     else
-        OS="unknown"
-        log "${RED}Cannot detect OS, defaulting to system Python${RESET}"
+        os="unknown"
+        log WARN "Cannot detect OS, defaulting to system Python"
     fi
     
-    if [ "$OS" = "ubuntu" ]; then
-        log "${GREEN}[+] Setting up virtual environment for Ubuntu${RESET}"
+    if [ "$os" = "ubuntu" ]; then
+        log INFO "Setting up virtual environment for Ubuntu"
         execute "python3 -m venv $VENV_DIR" "Virtual environment creation" || return 1
-        source "$VENV_DIR/bin/activate"
+        source "$VENV_DIR/bin/activate" || { log ERROR "Failed to activate virtual environment"; return 1; }
         PIP_CMD="$VENV_DIR/bin/pip"
         PYTHON_CMD="$VENV_DIR/bin/python3"
         execute "$PIP_CMD install --upgrade pip setuptools" "pip and setuptools upgrade" || return 1
     else
-        log "${GREEN}[+] Using system Python for $OS${RESET}"
+        log INFO "Using system Python for $os"
         execute "python3 -m ensurepip --upgrade && python3 -m pip install --upgrade pip setuptools" "pip and setuptools setup" || return 1
         PIP_CMD="pip3"
         PYTHON_CMD="python3"
     fi
+    OS="$os"
 }
 
-# Function to install packages
+# Install packages
 install_packages() {
     local type="$1" packages="$2" desc="$3"
     case $type in
@@ -69,38 +116,40 @@ install_packages() {
         pip) execute "$PIP_CMD install $packages" "$desc" ;;
         gem) execute "sudo gem install $packages" "$desc" ;;
         npm) execute "sudo npm install -g $packages" "$desc" ;;
-        go) execute "go install -v $packages@latest" "$desc" && [ -f "$HOME/go/bin/$(basename $packages)" ] && sudo cp "$HOME/go/bin/$(basename $packages)" /usr/local/bin/ ;;
+        go)  execute "go install -v $packages@latest" "$desc" && \
+             [ -f "$HOME/go/bin/$(basename $packages)" ] && \
+             execute "sudo cp $HOME/go/bin/$(basename $packages) /usr/local/bin/" "Copying $(basename $packages) to /usr/local/bin" ;;
     esac
-    # No exit on failure, just proceed
+    [ $? -eq 0 ] && SUCCESSFUL_TOOLS+=("$desc") || FAILED_TOOLS+=("$desc")
 }
 
-# Function to clone and setup Git repo
+# Clone and setup Git repo
 clone_and_setup() {
-    local repo="$1" dir="$2" setup_cmd="$3"
+    local repo="$1" dir="$2" setup_cmd="$3" desc="Cloning and setting up $repo"
     
-    # If directory exists, remove it; then clone
     if [ -d "$dir" ]; then
-        log "${BLUE}[+] Removing existing directory $dir for fresh clone${RESET}"
+        log INFO "Removing existing directory $dir for fresh clone"
         execute "rm -rf $dir" "Removing $dir" || return 1
     fi
     if execute "git clone $repo $dir" "Cloning $repo"; then
-        # Run setup command if provided and cloning succeeded
+        SUCCESSFUL_TOOLS+=("Cloning $repo")
         if [ -n "$setup_cmd" ]; then
-            cd "$dir" || return 1
-            execute "$setup_cmd" "Setting up $dir" || return 1
-            cd - || return 1
+            cd "$dir" || { log ERROR "Failed to cd into $dir"; FAILED_TOOLS+=("Setup $repo"); return 1; }
+            execute "$setup_cmd" "Setting up $dir" && SUCCESSFUL_TOOLS+=("Setup $repo") || FAILED_TOOLS+=("Setup $repo")
+            cd - >/dev/null || log WARN "Failed to return to previous directory"
         fi
+    else
+        FAILED_TOOLS+=("Cloning $repo")
     fi
-    # No exit on failure, just proceed
 }
 
 # Display banner
 banner() {
+    log INFO "Starting Chaathan Tools Installation v$VERSION"
     echo "${RED} ######################################################### ${RESET}"
     echo "${RED} #                 TOOLS FOR BUG BOUNTY                  # ${RESET}"
     echo "${RED} ######################################################### ${RESET}"
     echo "${BLUE}
-
       _____ _    _                 _______ _    _          _   _
      / ____| |  | |   /\        /\|__   __| |  | |   /\   | \ | |
     | |    | |__| |  /  \      /  \  | |  | |__| |  /  \  |  \| |
@@ -113,12 +162,10 @@ banner() {
     echo "${GREEN}                   Thanks to everyone!                     ${RESET}"
 }
 
-# Main installation logic
-main() {
-    banner
-    setup_environment
+# Install all tools
+install_tools() {
+    log INFO "Installing base dependencies and tools"
     
-    # Update system and install base dependencies
     execute "sudo apt -y update && sudo apt -y upgrade" "System update/upgrade"
     install_packages apt "$APT_PACKAGES" "Base dependencies installation"
     execute "curl -sL https://git.io/vokNn | sudo bash -" "apt-fast installation"
@@ -131,21 +178,15 @@ main() {
         export GOROOT=/usr/local/go
         export GOPATH=$HOME/go
         export PATH=$PATH:$GOROOT/bin:$GOPATH/bin' > ~/.bash_profile
-        export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin  # Immediate effect in this session
+        export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
     else
-        log "${BLUE}Golang is already installed${RESET}"
+        log INFO "Golang is already installed"
     fi
-    if [ -f ~/.bash_profile ]; then
-        source ~/.bash_profile
-    else
-        log "${RED}Warning: ~/.bash_profile not found, PATH not updated${RESET}"
-    fi
+    [ -f ~/.bash_profile ] && source ~/.bash_profile || log WARN "bash_profile not found, PATH not updated"
     
-    # Create tools directory
-    mkdir -p "$TOOLS_DIR" && cd "$TOOLS_DIR" || return 1
+    mkdir -p "$TOOLS_DIR" && cd "$TOOLS_DIR" || { log ERROR "Failed to create tools directory"; return 1; }
     
-    # Install tools
-    log "${RED} #################### Installing Tools #################### ${RESET}"
+    log INFO "#################### Installing Tools ####################"
     
     # Basic Tools
     install_packages pip "py-altdns" "py-altdns installation"
@@ -256,15 +297,30 @@ main() {
     install_packages go "github.com/projectdiscovery/pdtm/cmd/pdtm" "pdtm installation"
     cd ~/go/bin && execute "./pdtm --install-all" "Installing pdtm tools" && cd ..
     clone_and_setup "https://github.com/xnl-h4ck3r/waymore.git" "waymore" "$PYTHON_CMD setup.py install"
+}
+
+# Main function
+main() {
+    banner
+    check_prerequisites
+    setup_environment || { log ERROR "Environment setup failed, aborting"; exit 1; }
+    install_tools
     
-    # Instructions
-    log "${GREEN}Use 'source ~/.bash_profile' to enable shell functions${RESET}"
-    log "${GREEN}ALL THE TOOLS ARE MADE BY THE BEST PEOPLE OF THE INFOSEC COMMUNITY${RESET}"
-    log "${GREEN}                I AM JUST A SCRIPT-KIDDIE ;)                 ${RESET}"
+    # Summary
+    END_TIME=$(date +%s)
+    ELAPSED=$((END_TIME - START_TIME))
+    log INFO "Installation completed in $((ELAPSED / 60)) minutes and $((ELAPSED % 60)) seconds"
+    log INFO "Successful installations: ${#SUCCESSFUL_TOOLS[@]}"
+    [ ${#SUCCESSFUL_TOOLS[@]} -gt 0 ] && log DEBUG "Successful tools: ${SUCCESSFUL_TOOLS[*]}"
+    log INFO "Failed installations: ${#FAILED_TOOLS[@]}"
+    [ ${#FAILED_TOOLS[@]} -gt 0 ] && log ERROR "Failed tools: ${FAILED_TOOLS[*]}"
     
-    # Deactivate virtual environment if on Ubuntu
+    log INFO "Use 'source ~/.bash_profile' to enable shell functions"
+    log INFO "ALL THE TOOLS ARE MADE BY THE BEST PEOPLE OF THE INFOSEC COMMUNITY"
+    log INFO "                I AM JUST A SCRIPT-KIDDIE ;)"
+    
     [ "$OS" = "ubuntu" ] && deactivate
 }
 
-# Run main function
+# Run main
 main
