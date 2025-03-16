@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script version
-VERSION="1.1.0"
+VERSION="1.1.1"
 START_TIME=$(date +%s)
 
 # Enable debug mode with --debug flag
@@ -41,8 +41,10 @@ log() {
     # Only log DEBUG if debug mode is enabled
     [ "$level" = "DEBUG" ] && [ "$DEBUG_MODE" -ne 1 ] && return
     
-    echo "$timestamp [$level] $msg" | tee -a "$LOG_FILE"
-    printf "${color}%s${RESET}\n" "$timestamp [$level] $msg" >&2
+    # Plain text to log file
+    echo "$timestamp [$level] $msg" >> "$LOG_FILE"
+    # Colored output to console (stdout)
+    printf "${color}%s${RESET}\n" "$timestamp [$level] $msg"
 }
 
 # Trap unexpected errors
@@ -52,15 +54,15 @@ trap 'log ERROR "Unexpected error occurred at line $LINENO. Exiting."; exit 1' E
 execute() {
     local cmd="$1" desc="$2" retries=${3:-3}
     local attempt=1 rc=0
-    log DEBUG "Executing: $cmd"
+    log DEBUG "Executing command: $cmd for $desc"
     
     while [ $attempt -le $retries ]; do
-        if eval "$cmd" 2>>"$LOG_FILE"; then
-            log INFO "$desc succeeded"
+        if eval "$cmd" >>"$LOG_FILE" 2>&1; then
+            log INFO "$desc completed successfully"
             return 0
         fi
         rc=$?
-        log WARN "Attempt $attempt/$retries failed for $desc (exit code: $rc)"
+        log WARN "$desc failed on attempt $attempt/$retries (exit code: $rc)"
         ((attempt++))
         sleep 5
     done
@@ -94,14 +96,14 @@ setup_environment() {
     
     if [ "$os" = "ubuntu" ]; then
         log INFO "Setting up virtual environment for Ubuntu"
-        execute "python3 -m venv $VENV_DIR" "Virtual environment creation" || return 1
+        execute "python3 -m venv $VENV_DIR" "Creating virtual environment in $VENV_DIR" || return 1
         source "$VENV_DIR/bin/activate" || { log ERROR "Failed to activate virtual environment"; return 1; }
         PIP_CMD="$VENV_DIR/bin/pip"
         PYTHON_CMD="$VENV_DIR/bin/python3"
-        execute "$PIP_CMD install --upgrade pip setuptools" "pip and setuptools upgrade" || return 1
+        execute "$PIP_CMD install --upgrade pip setuptools" "Upgrading pip and installing setuptools in venv" || return 1
     else
         log INFO "Using system Python for $os"
-        execute "python3 -m ensurepip --upgrade && python3 -m pip install --upgrade pip setuptools" "pip and setuptools setup" || return 1
+        execute "python3 -m ensurepip --upgrade && python3 -m pip install --upgrade pip setuptools" "Ensuring pip and setuptools for system Python" || return 1
         PIP_CMD="pip3"
         PYTHON_CMD="python3"
     fi
@@ -111,35 +113,42 @@ setup_environment() {
 # Install packages
 install_packages() {
     local type="$1" packages="$2" desc="$3"
+    local install_desc="Installing $packages via $type ($desc)"
+    
     case $type in
-        apt) execute "sudo apt -y install $packages" "$desc" ;;
-        pip) execute "$PIP_CMD install $packages" "$desc" ;;
-        gem) execute "sudo gem install $packages" "$desc" ;;
-        npm) execute "sudo npm install -g $packages" "$desc" ;;
-        go)  execute "go install -v $packages@latest" "$desc" && \
-             [ -f "$HOME/go/bin/$(basename $packages)" ] && \
-             execute "sudo cp $HOME/go/bin/$(basename $packages) /usr/local/bin/" "Copying $(basename $packages) to /usr/local/bin" ;;
+        apt) execute "sudo apt -y install $packages" "$install_desc" ;;
+        pip) execute "$PIP_CMD install $packages" "$install_desc" ;;
+        gem) execute "sudo gem install $packages" "$install_desc" ;;
+        npm) execute "sudo npm install -g $packages" "$install_desc" ;;
+        go)
+            execute "go install -v $packages@latest" "$install_desc" && \
+            if [ -f "$HOME/go/bin/$(basename $packages)" ]; then
+                execute "sudo cp $HOME/go/bin/$(basename $packages) /usr/local/bin/" "Copying $(basename $packages) to /usr/local/bin" || \
+                log WARN "Failed to copy $(basename $packages) to /usr/local/bin"
+        fi ;;
     esac
     [ $? -eq 0 ] && SUCCESSFUL_TOOLS+=("$desc") || FAILED_TOOLS+=("$desc")
 }
 
 # Clone and setup Git repo
 clone_and_setup() {
-    local repo="$1" dir="$2" setup_cmd="$3" desc="Cloning and setting up $repo"
+    local repo="$1" dir="$2" setup_cmd="$3"
+    local clone_desc="Cloning $repo to $dir"
+    local setup_desc="Setting up $dir"
     
     if [ -d "$dir" ]; then
         log INFO "Removing existing directory $dir for fresh clone"
-        execute "rm -rf $dir" "Removing $dir" || return 1
+        execute "rm -rf $dir" "Removing directory $dir" || return 1
     fi
-    if execute "git clone $repo $dir" "Cloning $repo"; then
-        SUCCESSFUL_TOOLS+=("Cloning $repo")
+    if execute "git clone $repo $dir" "$clone_desc"; then
+        SUCCESSFUL_TOOLS+=("$clone_desc")
         if [ -n "$setup_cmd" ]; then
-            cd "$dir" || { log ERROR "Failed to cd into $dir"; FAILED_TOOLS+=("Setup $repo"); return 1; }
-            execute "$setup_cmd" "Setting up $dir" && SUCCESSFUL_TOOLS+=("Setup $repo") || FAILED_TOOLS+=("Setup $repo")
+            cd "$dir" || { log ERROR "Failed to cd into $dir"; FAILED_TOOLS+=("$setup_desc"); return 1; }
+            execute "$setup_cmd" "$setup_desc" && SUCCESSFUL_TOOLS+=("$setup_desc") || FAILED_TOOLS+=("$setup_desc")
             cd - >/dev/null || log WARN "Failed to return to previous directory"
         fi
     else
-        FAILED_TOOLS+=("Cloning $repo")
+        FAILED_TOOLS+=("$clone_desc")
     fi
 }
 
@@ -166,14 +175,14 @@ banner() {
 install_tools() {
     log INFO "Installing base dependencies and tools"
     
-    execute "sudo apt -y update && sudo apt -y upgrade" "System update/upgrade"
+    execute "sudo apt -y update && sudo apt -y upgrade" "Updating and upgrading system packages"
     install_packages apt "$APT_PACKAGES" "Base dependencies installation"
-    execute "curl -sL https://git.io/vokNn | sudo bash -" "apt-fast installation"
+    execute "curl -sL https://git.io/vokNn | sudo bash -" "Installing apt-fast"
     
     # Install Go
     if [ ! -d "/usr/local/go" ]; then
-        execute "wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O go.tar.gz" "Downloading Go"
-        execute "sudo tar -C /usr/local -xzf go.tar.gz && rm go.tar.gz" "Extracting Go"
+        execute "wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O go.tar.gz" "Downloading Go $GO_VERSION"
+        execute "sudo tar -C /usr/local -xzf go.tar.gz && rm go.tar.gz" "Extracting Go to /usr/local"
         echo '# Set Go environment variables
         export GOROOT=/usr/local/go
         export GOPATH=$HOME/go
@@ -223,7 +232,7 @@ install_tools() {
     clone_and_setup "https://github.com/M4cs/traxss.git" "traxss" "$PIP_CMD install -r requirements.txt"
     
     # Cloud Workflow Tools
-    execute "curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip && unzip -q awscliv2.zip && sudo ./aws/install && rm -rf aws awscliv2.zip" "AWS CLI installation"
+    execute "curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip && unzip -q awscliv2.zip && sudo ./aws/install && rm -rf aws awscliv2.zip" "Installing AWS CLI"
     clone_and_setup "https://github.com/gwen001/s3-buckets-finder.git" "s3-buckets-finder" ""
     clone_and_setup "https://github.com/nahamsec/lazys3.git" "lazys3" ""
     clone_and_setup "https://github.com/securing/DumpsterDiver.git" "DumpsterDiver" "$PIP_CMD install -r requirements.txt"
@@ -255,7 +264,7 @@ install_tools() {
     clone_and_setup "https://github.com/0xinfection/tidos-framework.git" "Frameworks/TIDoS-Framework" "chmod +x install"
     clone_and_setup "https://github.com/1N3/BlackWidow.git" "Frameworks/BlackWidow" ""
     clone_and_setup "https://github.com/screetsec/Sudomy.git" "Frameworks/Sudomy" "$PIP_CMD install -r requirements.txt && sudo npm i -g wappalyzer"
-    execute "wget -q https://github.com/Edu4rdSHL/findomain/releases/latest/download/findomain-linux -O findomain && chmod +x findomain && sudo mv findomain /usr/local/bin/" "findomain installation"
+    execute "wget -q https://github.com/Edu4rdSHL/findomain/releases/latest/download/findomain-linux -O findomain && chmod +x findomain && sudo mv findomain /usr/local/bin/" "Installing findomain"
     
     # Other Tools
     clone_and_setup "https://github.com/swisskyrepo/SSRFmap.git" "SSRFMap" "$PIP_CMD install -r requirements.txt"
