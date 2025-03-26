@@ -232,7 +232,12 @@ install_tools() {
     clone_and_setup "https://github.com/M4cs/traxss.git" "traxss" "$PIP_CMD install -r requirements.txt"
     
     # Cloud Workflow Tools
-    execute "curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip && unzip -q awscliv2.zip && sudo ./aws/install && rm -rf aws awscliv2.zip" "Installing AWS CLI"
+    if command -v aws >/dev/null 2>&1 || [ -d "/usr/local/aws-cli" ]; then
+        log INFO "AWS CLI is already installed, skipping installation"
+    else
+        log INFO "Installing AWS CLI"
+        execute "curl -s https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip && unzip -o -q awscliv2.zip && sudo ./aws/install && rm -rf aws awscliv2.zip" "Installing AWS CLI"
+    fi
     clone_and_setup "https://github.com/gwen001/s3-buckets-finder.git" "s3-buckets-finder" ""
     clone_and_setup "https://github.com/nahamsec/lazys3.git" "lazys3" ""
     clone_and_setup "https://github.com/securing/DumpsterDiver.git" "DumpsterDiver" "$PIP_CMD install -r requirements.txt"
