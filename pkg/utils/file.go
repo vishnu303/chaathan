@@ -66,3 +66,21 @@ func FileExists(filename string) bool {
 	}
 	return !info.IsDir()
 }
+
+// CountFileLines returns the number of non-empty lines in a file
+func CountFileLines(filePath string) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) != "" {
+			count++
+		}
+	}
+	return count, scanner.Err()
+}

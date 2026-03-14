@@ -171,7 +171,7 @@ func (t *ToolBox) RunSublist3r(ctx context.Context, domain string, outputFile st
 // --- Active Enumeration ---
 
 func (t *ToolBox) RunAmass(ctx context.Context, domain string, outputFile string) error {
-	args := []string{"enum", "-active", "-alts", "-brute", "-min-for-recursive", "2", "-d", domain, "-o", outputFile}
+	args := []string{"enum", "-active", "-alts", "-d", domain, "-o", outputFile}
 	if t.Config != nil && t.Config.Amass.Timeout > 0 {
 		args = append(args, "-timeout", strconv.Itoa(t.Config.Amass.Timeout))
 	}
@@ -371,6 +371,69 @@ func (t *ToolBox) RunLinkfinderOnFile(ctx context.Context, jsFile string, output
 		return err
 	}
 	return writeToFile(outputFile, output)
+}
+
+// RunArjun discovers hidden HTTP parameters on a URL
+func (t *ToolBox) RunArjun(ctx context.Context, url string, outputFile string) error {
+	args := []string{"-u", url, "-oJ", outputFile, "--stable"}
+	_, err := t.Runner.Run(ctx, "arjun", args)
+	return err
+}
+
+// RunArjunFromFile discovers hidden HTTP parameters from a file of URLs
+func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
+	_, err := t.Runner.Run(ctx, "arjun", args)
+	return err
+}
+
+// RunHttpxURLCheck live-checks a list of URLs (not subdomains) and outputs only live URLs
+func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputFile string) error {
+	args := []string{
+		"-l", urlsFile,
+		"-threads", strconv.Itoa(t.httpxThreads()),
+		"-timeout", strconv.Itoa(t.httpxTimeout()),
+		"-status-code",
+		"-no-fallback",
+		"-o", outputFile,
+	}
+	if t.Config != nil && t.Config.Httpx.FollowRedirects {
+		args = append(args, "-follow-redirects")
+	}
+	_, err := t.Runner.Run(ctx, "httpx", args)
+	return err
+}
+
+// RunNucleiURLs runs nuclei on specific URLs with stricter rate limits.
+// Used for path-specific vulnerability scanning (separate from infra scanning).
+func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile string) error {
+	// Use half the normal rate limit for URL scanning to reduce noise
+	rateLimit := t.nucleiRateLimit() / 2
+	if rateLimit < 25 {
+		rateLimit = 25
+	}
+	concurrency := t.nucleiConcurrency() / 2
+	if concurrency < 5 {
+		concurrency = 5
+	}
+
+	args := []string{
+		"-l", urlsFile,
+		"-c", strconv.Itoa(concurrency),
+		"-rl", strconv.Itoa(rateLimit),
+		"-severity", "critical,high,medium",
+		"-jsonl",
+		"-o", outputFile,
+	}
+
+	// Apply exclude tags from config
+	excludeTags := t.nucleiExcludeTags()
+	if len(excludeTags) > 0 {
+		args = append(args, "-etags", strings.Join(excludeTags, ","))
+	}
+
+	_, err := t.Runner.Run(ctx, "nuclei", args)
+	return err
 }
 
 // --- Wordlist Generation ---
