@@ -273,6 +273,8 @@ func getDockerImage(tool string) string {
 		return "hahwul/dalfox"
 	case "subjack":
 		return "alpine" // no official docker image
+	case "arjun":
+		return "s0md3v/arjun"
 	default:
 		return "alpine"
 	}
@@ -281,7 +283,7 @@ func getDockerImage(tool string) string {
 func isEntrypointImage(tool string) bool {
 	switch tool {
 	case "amass", "nuclei", "httpx", "naabu", "subfinder", "dnsx", "katana", "ffuf", "cewl", "linkfinder",
-		"alterx", "tlsx", "uncover", "dalfox":
+		"alterx", "tlsx", "uncover", "dalfox", "arjun":
 		return true
 	default:
 		return false

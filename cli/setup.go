@@ -71,6 +71,7 @@ var pyTools = []struct {
 	{"cloud_enum", "git+https://github.com/initstring/cloud_enum.git", "cloud_enum.py"},
 	{"sublist3r", "git+https://github.com/aboul3la/Sublist3r.git", "sublist3r.py"},
 	{"linkfinder", "git+https://github.com/GerbenJavado/LinkFinder.git", "linkfinder.py"},
+	{"arjun", "arjun", "arjun"},
 }
 
 // Python scripts that need manual installation (not available via pip)
@@ -196,6 +197,7 @@ func installGoTool(name, url string, needsCGO bool) error {
 	}
 
 	if Verbose {
+		logger.SubStep("Installing %s from %s", name, url)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}

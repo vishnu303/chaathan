@@ -56,9 +56,12 @@ var WildcardSteps = []Step{
 	{Name: "port_scanning", Description: "Port Scanning", Required: false, Tool: "naabu"},
 	{Name: "web_crawling", Description: "Web Crawling", Required: false, Tool: "katana,gospider"},
 	{Name: "js_analysis", Description: "JavaScript Analysis", Required: false, Tool: "linkfinder"},
+	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
+	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
 	{Name: "wordlist_gen", Description: "Wordlist Generation", Required: false, Tool: "cewl"},
 	{Name: "dir_fuzzing", Description: "Directory Fuzzing", Required: false, Tool: "ffuf"},
-	{Name: "vuln_scanning", Description: "Vulnerability Scanning", Required: false, Tool: "nuclei"},
+	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},
+	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},
 	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "subjack"},
 	{Name: "xss_scanning", Description: "XSS Scanning", Required: false, Tool: "dalfox"},
 }
