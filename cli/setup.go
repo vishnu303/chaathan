@@ -8,11 +8,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/progress"
 )
 
 var setupCmd = &cobra.Command{
@@ -29,10 +28,7 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 }
 
-type installResult struct {
-	name string
-	err  error
-}
+// ── Tool definitions ─────────────────────────────────────────────────────────
 
 var goTools = []struct {
 	name     string
@@ -90,125 +86,58 @@ var rubyTools = []struct {
 	{"cewl", "cewl"},
 }
 
+// ── Main setup entrypoint ────────────────────────────────────────────────────
+
 func runSetup(cmd *cobra.Command, args []string) {
-	logger.Info("Starting Chaathan Setup...")
 	start := time.Now()
+
+	progress.Header("🔧 Chaathan Setup")
 
 	installPrerequisites()
 
 	if _, err := exec.LookPath("go"); err != nil {
-		logger.Error("Go is not installed. Please install Go 1.21+ manually.")
+		progress.ItemFail("Go is not installed", "Please install Go 1.21+ manually")
 		os.Exit(1)
 	}
 
-	stats := installAllTools()
+	var totalInstalled, totalSkipped, totalFailed int32
 
-	logger.Section("Setup Complete (%s)", time.Since(start).Round(time.Second))
-	logger.Info("Installed: %d | Skipped: %d | Failed: %d", stats.installed, stats.skipped, stats.failed)
-	logger.Info("Ensure your $GOPATH/bin is in your $PATH.")
+	// Go tools
+	i, s, f := installGoToolsSection()
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
+	// Python tools
+	i, s, f = installPythonToolsSection()
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
+	// Ruby tools
+	i, s, f = installRubyToolsSection()
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
+	// MassDNS
+	i, s, f = installMassDNSSection()
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
+	progress.Summary(totalInstalled, totalSkipped, totalFailed, time.Since(start))
+	progress.Tip("Ensure $GOPATH/bin is in your $PATH")
 }
 
-type installStats struct {
-	installed, skipped, failed int32
-}
-
-func (s *installStats) incInstalled() { atomic.AddInt32(&s.installed, 1) }
-func (s *installStats) incSkipped()   { atomic.AddInt32(&s.skipped, 1) }
-func (s *installStats) incFailed()    { atomic.AddInt32(&s.failed, 1) }
-
-func installAllTools() *installStats {
-	stats := &installStats{}
-	var wg sync.WaitGroup
-	results := make(chan installResult, len(goTools))
-	workers := runtime.NumCPU()
-
-	goToolsToInstall := filterGoTools()
-	sem := make(chan struct{}, workers)
-
-	for _, t := range goToolsToInstall {
-		wg.Add(1)
-		go func(tool struct {
-			name     string
-			url      string
-			needsCGO bool
-		}) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			err := installGoTool(tool.name, tool.url, tool.needsCGO)
-			results <- installResult{name: tool.name, err: err}
-		}(t)
-	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	for r := range results {
-		if r.err != nil {
-			logger.Error("Failed to install %s: %v", r.name, r.err)
-			stats.incFailed()
-		} else {
-			logger.Success("%s installed", r.name)
-			stats.incInstalled()
-		}
-	}
-
-	installPythonTools(stats)
-	installRubyTools(stats)
-	installMassDNS(stats)
-
-	return stats
-}
-
-func filterGoTools() []struct {
-	name     string
-	url      string
-	needsCGO bool
-} {
-	var toInstall []struct {
-		name     string
-		url      string
-		needsCGO bool
-	}
-	for _, t := range goTools {
-		if _, err := exec.LookPath(t.name); err == nil {
-			logger.Success("%s already installed, skipping.", t.name)
-			continue
-		}
-		toInstall = append(toInstall, t)
-	}
-	return toInstall
-}
-
-func installGoTool(name, url string, needsCGO bool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "go", "install", "-v", url)
-
-	// Tools that need libpcap (like naabu, nuclei) require CGO_ENABLED=1
-	if needsCGO {
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
-	} else {
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	}
-
-	if Verbose {
-		logger.SubStep("Installing %s from %s", name, url)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-	return cmd.Run()
-}
+// ── Prerequisites ────────────────────────────────────────────────────────────
 
 func installPrerequisites() {
-	logger.Section("Installing Prerequisites")
+	progress.Section("Prerequisites", "")
 
 	if runtime.GOOS != "linux" {
-		logger.Warning("Auto-install only supported on Ubuntu/Debian. Please install: go, pip3, gem, git, make, gcc, libpcap-dev")
+		progress.ItemInfo("Auto-install only supported on Ubuntu/Debian.")
+		progress.ItemInfo("Please ensure: go, pip3, gem, git, make, gcc, libpcap-dev")
 		return
 	}
 
@@ -229,20 +158,25 @@ func installPrerequisites() {
 	var toInstall []string
 	for _, p := range prereqs {
 		if isInstalled(p.binary, p.dpkgPkg) {
-			logger.Success("%s already installed.", p.name)
-			continue
+			progress.ItemOK(p.name)
+		} else {
+			progress.ItemPending(p.name)
+			toInstall = append(toInstall, p.aptPkg)
 		}
-		logger.SubStep("%s not found, will install.", p.name)
-		toInstall = append(toInstall, p.aptPkg)
 	}
 
 	if len(toInstall) == 0 {
-		logger.Success("All prerequisites installed!")
+		progress.ItemInfo("All prerequisites ready")
 		return
 	}
 
-	runCmd("sudo", "apt", "update", "-y")
-	runCmd("sudo", append([]string{"apt", "install", "-y"}, toInstall...)...)
+	progress.ItemInfo(fmt.Sprintf("Installing %d packages via apt...", len(toInstall)))
+	runSysCmd("sudo", "apt", "update", "-qq")
+	if err := runSysCmd("sudo", append([]string{"apt", "install", "-y", "-qq"}, toInstall...)...); err != nil {
+		progress.ItemFail("apt install", err.Error())
+	} else {
+		progress.ItemOK(fmt.Sprintf("%d packages installed", len(toInstall)))
+	}
 }
 
 func isInstalled(binary, dpkgPkg string) bool {
@@ -256,7 +190,7 @@ func isInstalled(binary, dpkgPkg string) bool {
 	return false
 }
 
-func runCmd(name string, args ...string) error {
+func runSysCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -264,57 +198,307 @@ func runCmd(name string, args ...string) error {
 	return cmd.Run()
 }
 
-func installPythonTools(stats *installStats) {
-	logger.Section("Installing Python Tools")
+// ── Go Tools ─────────────────────────────────────────────────────────────────
 
+func installGoToolsSection() (installed, skipped, failed int) {
+	// Filter already-installed tools
+	var toInstall []struct {
+		name     string
+		url      string
+		needsCGO bool
+	}
+	var skippedCount int
+	for _, t := range goTools {
+		if _, err := exec.LookPath(t.name); err == nil {
+			skippedCount++
+			continue
+		}
+		toInstall = append(toInstall, t)
+	}
+
+	detail := ""
+	if skippedCount > 0 {
+		detail = fmt.Sprintf("%d to install, %d already installed", len(toInstall), skippedCount)
+	} else {
+		detail = fmt.Sprintf("%d to install", len(toInstall))
+	}
+	progress.Section("Go Tools", detail)
+
+	if len(toInstall) == 0 {
+		progress.ItemInfo("Nothing to do")
+		return 0, skippedCount, 0
+	}
+
+	tracker := progress.NewTracker(len(toInstall))
+	tracker.RunSpinner()
+
+	var wg sync.WaitGroup
+	workers := 1 // sequential: prevents OOM kills during heavy Go compilation
+	sem := make(chan struct{}, workers)
+
+	for _, t := range toInstall {
+		wg.Add(1)
+		go func(tool struct {
+			name     string
+			url      string
+			needsCGO bool
+		}) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			tracker.Start(tool.name)
+			err := installGoTool(tool.name, tool.url, tool.needsCGO)
+			if err != nil {
+				tracker.Fail(tool.name, err.Error())
+			} else {
+				tracker.Complete(tool.name)
+			}
+		}(t)
+	}
+
+	wg.Wait()
+	tracker.StopSpinner()
+
+	i, _, f := tracker.Stats()
+	return i, skippedCount, f
+}
+
+func installGoTool(_, url string, needsCGO bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "install", "-v", url)
+
+	if needsCGO {
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
+	} else {
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	}
+
+	if Verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
+// ── Python Tools ─────────────────────────────────────────────────────────────
+
+func installPythonToolsSection() (installed, skipped, failed int) {
 	pip := "pip3"
 	if _, err := exec.LookPath("pip3"); err != nil {
 		if _, err := exec.LookPath("pip"); err != nil {
-			logger.Warning("pip not found. Skipping Python tools.")
-			return
+			progress.Section("Python Tools", "")
+			progress.ItemInfo("pip not found — skipping")
+			return 0, 0, 0
 		}
 		pip = "pip"
 	}
 
-	var wg sync.WaitGroup
+	// Filter
+	type pyTool struct {
+		name, pkg, cmd string
+	}
+	var toInstall []pyTool
+	var skippedCount int
 	for _, t := range pyTools {
+		if _, err := exec.LookPath(t.cmdName); err == nil {
+			skippedCount++
+			continue
+		}
+		toInstall = append(toInstall, pyTool{t.name, t.package_, t.cmdName})
+	}
+
+	// Also count scripts
+	type pyScript struct {
+		name, repo, script string
+	}
+	var scriptsToInstall []pyScript
+	for _, t := range pyScripts {
+		if _, err := exec.LookPath(t.name); err == nil {
+			skippedCount++
+			continue
+		}
+		scriptsToInstall = append(scriptsToInstall, pyScript{t.name, t.repo, t.script})
+	}
+
+	totalToInstall := len(toInstall) + len(scriptsToInstall)
+	detail := ""
+	if skippedCount > 0 {
+		detail = fmt.Sprintf("%d to install, %d already installed", totalToInstall, skippedCount)
+	} else {
+		detail = fmt.Sprintf("%d to install", totalToInstall)
+	}
+	progress.Section("Python Tools", detail)
+
+	if totalToInstall == 0 {
+		progress.ItemInfo("Nothing to do")
+		return 0, skippedCount, 0
+	}
+
+	tracker := progress.NewTracker(totalToInstall)
+	tracker.RunSpinner()
+
+	var wg sync.WaitGroup
+
+	// pip tools
+	for _, t := range toInstall {
 		wg.Add(1)
-		go func(tool struct {
-			name     string
-			package_ string
-			cmdName  string
-		}) {
+		go func(tool pyTool) {
 			defer wg.Done()
+			tracker.Start(tool.name)
 
-			// Check if already installed
-			if _, err := exec.LookPath(tool.cmdName); err == nil {
-				logger.Success("%s already installed, skipping.", tool.name)
-				stats.incSkipped()
-				return
-			}
-
-			logger.SubStep("Installing %s...", tool.name)
-			cmd := exec.Command(pip, "install", "--break-system-packages", tool.package_)
+			cmd := exec.Command(pip, "install", "--break-system-packages", tool.pkg)
 			if Verbose {
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 			}
 			if err := cmd.Run(); err != nil {
-				logger.Error("Failed: %s (%v)", tool.name, err)
-				stats.incFailed()
+				tracker.Fail(tool.name, err.Error())
 			} else {
-				logger.Success("%s installed", tool.name)
-				stats.incInstalled()
+				tracker.Complete(tool.name)
 			}
 		}(t)
 	}
-	wg.Wait()
 
-	// Install Python scripts that need manual setup
-	installPythonScripts(stats)
+	// python scripts (clone + copy)
+	for _, t := range scriptsToInstall {
+		wg.Add(1)
+		go func(tool pyScript) {
+			defer wg.Done()
+			tracker.Start(tool.name)
+
+			goPath := os.Getenv("GOPATH")
+			if goPath == "" {
+				home, _ := os.UserHomeDir()
+				goPath = filepath.Join(home, "go")
+			}
+			binDir := filepath.Join(goPath, "bin")
+
+			tempDir, err := os.MkdirTemp("", tool.name+"_*")
+			if err != nil {
+				tracker.Fail(tool.name, err.Error())
+				return
+			}
+			defer os.RemoveAll(tempDir)
+
+			if err := exec.Command("git", "clone", "--depth", "1", tool.repo, tempDir).Run(); err != nil {
+				tracker.Fail(tool.name, "clone failed")
+				return
+			}
+
+			src := filepath.Join(tempDir, tool.script)
+			dst := filepath.Join(binDir, tool.name)
+			input, err := os.ReadFile(src)
+			if err != nil {
+				tracker.Fail(tool.name, "read failed")
+				return
+			}
+			if err := os.WriteFile(dst, input, 0755); err != nil {
+				tracker.Fail(tool.name, "write failed")
+				return
+			}
+			tracker.Complete(tool.name)
+		}(t)
+	}
+
+	wg.Wait()
+	tracker.StopSpinner()
+
+	i, _, f := tracker.Stats()
+	return i, skippedCount, f
 }
 
-func installPythonScripts(stats *installStats) {
+// ── Ruby Tools ───────────────────────────────────────────────────────────────
+
+func installRubyToolsSection() (installed, skipped, failed int) {
+	if _, err := exec.LookPath("gem"); err != nil {
+		progress.Section("Ruby Tools", "")
+		progress.ItemInfo("gem not found — skipping")
+		return 0, 0, 0
+	}
+
+	var toInstall []struct{ name, gem string }
+	var skippedCount int
+	for _, t := range rubyTools {
+		if _, err := exec.LookPath(t.name); err == nil {
+			skippedCount++
+			continue
+		}
+		toInstall = append(toInstall, struct{ name, gem string }{t.name, t.gemName})
+	}
+
+	detail := ""
+	if skippedCount > 0 {
+		detail = fmt.Sprintf("%d to install, %d already installed", len(toInstall), skippedCount)
+	} else {
+		detail = fmt.Sprintf("%d to install", len(toInstall))
+	}
+	progress.Section("Ruby Tools", detail)
+
+	if len(toInstall) == 0 {
+		progress.ItemInfo("Nothing to do")
+		return 0, skippedCount, 0
+	}
+
+	tracker := progress.NewTracker(len(toInstall))
+	tracker.RunSpinner()
+
+	var wg sync.WaitGroup
+	for _, t := range toInstall {
+		wg.Add(1)
+		go func(tool struct{ name, gem string }) {
+			defer wg.Done()
+			tracker.Start(tool.name)
+
+			// Try without sudo first
+			cmd := exec.Command("gem", "install", tool.gem)
+			if Verbose {
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
+			if err := cmd.Run(); err != nil {
+				// Retry with sudo
+				cmd = exec.Command("sudo", "gem", "install", tool.gem)
+				if Verbose {
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+				}
+				if err := cmd.Run(); err != nil {
+					tracker.Fail(tool.name, err.Error())
+					return
+				}
+			}
+			tracker.Complete(tool.name)
+		}(t)
+	}
+
+	wg.Wait()
+	tracker.StopSpinner()
+
+	i, _, f := tracker.Stats()
+	return i, skippedCount, f
+}
+
+// ── MassDNS ──────────────────────────────────────────────────────────────────
+
+func installMassDNSSection() (installed, skipped, failed int) {
+	progress.Section("MassDNS", "")
+
+	if _, err := exec.LookPath("massdns"); err == nil {
+		progress.ItemOK("Already installed")
+		return 0, 1, 0
+	}
+
+	if runtime.GOOS == "windows" {
+		progress.ItemInfo("Windows requires manual install from github.com/blechschmidt/massdns")
+		return 0, 0, 0
+	}
+
+	tracker := progress.NewTracker(3) // clone, compile, install
+	tracker.RunSpinner()
+
 	goPath := os.Getenv("GOPATH")
 	if goPath == "" {
 		home, _ := os.UserHomeDir()
@@ -322,184 +506,57 @@ func installPythonScripts(stats *installStats) {
 	}
 	binDir := filepath.Join(goPath, "bin")
 
-	var wg sync.WaitGroup
-	for _, t := range pyScripts {
-		wg.Add(1)
-		go func(tool struct {
-			name   string
-			repo   string
-			script string
-		}) {
-			defer wg.Done()
-
-			// Check if already installed
-			if _, err := exec.LookPath(tool.name); err == nil {
-				logger.Success("%s already installed, skipping.", tool.name)
-				stats.incSkipped()
-				return
-			}
-
-			logger.SubStep("Installing %s from %s...", tool.name, tool.repo)
-
-			tempDir, err := os.MkdirTemp("", tool.name+"_*")
-			if err != nil {
-				logger.Error("Failed to create temp dir for %s: %v", tool.name, err)
-				stats.incFailed()
-				return
-			}
-			defer os.RemoveAll(tempDir)
-
-			// Clone repo
-			if err := exec.Command("git", "clone", "--depth", "1", tool.repo, tempDir).Run(); err != nil {
-				logger.Error("Failed to clone %s: %v", tool.name, err)
-				stats.incFailed()
-				return
-			}
-
-			// Copy script to bin directory with proper name
-			src := filepath.Join(tempDir, tool.script)
-			dst := filepath.Join(binDir, tool.name)
-
-			input, err := os.ReadFile(src)
-			if err != nil {
-				logger.Error("Failed to read %s: %v", tool.script, err)
-				stats.incFailed()
-				return
-			}
-
-			if err := os.WriteFile(dst, input, 0755); err != nil {
-				logger.Error("Failed to install %s: %v", tool.name, err)
-				stats.incFailed()
-				return
-			}
-
-			logger.Success("%s installed", tool.name)
-			stats.incInstalled()
-		}(t)
-	}
-	wg.Wait()
-}
-
-func installRubyTools(stats *installStats) {
-	logger.Section("Installing Ruby Tools")
-
-	if _, err := exec.LookPath("gem"); err != nil {
-		logger.Warning("gem not found. Skipping Ruby tools.")
-		return
-	}
-
-	var wg sync.WaitGroup
-	for _, t := range rubyTools {
-		wg.Add(1)
-		go func(tool struct {
-			name    string
-			gemName string
-		}) {
-			defer wg.Done()
-
-			// Check if already installed
-			if _, err := exec.LookPath(tool.name); err == nil {
-				logger.Success("%s already installed, skipping.", tool.name)
-				stats.incSkipped()
-				return
-			}
-
-			logger.SubStep("Installing %s...", tool.name)
-
-			// Try without sudo first (user might have proper permissions)
-			cmd := exec.Command("gem", "install", tool.gemName)
-			if Verbose {
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-			}
-			if err := cmd.Run(); err != nil {
-				// Try with sudo as fallback
-				logger.SubStep("Retrying with sudo...")
-				cmd = exec.Command("sudo", "gem", "install", tool.gemName)
-				if Verbose {
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-				}
-				if err := cmd.Run(); err != nil {
-					logger.Error("Failed: %s (%v)", tool.name, err)
-					stats.incFailed()
-					return
-				}
-			}
-			logger.Success("%s installed", tool.name)
-			stats.incInstalled()
-		}(t)
-	}
-	wg.Wait()
-}
-
-func installMassDNS(stats *installStats) {
-	logger.Section("Checking MassDNS")
-
-	if _, err := exec.LookPath("massdns"); err == nil {
-		logger.Success("MassDNS already installed.")
-		stats.incSkipped()
-		return
-	}
-
-	if runtime.GOOS == "windows" {
-		logger.Warning("MassDNS on Windows requires manual install from https://github.com/blechschmidt/massdns")
-		return
-	}
-
-	logger.Info("Building MassDNS from source...")
-
 	tempDir, err := os.MkdirTemp("", "massdns_*")
 	if err != nil {
-		logger.Error("Failed to create temp dir: %v", err)
-		stats.incFailed()
-		return
+		tracker.StopSpinner()
+		progress.ItemFail("massdns", "failed to create temp dir")
+		return 0, 0, 1
 	}
 	defer os.RemoveAll(tempDir)
 
-	steps := []struct {
-		name string
-		fn   func() error
-	}{
-		{"clone", func() error {
-			return exec.Command("git", "clone", "--depth", "1", "https://github.com/blechschmidt/massdns.git", tempDir).Run()
-		}},
-		{"compile", func() error {
-			cmd := exec.Command("make", "-j", fmt.Sprintf("%d", runtime.NumCPU()))
-			cmd.Dir = tempDir
-			return cmd.Run()
-		}},
-		{"install", func() error {
-			goPath := os.Getenv("GOPATH")
-			if goPath == "" {
-				home, _ := os.UserHomeDir()
-				goPath = filepath.Join(home, "go")
-			}
-			binDir := filepath.Join(goPath, "bin")
-			if err := os.MkdirAll(binDir, 0755); err != nil {
-				return err
-			}
+	// Step 1: Clone
+	tracker.Start("clone")
+	if err := exec.Command("git", "clone", "--depth", "1", "https://github.com/blechschmidt/massdns.git", tempDir).Run(); err != nil {
+		tracker.Fail("clone", err.Error())
+		tracker.StopSpinner()
+		return 0, 0, 1
+	}
+	tracker.Complete("clone")
 
-			src := filepath.Join(tempDir, "bin", "massdns")
-			dst := filepath.Join(binDir, "massdns")
+	// Step 2: Compile
+	tracker.Start("compile")
+	cmd := exec.Command("make", "-j", fmt.Sprintf("%d", runtime.NumCPU()))
+	cmd.Dir = tempDir
+	if err := cmd.Run(); err != nil {
+		tracker.Fail("compile", err.Error())
+		tracker.StopSpinner()
+		return 0, 0, 1
+	}
+	tracker.Complete("compile")
 
-			input, err := os.ReadFile(src)
-			if err != nil {
-				return err
-			}
-			return os.WriteFile(dst, input, 0755)
-		}},
+	// Step 3: Install
+	tracker.Start("install")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		tracker.Fail("install", err.Error())
+		tracker.StopSpinner()
+		return 0, 0, 1
 	}
 
-	for _, step := range steps {
-		logger.SubStep("%s...", step.name)
-		if err := step.fn(); err != nil {
-			logger.Error("MassDNS %s failed: %v", step.name, err)
-			stats.incFailed()
-			return
-		}
+	src := filepath.Join(tempDir, "bin", "massdns")
+	dst := filepath.Join(binDir, "massdns")
+	input, err := os.ReadFile(src)
+	if err != nil {
+		tracker.Fail("install", err.Error())
+		tracker.StopSpinner()
+		return 0, 0, 1
 	}
+	if err := os.WriteFile(dst, input, 0755); err != nil {
+		tracker.Fail("install", err.Error())
+		tracker.StopSpinner()
+		return 0, 0, 1
+	}
+	tracker.Complete("install")
 
-	logger.Success("MassDNS installed!")
-	stats.incInstalled()
+	tracker.StopSpinner()
+	return 1, 0, 0
 }

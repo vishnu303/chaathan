@@ -190,9 +190,19 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 	// We do NOT use -t (tty) here because it messes up output capturing usually
 	dockerArgs := []string{"run", "--rm", "-i"}
 
-	pwd, _ := os.Getwd()
-	dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", pwd))
+	// Mount the working directory
+	if options.Dir != "" {
+		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", options.Dir))
+	} else {
+		pwd, _ := os.Getwd()
+		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", pwd))
+	}
 	dockerArgs = append(dockerArgs, "-w", "/data")
+
+	// Pass environment variables
+	for _, env := range options.Env {
+		dockerArgs = append(dockerArgs, "-e", env)
+	}
 
 	dockerArgs = append(dockerArgs, image)
 
