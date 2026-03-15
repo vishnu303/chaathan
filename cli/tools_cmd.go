@@ -22,7 +22,7 @@ var allTools = []struct {
 	{"subfinder", "Enum", "Passive subdomain discovery", true},
 	{"assetfinder", "Enum", "Passive subdomain discovery", true},
 	{"sublist3r", "Enum", "Passive subdomain discovery (Python)", false},
-	{"amass", "Enum", "Active DNS enumeration & brute-force", false},
+	{"amass", "Enum", "Active DNS enumeration", false},
 	{"alterx", "Enum", "Smart subdomain permutation", false},
 
 	// DNS & Resolution
@@ -37,6 +37,7 @@ var allTools = []struct {
 	// URL Discovery
 	{"waybackurls", "URLs", "Wayback Machine URL extraction", false},
 	{"gau", "URLs", "Historical URL discovery", false},
+	{"arjun", "URLs", "Hidden HTTP parameter discovery (Python)", false},
 	{"katana", "Crawl", "Web crawling & spidering", false},
 	{"gospider", "Crawl", "Web crawling & spidering", false},
 
