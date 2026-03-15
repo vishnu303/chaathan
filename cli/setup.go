@@ -258,10 +258,9 @@ func isInstalled(binary, dpkgPkg string) bool {
 
 func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
-	if Verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
