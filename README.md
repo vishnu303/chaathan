@@ -1,6 +1,6 @@
 # Chaathan
 
-A modular CLI pentesting framework for bug bounty reconnaissance and vulnerability scanning. Single binary, persistent database, 24+ integrated tools.
+A modular CLI pentesting framework for bug bounty reconnaissance and vulnerability scanning. Single binary, persistent database, 28+ integrated tools.
 
 ```
    _____ _                 _   _                 
@@ -13,7 +13,7 @@ A modular CLI pentesting framework for bug bounty reconnaissance and vulnerabili
 
 ## What It Does
 
-Chaathan runs a **17-step automated recon workflow** on a target domain — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks — and stores everything in a local SQLite database you can query, diff, and export.
+Chaathan runs a **22-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
 
 ## Install
 
@@ -21,14 +21,13 @@ Chaathan runs a **17-step automated recon workflow** on a target domain — subd
 git clone https://github.com/vishnu303/chaathan-flow.git
 cd chaathan-flow
 
-# Build
-make build
+# One-command setup: builds, installs to /usr/local/bin, installs all tools
+make setup
 
-# Install system-wide (optional)
-make install
-
-# Install all external tools
-chaathan setup
+# Or step by step:
+make build          # Build binary
+make install        # Install to /usr/local/bin
+chaathan setup      # Install all external tools
 ```
 
 **Requirements:** Go 1.21+, Git, Linux
@@ -39,8 +38,11 @@ chaathan setup
 # Install tools (first time)
 chaathan setup
 
-# Run full recon
-chaathan scan -d target.com
+# Run full 22-step domain recon
+chaathan wildcard -d target.com
+
+# Run company/org discovery
+chaathan company -n "Company Inc"
 
 # Check what's installed
 chaathan tools check
@@ -54,10 +56,12 @@ chaathan query subdomains 1 --live
 chaathan report generate 1 --format html
 ```
 
-## The 17-Step Workflow
+## Workflows
+
+### Wildcard Scan (22 Steps)
 
 ```bash
-chaathan scan -d target.com
+chaathan wildcard -d target.com
 ```
 
 | Step | Tool(s) | What It Does | Skip Flag |
@@ -69,38 +73,59 @@ chaathan scan -d target.com
 | 5 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
 | 6 | DNSx | Consolidation + DNS resolution | — |
 | 7 | Alterx → DNSx | Smart subdomain permutation | — |
-| 8 | Httpx | HTTP probing + tech detection | — |
-| 9 | tlsx | TLS cert analysis + SAN extraction | `--skip-tlsx` |
-| 10 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
-| 11 | Katana, GoSpider | Web crawling | `--skip-crawl` |
-| 12 | LinkFinder | JavaScript endpoint extraction | — |
-| 13 | CeWL | Custom wordlist generation | — |
-| 14 | ffuf | Directory fuzzing | needs `--wordlist` |
-| 15 | Nuclei | Template-based vuln scanning | `--skip-nuclei` |
-| 16 | Subjack | Subdomain takeover detection | `--skip-subjack` |
-| 17 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
+| 8 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
+| 9 | Httpx | HTTP probing + tech detection | — |
+| 10 | tlsx | TLS cert analysis + SAN extraction | `--skip-tlsx` |
+| 11 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
+| 12 | Katana, GoSpider | Web crawling | `--skip-crawl` |
+| 13 | LinkFinder | JavaScript endpoint extraction | — |
+| 14 | SubDomainizer | JS-based subdomain extraction | `--skip-subdomainizer` |
+| 15 | Arjun | HTTP parameter discovery | `--skip-arjun` |
+| 16 | Httpx | URL consolidation + live check | — |
+| 17 | CeWL | Custom wordlist generation | — |
+| 18 | ffuf | Directory fuzzing | needs `--wordlist` |
+| 19 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
+| 20 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
+| 21 | Subjack | Subdomain takeover detection | `--skip-subjack` |
+| 22 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
 
 **Fast scan** (skip heavy tools):
 ```bash
-chaathan scan -d target.com --skip-amass --skip-naabu --skip-nuclei
+chaathan wildcard -d target.com --skip-amass --skip-naabu --skip-nuclei
 ```
 
 **Resume interrupted scan:**
 ```bash
-chaathan scan -d target.com --resume <scan_id>
+chaathan wildcard -d target.com --resume <scan_id>
 ```
+
+**Press `s` during scanning** to skip the current tool without aborting.
+
+### Company Scan (3 Steps)
+
+```bash
+chaathan company -n "Company Inc"
+```
+
+| Step | Tool | What It Does | Skip Flag |
+|------|------|-------------|-----------|
+| 1 | Metabigor | ASN & network range discovery | `--skip-metabigor` |
+| 2 | Amass Intel | Root domain discovery (reverse-whois) | `--skip-amass-intel` |
+| 3 | Cloud Enum | Cloud infrastructure enumeration | `--skip-cloud-enum` |
 
 ## Commands
 
 | Command | What It Does |
 |---------|-------------|
-| `chaathan scan -d <domain>` | Run the 17-step recon workflow |
+| `chaathan wildcard -d <domain>` | Run the 22-step domain recon workflow |
+| `chaathan company -n <name>` | Run the 3-step company discovery workflow |
 | `chaathan status` | Dashboard — recent scans, progress, stats |
-| `chaathan tools list` | List all 24 tools with categories |
+| `chaathan tools list` | List all 28+ tools with categories |
 | `chaathan tools check` | Check which tools are installed |
 | `chaathan diff <id1> <id2>` | Compare two scans — find new assets/vulns |
 | `chaathan scans list` | List all past scans |
 | `chaathan scans show <id>` | Show scan details and statistics |
+| `chaathan scans resume <id>` | Resume an interrupted scan |
 | `chaathan query subdomains <id>` | Query discovered subdomains |
 | `chaathan query vulns <id>` | Query vulnerabilities |
 | `chaathan query ports <id>` | Query open ports |
@@ -113,7 +138,9 @@ chaathan scan -d target.com --resume <scan_id>
 | `chaathan delete old <days>` | Delete scans older than N days |
 | `chaathan config show` | Show current configuration |
 | `chaathan config edit` | Edit config in your editor |
-| `chaathan setup` | Install all external tools |
+| `chaathan config set <key> <val>` | Set a config value |
+| `chaathan setup` | Install all 28+ external tools |
+| `chaathan version` | Show version info |
 
 ## Query Examples
 
@@ -197,17 +224,18 @@ chaathan config set notifications.min_severity high
 
 Subdomain takeover findings trigger immediate notifications.
 
-## Integrated Tools (24)
+## Integrated Tools (28+)
 
 | Category | Tools |
 |----------|-------|
-| **Subdomain Discovery** | subfinder, assetfinder, sublist3r, amass, alterx |
-| **DNS** | dnsx, shuffledns |
+| **Subdomain Discovery** | subfinder, assetfinder, sublist3r, amass, alterx, subdomainizer |
+| **DNS** | dnsx, shuffledns, massdns |
 | **Web Probing** | httpx, tlsx |
 | **Port Scanning** | naabu |
 | **URL Discovery** | waybackurls, gau |
 | **Web Crawling** | katana, gospider |
-| **JS Analysis** | linkfinder |
+| **JS Analysis** | linkfinder, subdomainizer |
+| **Parameter Discovery** | arjun |
 | **Fuzzing** | ffuf |
 | **Wordlists** | cewl |
 | **Vuln Scanning** | nuclei, subjack, dalfox |
@@ -224,14 +252,19 @@ chaathan setup          # install everything
 ```
 ~/.chaathan/
 ├── config.yaml
-├── chaathan.db               # SQLite — all results
+├── chaathan.db                  # SQLite — all results
+├── logs/
+│   └── setup_2024-01-15.log     # Setup install logs
 ├── scans/
 │   └── target.com/
 │       ├── subfinder.txt
 │       ├── all_subdomains.txt
+│       ├── shuffledns_bruteforce.txt
+│       ├── subdomainizer.txt
 │       ├── httpx_live.json
 │       ├── naabu_ports.txt
 │       ├── tlsx_certs.json
+│       ├── arjun_params.json
 │       ├── nuclei_vulns.json
 │       ├── subjack_takeovers.txt
 │       ├── dalfox_xss.json
@@ -242,18 +275,18 @@ chaathan setup          # install everything
 ├── reports/
 │   └── scan_1.md
 └── state/
-    └── scan_1.json           # for resume
+    └── scan_1.json              # for resume
 ```
 
 ## Makefile
 
 ```bash
-make build          # build binary (stripped, ~11MB)
-make install        # install to /usr/local/bin
+make build          # build binary
+make install        # build + install to /usr/local/bin
+make setup          # build + install + install all tools (one-stop)
 make clean          # remove build artifacts
 make test           # run tests
 make vet            # static analysis
-make setup          # build + install tools
 make tools-check    # check installed tools
 make all            # build + install + setup
 ```
@@ -262,7 +295,7 @@ make all            # build + install + setup
 
 ```bash
 # Daily scan via cron
-0 0 * * * /usr/local/bin/chaathan scan -d target.com
+0 0 * * * /usr/local/bin/chaathan wildcard -d target.com
 
 # Weekly diff to spot changes
 chaathan diff <old_scan_id> <new_scan_id>
@@ -279,9 +312,9 @@ chaathan-flow/
 ├── Makefile
 ├── cli/
 │   ├── root.go              # CLI setup, global flags
-│   ├── wildcard.go          # 17-step recon workflow
-│   ├── company.go           # Company/org workflow
-│   ├── setup.go             # Tool installation
+│   ├── wildcard.go          # 22-step recon workflow
+│   ├── company.go           # 3-step company/org workflow
+│   ├── setup.go             # Tool installation + logging
 │   ├── scans.go             # Scan management
 │   ├── query.go             # Query results
 │   ├── report.go            # Report generation
@@ -294,13 +327,14 @@ chaathan-flow/
 ├── pkg/
 │   ├── config/config.go     # YAML config
 │   ├── database/database.go # SQLite operations
-│   ├── logger/logger.go     # Colored output
+│   ├── logger/logger.go     # Modern styled output
 │   ├── notify/notify.go     # Discord/Slack/Telegram
+│   ├── progress/progress.go # Spinners & progress bars
 │   ├── report/report.go     # Report templates
-│   ├── runner/runner.go     # Tool execution + retry
+│   ├── runner/runner.go     # Tool execution + retry + docker
 │   ├── scan/scan.go         # Scan state + resume
 │   ├── scope/scope.go       # Scope filtering
-│   ├── tools/tools.go       # Tool wrappers (24 tools)
+│   ├── tools/tools.go       # Tool wrappers (28+ tools)
 │   └── utils/
 │       ├── file.go          # File utilities
 │       ├── parser.go        # Output parsers

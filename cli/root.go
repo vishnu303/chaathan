@@ -29,29 +29,41 @@ var rootCmd = &cobra.Command{
  | |    | '_ \ / _' |/ _' | __| '_ \ / _' | '_ \ 
  | |____| | | | (_| | (_| | |_| | | | (_| | | | |
   \_____|_| |_|\__,_|\__,_|\__|_| |_|\__,_|_| |_|
-                                                 
+                                                  
 Chaathan is a powerful, modular CLI pentesting tool for comprehensive 
 bug bounty reconnaissance and vulnerability scanning.
 
-Features:
-  - Subdomain enumeration (15+ tools)
-  - Live host detection & port scanning
-  - Web crawling & JavaScript analysis
-  - Vulnerability scanning with Nuclei
-  - Persistent database storage
+Workflows:
+  - Wildcard Scan : 22-step domain recon & vuln assessment pipeline
+  - Company Scan  : 3-step organization-level discovery (ASN, domains, cloud)
+
+Capabilities:
+  - 28+ integrated tools (subfinder, nuclei, httpx, katana, and more)
+  - Passive & active subdomain enumeration
+  - DNS brute-force (ShuffleDNS) & smart permutation (Alterx)
+  - JavaScript subdomain extraction (SubDomainizer)
+  - Live host detection, TLS analysis & port scanning
+  - Web crawling, JS analysis & parameter discovery
+  - Vulnerability scanning (Nuclei) & XSS detection (Dalfox)
+  - Subdomain takeover detection (Subjack)
+  - Cloud infrastructure enumeration (Cloud Enum)
+  - Persistent SQLite database for all results
   - Report generation (Markdown/JSON/HTML)
   - Discord/Slack/Telegram notifications
   - Resume interrupted scans
+  - Setup logging for install debugging
 
 Modes:
   - native: Uses tools installed in your system $PATH (Recommended)
   - docker: Uses Docker containers for tool isolation
 
 Quick Start:
-  chaathan setup              # Install all tools
-  chaathan wildcard -d target.com  # Run full recon
-  chaathan scans list         # View past scans
-  chaathan report generate 1  # Generate report for scan #1
+  chaathan setup                     # Install all tools
+  chaathan wildcard -d target.com    # Run full 22-step recon
+  chaathan company -n "Company Inc"  # Run company discovery
+  chaathan scans list                # View past scans
+  chaathan report generate 1         # Generate report for scan #1
+  chaathan tools check               # Verify tool installations
 `,
 	PersistentPreRun: initializeApp,
 }
@@ -129,9 +141,10 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Chaathan v2.0.0")
-		fmt.Println("A comprehensive CLI pentesting framework")
-		fmt.Println("https://github.com/yourusername/chaathan")
+		fmt.Printf("%s%sChaathan%s v2.0.0\n", logger.BrightCyan, logger.Bold, logger.Reset)
+		fmt.Printf("%sAdvanced Pentesting Recon Framework%s\n", logger.Dim, logger.Reset)
+		fmt.Printf("%s28+ tools • 22-step wildcard scan • 3-step company scan%s\n", logger.Dim, logger.Reset)
+		fmt.Printf("%shttps://github.com/vishnu303/chaathan-flow%s\n", logger.Dim, logger.Reset)
 	},
 }
 

@@ -523,6 +523,43 @@ func (t *ToolBox) RunAlterx(ctx context.Context, inputFile string, outputFile st
 	return err
 }
 
+// --- DNS Brute-force ---
+
+// RunShuffleDNS performs DNS brute-forcing using shuffledns (massdns wrapper).
+// It takes a domain, a wordlist for brute-forcing, and an optional resolvers file.
+func (t *ToolBox) RunShuffleDNS(ctx context.Context, domain string, wordlist string, resolversFile string, outputFile string) error {
+	if wordlist == "" {
+		return fmt.Errorf("shuffledns requires a wordlist path")
+	}
+	args := []string{
+		"-d", domain,
+		"-w", wordlist,
+		"-o", outputFile,
+		"-silent",
+	}
+	if resolversFile != "" {
+		args = append(args, "-r", resolversFile)
+	}
+	// Check for massdns in PATH and use it
+	args = append(args, "-type", "bruteforce")
+	_, err := t.Runner.Run(ctx, "shuffledns", args)
+	return err
+}
+
+// RunShuffleDNSResolve uses shuffledns to resolve a list of subdomains (resolve mode).
+func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, resolversFile string, outputFile string) error {
+	args := []string{
+		"-list", inputFile,
+		"-o", outputFile,
+		"-silent",
+	}
+	if resolversFile != "" {
+		args = append(args, "-r", resolversFile)
+	}
+	_, err := t.Runner.Run(ctx, "shuffledns", args)
+	return err
+}
+
 // --- Subdomain Takeover ---
 
 // RunSubjack checks discovered subdomains for potential subdomain takeover vulnerabilities

@@ -4,7 +4,7 @@
 BINARY_NAME := chaathan
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-GOFLAGS := -ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
+GOFLAGS := -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 INSTALL_DIR := /usr/local/bin
 
 .PHONY: all build install uninstall clean test vet lint setup tools-check help
@@ -73,10 +73,10 @@ lint:
 	@golangci-lint run ./...
 	@echo "✅ Lint passed"
 
-## setup: Install all required external tools
-setup: build
+## setup: Build, install chaathan, then install all required external tools
+setup: install
 	@echo "Running tool setup..."
-	@./$(BINARY_NAME) setup
+	@$(BINARY_NAME) setup
 	@echo "✅ Setup complete"
 
 ## tools-check: Check which external tools are installed

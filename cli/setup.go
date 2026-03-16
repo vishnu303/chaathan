@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,13 +16,97 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/progress"
 )
 
+var (
+	setupLogFile *os.File
+	setupLogMu   sync.Mutex
+	setupLogPath string
+)
+
+// initSetupLog creates the log file for this setup run.
+func initSetupLog() {
+	home, _ := os.UserHomeDir()
+	logDir := filepath.Join(home, ".chaathan", "logs")
+	os.MkdirAll(logDir, 0755)
+
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	setupLogPath = filepath.Join(logDir, fmt.Sprintf("setup_%s.log", timestamp))
+
+	var err error
+	setupLogFile, err = os.Create(setupLogPath)
+	if err != nil {
+		progress.ItemInfo(fmt.Sprintf("Warning: cannot create log file: %v", err))
+		return
+	}
+
+	// Write header
+	fmt.Fprintf(setupLogFile, "=== Chaathan Setup Log ===\n")
+	fmt.Fprintf(setupLogFile, "Started: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(setupLogFile, "OS: %s/%s\n\n", runtime.GOOS, runtime.GOARCH)
+}
+
+// writeSetupLog writes a message to the setup log file (thread-safe).
+func writeSetupLog(format string, args ...interface{}) {
+	if setupLogFile == nil {
+		return
+	}
+	setupLogMu.Lock()
+	defer setupLogMu.Unlock()
+	fmt.Fprintf(setupLogFile, format+"\n", args...)
+}
+
+// captureCommandOutput runs a command and captures its output to the log file.
+// If Verbose is true, output is also shown on screen.
+func captureCommandOutput(cmd *exec.Cmd, toolName string) error {
+	var stdout, stderr bytes.Buffer
+
+	if Verbose {
+		// Show on screen AND capture to buffer
+		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	} else {
+		// Only capture to buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
+
+	err := cmd.Run()
+
+	// Always write to log file
+	writeSetupLog("--- [%s] ---", toolName)
+	writeSetupLog("Command: %s", cmd.String())
+	if stdout.Len() > 0 {
+		writeSetupLog("STDOUT:\n%s", stdout.String())
+	}
+	if stderr.Len() > 0 {
+		writeSetupLog("STDERR:\n%s", stderr.String())
+	}
+	if err != nil {
+		writeSetupLog("ERROR: %v", err)
+	} else {
+		writeSetupLog("STATUS: SUCCESS")
+	}
+	writeSetupLog("")
+
+	return err
+}
+
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Install all dependency tools",
-	Long: `Installs the necessary pentesting tools required for native execution mode.
-- Go tools are installed via 'go install' (parallel)
-- Python tools are installed via 'pip3 install'
-- MassDNS is built from source`,
+	Long: `Installs the 28+ tools required for native execution mode.
+
+Categories:
+  - Go tools:     subfinder, httpx, nuclei, katana, naabu, etc.
+  - Python tools: sublist3r, subdomainizer, linkfinder, uro
+  - Ruby tools:   cewl (Custom Word List generator)
+  - From source:  massdns (high-performance DNS resolver)
+
+Already-installed tools are skipped automatically.
+All output is logged to ~/.chaathan/logs/setup_<timestamp>.log for debugging.
+
+Usage:
+  chaathan setup              # Install tools (parallel)
+  chaathan setup --verbose    # Show live install output`,
 	Run: runSetup,
 }
 
@@ -93,6 +179,13 @@ func runSetup(cmd *cobra.Command, args []string) {
 
 	progress.Header("🔧 Chaathan Setup")
 
+	// Initialize setup log file
+	initSetupLog()
+	if setupLogFile != nil {
+		defer setupLogFile.Close()
+		progress.ItemInfo(fmt.Sprintf("📝 Log file: %s", setupLogPath))
+	}
+
 	installPrerequisites()
 
 	if _, err := exec.LookPath("go"); err != nil {
@@ -126,8 +219,17 @@ func runSetup(cmd *cobra.Command, args []string) {
 	totalSkipped += int32(s)
 	totalFailed += int32(f)
 
+	// Write log footer
+	writeSetupLog("=== Setup Complete ===")
+	writeSetupLog("Duration: %s", time.Since(start).Round(time.Second))
+	writeSetupLog("Installed: %d, Skipped: %d, Failed: %d", totalInstalled, totalSkipped, totalFailed)
+
 	progress.Summary(totalInstalled, totalSkipped, totalFailed, time.Since(start))
 	progress.Tip("Ensure $GOPATH/bin is in your $PATH")
+
+	if totalFailed > 0 {
+		progress.Tip(fmt.Sprintf("Check log for errors: %s", setupLogPath))
+	}
 }
 
 // ── Prerequisites ────────────────────────────────────────────────────────────
@@ -264,7 +366,7 @@ func installGoToolsSection() (installed, skipped, failed int) {
 	return i, skippedCount, f
 }
 
-func installGoTool(_, url string, needsCGO bool) error {
+func installGoTool(name, url string, needsCGO bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -276,11 +378,7 @@ func installGoTool(_, url string, needsCGO bool) error {
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	}
 
-	if Verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-	return cmd.Run()
+	return captureCommandOutput(cmd, name)
 }
 
 // ── Python Tools ─────────────────────────────────────────────────────────────
@@ -350,11 +448,7 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 			tracker.Start(tool.name)
 
 			cmd := exec.Command(pip, "install", "--break-system-packages", tool.pkg)
-			if Verbose {
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-			}
-			if err := cmd.Run(); err != nil {
+			if err := captureCommandOutput(cmd, tool.name); err != nil {
 				tracker.Fail(tool.name, err.Error())
 			} else {
 				tracker.Complete(tool.name)
@@ -383,7 +477,8 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 			}
 			defer os.RemoveAll(tempDir)
 
-			if err := exec.Command("git", "clone", "--depth", "1", tool.repo, tempDir).Run(); err != nil {
+			cloneCmd := exec.Command("git", "clone", "--depth", "1", tool.repo, tempDir)
+			if err := captureCommandOutput(cloneCmd, tool.name+" (clone)"); err != nil {
 				tracker.Fail(tool.name, "clone failed")
 				return
 			}
@@ -454,18 +549,10 @@ func installRubyToolsSection() (installed, skipped, failed int) {
 
 			// Try without sudo first
 			cmd := exec.Command("gem", "install", tool.gem)
-			if Verbose {
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-			}
-			if err := cmd.Run(); err != nil {
+			if err := captureCommandOutput(cmd, tool.name); err != nil {
 				// Retry with sudo
 				cmd = exec.Command("sudo", "gem", "install", tool.gem)
-				if Verbose {
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-				}
-				if err := cmd.Run(); err != nil {
+				if err := captureCommandOutput(cmd, tool.name+" (sudo)"); err != nil {
 					tracker.Fail(tool.name, err.Error())
 					return
 				}
@@ -516,7 +603,8 @@ func installMassDNSSection() (installed, skipped, failed int) {
 
 	// Step 1: Clone
 	tracker.Start("clone")
-	if err := exec.Command("git", "clone", "--depth", "1", "https://github.com/blechschmidt/massdns.git", tempDir).Run(); err != nil {
+	massdnsClone := exec.Command("git", "clone", "--depth", "1", "https://github.com/blechschmidt/massdns.git", tempDir)
+	if err := captureCommandOutput(massdnsClone, "massdns (clone)"); err != nil {
 		tracker.Fail("clone", err.Error())
 		tracker.StopSpinner()
 		return 0, 0, 1
@@ -525,9 +613,9 @@ func installMassDNSSection() (installed, skipped, failed int) {
 
 	// Step 2: Compile
 	tracker.Start("compile")
-	cmd := exec.Command("make", "-j", fmt.Sprintf("%d", runtime.NumCPU()))
-	cmd.Dir = tempDir
-	if err := cmd.Run(); err != nil {
+	makeCmd := exec.Command("make", "-j", fmt.Sprintf("%d", runtime.NumCPU()))
+	makeCmd.Dir = tempDir
+	if err := captureCommandOutput(makeCmd, "massdns (compile)"); err != nil {
 		tracker.Fail("compile", err.Error())
 		tracker.StopSpinner()
 		return 0, 0, 1

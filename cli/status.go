@@ -30,7 +30,7 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) {
-	logger.Info("Chaathan Status Dashboard")
+	logger.ScanHeader("Status", "Dashboard", 0)
 
 	// ── Recent Scans ──
 	logger.Section("Recent Scans")
@@ -124,7 +124,8 @@ func runStatus(cmd *cobra.Command, args []string) {
 	// ── Usage Hints ──
 	fmt.Println()
 	logger.Info("Quick commands:")
-	logger.Info("  chaathan scan -d example.com        # Start a new scan")
+	logger.Info("  chaathan wildcard -d example.com    # Start a new scan")
+	logger.Info("  chaathan company -n \"Company Inc\"   # Company discovery")
 	logger.Info("  chaathan scans list                 # List all scans")
 	logger.Info("  chaathan query vulns <scan_id>      # View vulnerabilities")
 	logger.Info("  chaathan tools check                # Check installed tools")
