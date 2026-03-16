@@ -285,6 +285,10 @@ func getDockerImage(tool string) string {
 		return "alpine" // no official docker image
 	case "arjun":
 		return "s0md3v/arjun"
+	case "shuffledns":
+		return "projectdiscovery/shuffledns"
+	case "subdomainizer":
+		return "alpine" // no official docker image
 	default:
 		return "alpine"
 	}
@@ -293,7 +297,7 @@ func getDockerImage(tool string) string {
 func isEntrypointImage(tool string) bool {
 	switch tool {
 	case "amass", "nuclei", "httpx", "naabu", "subfinder", "dnsx", "katana", "ffuf", "cewl", "linkfinder",
-		"alterx", "tlsx", "uncover", "dalfox", "arjun":
+		"alterx", "tlsx", "uncover", "dalfox", "arjun", "shuffledns":
 		return true
 	default:
 		return false

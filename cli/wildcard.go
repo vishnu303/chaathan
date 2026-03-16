@@ -27,21 +27,25 @@ import (
 )
 
 var (
-	targetDomain   string
-	skipAmass      bool
-	skipNuclei     bool
-	skipNaabu      bool
-	skipCrawl      bool
-	skipSubjack    bool
-	skipDalfox     bool
-	skipUncover    bool
-	skipTlsx       bool
-	skipArjun      bool
-	wordlistPath   string
-	githubToken    string
-	resumeScanID   int64
-	generateReport bool
-	skipToolChan   chan struct{} // channel to signal "skip current tool"
+	targetDomain      string
+	skipAmass         bool
+	skipNuclei        bool
+	skipNaabu         bool
+	skipCrawl         bool
+	skipSubjack       bool
+	skipDalfox        bool
+	skipUncover       bool
+	skipTlsx          bool
+	skipArjun         bool
+	skipShuffleDNS    bool
+	skipSubdomainizer bool
+	wordlistPath      string
+	dnsWordlistPath   string
+	resolversPath     string
+	githubToken       string
+	resumeScanID      int64
+	generateReport    bool
+	skipToolChan      chan struct{} // channel to signal "skip current tool"
 )
 
 var wildcardCmd = &cobra.Command{
@@ -49,7 +53,7 @@ var wildcardCmd = &cobra.Command{
 	Aliases: []string{"scan"},
 	Short:   "Run the Wildcard Reconnaissance Workflow",
 	Long: `
-Runs a comprehensive 20-step recon & vulnerability scanning workflow:
+Runs a comprehensive 22-step recon & vulnerability scanning workflow:
 
  1. Passive Enumeration (Subfinder, Assetfinder, Sublist3r) [Parallel]
  2. URL Discovery (Waybackurls, GAU) [Parallel]
@@ -58,19 +62,21 @@ Runs a comprehensive 20-step recon & vulnerability scanning workflow:
  5. Search Engine Dorking (Uncover/Shodan/Censys) [Optional, --skip-uncover]
  6. Consolidation & DNS Resolution (DNSx)
  7. Smart Subdomain Permutation (Alterx → DNSx)
- 8. Live Web Probing (Httpx)
- 9. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
-10. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
-11. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
-12. JavaScript Analysis (LinkFinder)
-13. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
-14. URL Consolidation & Live Check (httpx)
-15. Wordlist Generation (CeWL)
-16. Directory Fuzzing (ffuf) [Requires --wordlist]
-17. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
-18. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
-19. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
-20. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
+ 8. DNS Brute-force (ShuffleDNS/MassDNS) [Optional, --skip-shuffledns]
+ 9. Live Web Probing (Httpx)
+10. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
+11. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
+12. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
+13. JavaScript Analysis (LinkFinder)
+14. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
+15. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
+16. URL Consolidation & Live Check (httpx)
+17. Wordlist Generation (CeWL)
+18. Directory Fuzzing (ffuf) [Requires --wordlist]
+19. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
+20. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
+21. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
+22. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
 
 Press 's' at any time during scanning to skip the current tool.
 All results are stored in a SQLite database for querying and reporting.
@@ -89,7 +95,11 @@ func init() {
 	wildcardCmd.Flags().BoolVar(&skipUncover, "skip-uncover", false, "Skip search engine dorking (Uncover)")
 	wildcardCmd.Flags().BoolVar(&skipTlsx, "skip-tlsx", false, "Skip TLS certificate analysis")
 	wildcardCmd.Flags().BoolVar(&skipArjun, "skip-arjun", false, "Skip Arjun parameter discovery")
+	wildcardCmd.Flags().BoolVar(&skipShuffleDNS, "skip-shuffledns", false, "Skip ShuffleDNS brute-force")
+	wildcardCmd.Flags().BoolVar(&skipSubdomainizer, "skip-subdomainizer", false, "Skip SubDomainizer JS subdomain extraction")
 	wildcardCmd.Flags().StringVarP(&wordlistPath, "wordlist", "w", "", "Wordlist for directory fuzzing (enables ffuf)")
+	wildcardCmd.Flags().StringVar(&dnsWordlistPath, "dns-wordlist", "", "Wordlist for DNS brute-force with ShuffleDNS")
+	wildcardCmd.Flags().StringVar(&resolversPath, "resolvers", "", "Custom DNS resolvers file for ShuffleDNS")
 	wildcardCmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token for GitHub recon (or use GITHUB_TOKEN env)")
 	wildcardCmd.Flags().Int64Var(&resumeScanID, "resume", 0, "Resume a previous scan by ID")
 	wildcardCmd.Flags().BoolVar(&generateReport, "report", true, "Generate report after scan")
@@ -154,7 +164,6 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	logger.Info("Starting Wildcard Workflow for: %s", targetDomain)
 	logger.Info("Mode: %s", Mode)
 
 	// Setup output directory
@@ -166,10 +175,20 @@ func runWildcard(cmd *cobra.Command, args []string) {
 
 	// Create scan record in database
 	configJSON, _ := json.Marshal(map[string]interface{}{
-		"skip_amass":  skipAmass,
-		"skip_nuclei": skipNuclei,
-		"wordlist":    wordlistPath,
-		"github":      githubToken != "",
+		"skip_amass":         skipAmass,
+		"skip_nuclei":        skipNuclei,
+		"skip_naabu":         skipNaabu,
+		"skip_crawl":         skipCrawl,
+		"skip_subjack":       skipSubjack,
+		"skip_dalfox":        skipDalfox,
+		"skip_uncover":       skipUncover,
+		"skip_tlsx":          skipTlsx,
+		"skip_arjun":         skipArjun,
+		"skip_shuffledns":    skipShuffleDNS,
+		"skip_subdomainizer": skipSubdomainizer,
+		"wordlist":           wordlistPath,
+		"dns_wordlist":       dnsWordlistPath,
+		"github":             githubToken != "",
 	})
 
 	dbScan, err := database.CreateScan(targetDomain, "wildcard", resultDir, string(configJSON))
@@ -179,8 +198,11 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	scanID := int64(0)
 	if dbScan != nil {
 		scanID = dbScan.ID
-		logger.Info("Scan ID: %d", scanID)
 	}
+
+	// Show modern scan header
+	logger.ScanHeader("Wildcard", targetDomain, scanID)
+	logger.InitScanUI(len(scan.WildcardSteps))
 
 	// Initialize scan state manager
 	home, _ := os.UserHomeDir()
@@ -497,9 +519,50 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 8: Live Web Probing (Httpx)
+	// Step 8: DNS Brute-force (ShuffleDNS) — dictionary-based subdomain discovery
 	// =========================================================================
-	logger.Section("Step 8: Live Web Server Probing")
+	if !skipShuffleDNS && dnsWordlistPath != "" {
+		logger.Section("Step 8: DNS Brute-force (ShuffleDNS)")
+		shufflednsOut := filepath.Join(resultDir, "shuffledns_bruteforce.txt")
+		logger.SubStep("Running ShuffleDNS with wordlist: %s", dnsWordlistPath)
+		if err := runWithSkip(ctx, "shuffledns", func(sCtx context.Context) error {
+			return tb.RunShuffleDNS(sCtx, targetDomain, dnsWordlistPath, resolversPath, shufflednsOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				logger.Info("  ShuffleDNS skipped")
+			} else if Verbose {
+				logger.Warning("ShuffleDNS failed: %v", err)
+			}
+		} else {
+			if scanID > 0 {
+				count, _ := utils.ParseSubdomainsFile(scanID, shufflednsOut, "shuffledns")
+				logger.Info("  Found %d subdomains via DNS brute-force", count)
+			}
+			// Merge brute-forced subs into consolidated list
+			utils.MergeAndDeduplicate(
+				[]string{consolidatedSubs, shufflednsOut},
+				consolidatedSubs,
+			)
+		}
+		stateMgr.MarkStepComplete(scanState, "dns_bruteforce")
+	} else if skipShuffleDNS {
+		logger.Section("Step 8: Skipping ShuffleDNS (--skip-shuffledns)")
+		stateMgr.MarkStepComplete(scanState, "dns_bruteforce")
+	} else {
+		logger.Section("Step 8: Skipping ShuffleDNS (no --dns-wordlist provided)")
+		logger.Info("Use --dns-wordlist to enable DNS brute-force")
+		stateMgr.MarkStepComplete(scanState, "dns_bruteforce")
+	}
+
+	if ctx.Err() != nil {
+		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
+		return
+	}
+
+	// =========================================================================
+	// Step 9: Live Web Probing (Httpx)
+	// =========================================================================
+	logger.Section("Step 9: Live Web Server Probing")
 	httpxOut := filepath.Join(resultDir, "httpx_live.json")
 	logger.SubStep("Running Httpx...")
 	if err := tb.RunHttpx(ctx, consolidatedSubs, httpxOut); err != nil {
@@ -521,7 +584,7 @@ step2:
 	// Step 9: TLS/SSL Certificate Analysis (tlsx)
 	// =========================================================================
 	if !skipTlsx {
-		logger.Section("Step 9: TLS Certificate Analysis (tlsx)")
+		logger.Section("Step 10: TLS Certificate Analysis (tlsx)")
 		tlsxOut := filepath.Join(resultDir, "tlsx_certs.json")
 		logger.SubStep("Running tlsx — extracting SANs and checking cert issues...")
 		if err := tb.RunTlsx(ctx, consolidatedSubs, tlsxOut); err != nil {
@@ -541,7 +604,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "tls_analysis")
 	} else {
-		logger.Section("Step 9: Skipping tlsx (--skip-tlsx)")
+		logger.Section("Step 10: Skipping tlsx (--skip-tlsx)")
 		stateMgr.MarkStepComplete(scanState, "tls_analysis")
 	}
 
@@ -554,7 +617,7 @@ step2:
 	// Step 10: Port Scanning (Naabu) — scan ALL discovered subdomains
 	// =========================================================================
 	if !skipNaabu {
-		logger.Section("Step 10: Port Scanning")
+		logger.Section("Step 11: Port Scanning")
 		naabuOut := filepath.Join(resultDir, "naabu_ports.txt")
 		logger.SubStep("Running Naabu on all discovered subdomains...")
 		if err := tb.RunNaabuList(ctx, consolidatedSubs, naabuOut); err != nil {
@@ -567,7 +630,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "port_scanning")
 	} else {
-		logger.Section("Step 10: Skipping Naabu (--skip-naabu)")
+		logger.Section("Step 11: Skipping Naabu (--skip-naabu)")
 		stateMgr.MarkStepComplete(scanState, "port_scanning")
 	}
 
@@ -580,7 +643,7 @@ step2:
 	// Step 11: Web Crawling (Parallel - Katana + GoSpider)
 	// =========================================================================
 	if !skipCrawl {
-		logger.Section("Step 11: Web Crawling")
+		logger.Section("Step 12: Web Crawling")
 		katanaOut := filepath.Join(resultDir, "katana_urls.txt")
 		gospiderOut := filepath.Join(resultDir, "gospider_urls.txt")
 
@@ -616,7 +679,7 @@ step2:
 		wg.Wait()
 		stateMgr.MarkStepComplete(scanState, "web_crawling")
 	} else {
-		logger.Section("Step 11: Skipping Web Crawling (--skip-crawl)")
+		logger.Section("Step 12: Skipping Web Crawling (--skip-crawl)")
 		stateMgr.MarkStepComplete(scanState, "web_crawling")
 	}
 
@@ -628,7 +691,7 @@ step2:
 	// =========================================================================
 	// Step 12: JS Analysis & Endpoint Discovery
 	// =========================================================================
-	logger.Section("Step 12: JavaScript Analysis")
+	logger.Section("Step 13: JavaScript Analysis")
 	linkfinderOut := filepath.Join(resultDir, "linkfinder_endpoints.txt")
 	logger.SubStep("Running Linkfinder...")
 	if err := tb.RunLinkfinder(ctx, "https://"+targetDomain, linkfinderOut); err != nil {
@@ -644,11 +707,52 @@ step2:
 	stateMgr.MarkStepComplete(scanState, "js_analysis")
 
 	// =========================================================================
-	// Step 13: HTTP Parameter Discovery (Arjun)
+	// Step 14: JavaScript Subdomain Extraction (SubDomainizer)
+	// =========================================================================
+	if !skipSubdomainizer {
+		logger.Section("Step 14: JavaScript Subdomain Extraction (SubDomainizer)")
+		subdomainizerOut := filepath.Join(resultDir, "subdomainizer_subs.txt")
+		logger.SubStep("Running SubDomainizer on https://%s...", targetDomain)
+		if err := runWithSkip(ctx, "subdomainizer", func(sCtx context.Context) error {
+			return tb.RunSubdomainizer(sCtx, "https://"+targetDomain, subdomainizerOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				logger.Info("  SubDomainizer skipped")
+			} else if Verbose {
+				logger.Warning("SubDomainizer failed: %v", err)
+			}
+		} else {
+			if scanID > 0 {
+				count, _ := utils.ParseSubdomainsFile(scanID, subdomainizerOut, "subdomainizer")
+				if count > 0 {
+					logger.Info("  Found %d subdomains from JavaScript analysis", count)
+					// Merge JS-discovered subs into consolidated list
+					utils.MergeAndDeduplicate(
+						[]string{consolidatedSubs, subdomainizerOut},
+						consolidatedSubs,
+					)
+				} else {
+					logger.Info("  No new subdomains found in JavaScript")
+				}
+			}
+		}
+		stateMgr.MarkStepComplete(scanState, "js_subdomain_discovery")
+	} else {
+		logger.Section("Step 14: Skipping SubDomainizer (--skip-subdomainizer)")
+		stateMgr.MarkStepComplete(scanState, "js_subdomain_discovery")
+	}
+
+	if ctx.Err() != nil {
+		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
+		return
+	}
+
+	// =========================================================================
+	// Step 15: HTTP Parameter Discovery (Arjun)
 	// =========================================================================
 	arjunOut := filepath.Join(resultDir, "arjun_params.json")
 	if !skipArjun {
-		logger.Section("Step 13: HTTP Parameter Discovery (Arjun)")
+		logger.Section("Step 15: HTTP Parameter Discovery (Arjun)")
 		logger.SubStep("Running Arjun on https://%s...", targetDomain)
 		if err := runWithSkip(ctx, "arjun", func(sCtx context.Context) error {
 			return tb.RunArjun(sCtx, "https://"+targetDomain, arjunOut)
@@ -662,7 +766,7 @@ step2:
 			logger.SubStep("[Done] Arjun parameter discovery")
 		}
 	} else {
-		logger.Section("Step 13: Skipping Arjun (--skip-arjun)")
+		logger.Section("Step 15: Skipping Arjun (--skip-arjun)")
 	}
 	stateMgr.MarkStepComplete(scanState, "param_discovery")
 
@@ -674,7 +778,7 @@ step2:
 	// =========================================================================
 	// Step 14: URL Consolidation & Live Check
 	// =========================================================================
-	logger.Section("Step 14: URL Consolidation & Live Check")
+	logger.Section("Step 16: URL Consolidation & Live Check")
 	allURLsRaw := filepath.Join(resultDir, "all_urls_raw.txt")
 	allURLsLive := filepath.Join(resultDir, "all_urls_live.txt")
 
@@ -722,7 +826,7 @@ step2:
 	// =========================================================================
 	// Step 15: Wordlist Generation (CeWL)
 	// =========================================================================
-	logger.Section("Step 15: Wordlist Generation (CeWL)")
+	logger.Section("Step 17: Wordlist Generation (CeWL)")
 	cewlOut := filepath.Join(resultDir, "cewl_wordlist.txt")
 	logger.SubStep("Running CeWL...")
 	if err := tb.RunCewl(ctx, "https://"+targetDomain, cewlOut); err != nil {
@@ -738,7 +842,7 @@ step2:
 	// Step 16: Directory Fuzzing (ffuf)
 	// =========================================================================
 	if wordlistPath != "" {
-		logger.Section("Step 16: Directory Fuzzing (ffuf)")
+		logger.Section("Step 18: Directory Fuzzing (ffuf)")
 		ffufOut := filepath.Join(resultDir, "ffuf_results.json")
 		targetURL := fmt.Sprintf("https://%s/FUZZ", targetDomain)
 		logger.SubStep("Running ffuf with wordlist: %s", wordlistPath)
@@ -748,7 +852,7 @@ step2:
 			logger.SubStep("[Done] ffuf - Results: %s", ffufOut)
 		}
 	} else {
-		logger.Section("Step 16: Skipping ffuf (no wordlist provided)")
+		logger.Section("Step 18: Skipping ffuf (no wordlist provided)")
 		logger.Info("Use --wordlist to enable directory fuzzing")
 		if _, err := os.Stat(cewlOut); err == nil {
 			logger.Info("Tip: You can use the generated CeWL wordlist: %s", cewlOut)
@@ -765,7 +869,7 @@ step2:
 	// Step 17: Vulnerability Scanning — Run 1: Infrastructure (Nuclei)
 	// =========================================================================
 	if !skipNuclei {
-		logger.Section("Step 17: Vulnerability Scanning — Infra (Nuclei)")
+		logger.Section("Step 19: Vulnerability Scanning — Infra (Nuclei)")
 		nucleiOut := filepath.Join(resultDir, "nuclei_vulns.json")
 		logger.SubStep("Running Nuclei on discovered subdomains...")
 		if err := runWithSkip(ctx, "nuclei (infra)", func(sCtx context.Context) error {
@@ -802,7 +906,7 @@ step2:
 			}
 		}
 	} else {
-		logger.Section("Step 17: Skipping Nuclei (--skip-nuclei)")
+		logger.Section("Step 19: Skipping Nuclei (--skip-nuclei)")
 	}
 	stateMgr.MarkStepComplete(scanState, "vuln_scanning")
 
@@ -815,7 +919,7 @@ step2:
 	// Step 18: Vulnerability Scanning — Run 2: URLs (Nuclei)
 	// =========================================================================
 	if !skipNuclei && utils.FileExists(allURLsLive) {
-		logger.Section("Step 18: Vulnerability Scanning — URLs (Nuclei)")
+		logger.Section("Step 20: Vulnerability Scanning — URLs (Nuclei)")
 		nucleiURLOut := filepath.Join(resultDir, "nuclei_url_vulns.json")
 		logger.SubStep("Running Nuclei on live URLs (stricter rate, medium+ severity)...")
 		if err := runWithSkip(ctx, "nuclei (URLs)", func(sCtx context.Context) error {
@@ -833,9 +937,9 @@ step2:
 			}
 		}
 	} else if skipNuclei {
-		logger.Section("Step 18: Skipping Nuclei URLs (--skip-nuclei)")
+		logger.Section("Step 20: Skipping Nuclei URLs (--skip-nuclei)")
 	} else {
-		logger.Section("Step 18: Skipping Nuclei URLs (no live URLs available)")
+		logger.Section("Step 20: Skipping Nuclei URLs (no live URLs available)")
 	}
 	stateMgr.MarkStepComplete(scanState, "vuln_scanning_urls")
 
@@ -848,7 +952,7 @@ step2:
 	// Step 19: Subdomain Takeover Detection (Subjack)
 	// =========================================================================
 	if !skipSubjack {
-		logger.Section("Step 19: Subdomain Takeover Detection (Subjack)")
+		logger.Section("Step 21: Subdomain Takeover Detection (Subjack)")
 		subjackOut := filepath.Join(resultDir, "subjack_takeovers.txt")
 		logger.SubStep("Running Subjack — checking for dangling CNAMEs...")
 		if err := tb.RunSubjack(ctx, consolidatedSubs, subjackOut); err != nil {
@@ -883,7 +987,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "takeover_detection")
 	} else {
-		logger.Section("Step 19: Skipping Subjack (--skip-subjack)")
+		logger.Section("Step 21: Skipping Subjack (--skip-subjack)")
 		stateMgr.MarkStepComplete(scanState, "takeover_detection")
 	}
 
@@ -891,7 +995,7 @@ step2:
 	// Step 20: XSS Scanning (Dalfox) — uses live URLs
 	// =========================================================================
 	if !skipDalfox {
-		logger.Section("Step 20: XSS Scanning (Dalfox)")
+		logger.Section("Step 22: XSS Scanning (Dalfox)")
 		paramURLsFile := filepath.Join(resultDir, "param_urls_live.txt")
 		dalfoxOut := filepath.Join(resultDir, "dalfox_xss.json")
 
@@ -926,7 +1030,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "xss_scanning")
 	} else {
-		logger.Section("Step 20: Skipping Dalfox (--skip-dalfox)")
+		logger.Section("Step 22: Skipping Dalfox (--skip-dalfox)")
 		stateMgr.MarkStepComplete(scanState, "xss_scanning")
 	}
 
@@ -987,26 +1091,18 @@ func finalizeScan(scanID int64, status string, stateMgr *scan.Manager, state *sc
 		stateMgr.DeleteState(state.ScanID)
 	}
 
-	// Print summary
-	logger.Section("Workflow %s", status)
-	logger.Info("Duration: %s", duration.Round(time.Second))
-	logger.Success("Results saved in: %s", resultDir)
-
-	// Print stats and export results
+	// Print summary using modern UI
+	stats := make(map[string]string)
 	if scanID > 0 {
-		stats, err := database.GetScanStats(scanID)
+		dbStats, err := database.GetScanStats(scanID)
 		if err == nil {
-			logger.Info("\nStatistics:")
-			logger.Info("  Subdomains: %d (Live: %d)", stats.TotalSubdomains, stats.LiveSubdomains)
-			logger.Info("  Open Ports: %d", stats.TotalPorts)
-			logger.Info("  URLs: %d", stats.TotalURLs)
-			logger.Info("  Endpoints: %d", stats.TotalEndpoints)
+			stats["Subdomains"] = fmt.Sprintf("%d (Live: %d)", dbStats.TotalSubdomains, dbStats.LiveSubdomains)
+			stats["Open Ports"] = fmt.Sprintf("%d", dbStats.TotalPorts)
+			stats["URLs"] = fmt.Sprintf("%d", dbStats.TotalURLs)
+			stats["Endpoints"] = fmt.Sprintf("%d", dbStats.TotalEndpoints)
 
-			if len(stats.Vulnerabilities) > 0 {
-				logger.Info("  Vulnerabilities:")
-				for sev, count := range stats.Vulnerabilities {
-					logger.Info("    %s: %d", sev, count)
-				}
+			for sev, count := range dbStats.Vulnerabilities {
+				stats["Vuln ("+sev+")"] = fmt.Sprintf("%d", count)
 			}
 
 			// Send scan complete notification
@@ -1016,13 +1112,16 @@ func finalizeScan(scanID int64, status string, stateMgr *scan.Manager, state *sc
 					ScanID:   scanID,
 					Duration: duration,
 					Stats: map[string]int{
-						"subdomains": stats.TotalSubdomains,
-						"ports":      stats.TotalPorts,
-						"vulns":      len(stats.Vulnerabilities),
+						"subdomains": dbStats.TotalSubdomains,
+						"ports":      dbStats.TotalPorts,
+						"vulns":      len(dbStats.Vulnerabilities),
 					},
 				})
 			}
 		}
+
+		logger.ScanSummary(status, targetDomain, scanID, duration, stats)
+		logger.Success("Results saved in: %s", resultDir)
 
 		// Export all results to text files
 		if status == "completed" || status == "cancelled" {
@@ -1061,10 +1160,11 @@ func finalizeScan(scanID int64, status string, stateMgr *scan.Manager, state *sc
 
 	// Usage hints
 	if scanID > 0 {
-		logger.Info("\nNext steps:")
-		logger.Info("  chaathan scans show %d       # View scan details", scanID)
-		logger.Info("  chaathan query vulns %d      # List vulnerabilities", scanID)
-		logger.Info("  chaathan report generate %d  # Generate full report", scanID)
+		logger.NextSteps([]string{
+			fmt.Sprintf("chaathan scans show %d       # View scan details", scanID),
+			fmt.Sprintf("chaathan query vulns %d      # List vulnerabilities", scanID),
+			fmt.Sprintf("chaathan report generate %d  # Generate full report", scanID),
+		})
 	}
 }
 

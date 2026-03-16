@@ -43,6 +43,7 @@ var allTools = []struct {
 
 	// Analysis
 	{"linkfinder", "Analysis", "JavaScript endpoint extraction (Python)", false},
+	{"subdomainizer", "Analysis", "JavaScript subdomain extraction (Python)", false},
 	{"cewl", "Analysis", "Custom wordlist generation", false},
 
 	// Fuzzing & Scanning
@@ -120,7 +121,7 @@ func runToolsCheck(cmd *cobra.Command, args []string) {
 		path, err := exec.LookPath(t.Name)
 		if err != nil {
 			// Also check common Python script locations
-			if t.Name == "sublist3r" || t.Name == "linkfinder" || t.Name == "cloud_enum" {
+			if t.Name == "sublist3r" || t.Name == "linkfinder" || t.Name == "cloud_enum" || t.Name == "subdomainizer" {
 				path, err = exec.LookPath(t.Name + ".py")
 			}
 		}
