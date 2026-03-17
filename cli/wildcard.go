@@ -242,6 +242,9 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		toolsCfg = &Cfg.Tools
 	}
 	tb := tools.New(r, toolsCfg)
+	if Cfg != nil {
+		tb.WithAPIKeys(&Cfg.APIKeys)
+	}
 
 	// Setup notifier
 	var notifier *notify.Notifier

@@ -15,8 +15,9 @@ import (
 // It reads per-tool settings (threads, timeouts, rate limits) from the config
 // so users can tune behavior via config.yaml instead of recompiling.
 type ToolBox struct {
-	Runner runner.Runner
-	Config *config.ToolsConfig
+	Runner  runner.Runner
+	Config  *config.ToolsConfig
+	APIKeys *config.APIKeysConfig
 }
 
 // New creates a ToolBox. If cfg is nil, sensible defaults are used.
@@ -26,6 +27,12 @@ func New(r runner.Runner, cfg ...*config.ToolsConfig) *ToolBox {
 		tb.Config = cfg[0]
 	}
 	return tb
+}
+
+// WithAPIKeys attaches API key config to the ToolBox (used by uncover, etc).
+func (t *ToolBox) WithAPIKeys(keys *config.APIKeysConfig) *ToolBox {
+	t.APIKeys = keys
+	return t
 }
 
 // --- helpers to read config with fallback defaults ---
@@ -83,7 +90,15 @@ func (t *ToolBox) naabuPorts() string {
 	if t.Config != nil && t.Config.Naabu.Ports != "" {
 		return t.Config.Naabu.Ports
 	}
-	return "top-1000"
+	return "" // empty means use -top-ports 1000 flag
+}
+
+func (t *ToolBox) naabuTopPorts() int {
+	// Default to top 1000 ports when no explicit port list is set
+	if t.Config != nil && t.Config.Naabu.Ports != "" {
+		return 0 // explicit port list set, don't use -top-ports
+	}
+	return 1000
 }
 
 func (t *ToolBox) nucleiConcurrency() int {
@@ -215,10 +230,15 @@ func (t *ToolBox) RunHttpx(ctx context.Context, domainsFile string, outputFile s
 func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) error {
 	args := []string{
 		"-host", host,
-		"-p", t.naabuPorts(),
 		"-rate", strconv.Itoa(t.naabuRate()),
 		"-c", strconv.Itoa(t.naabuThreads()),
 		"-o", outputFile,
+	}
+	// Use explicit port list if configured, otherwise use -top-ports
+	if ports := t.naabuPorts(); ports != "" {
+		args = append(args, "-p", ports)
+	} else {
+		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
 	_, err := t.Runner.Run(ctx, "naabu", args)
 	return err
@@ -228,10 +248,15 @@ func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) 
 func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"-l", inputFile,
-		"-p", t.naabuPorts(),
 		"-rate", strconv.Itoa(t.naabuRate()),
 		"-c", strconv.Itoa(t.naabuThreads()),
 		"-o", outputFile,
+	}
+	// Use explicit port list if configured, otherwise use -top-ports
+	if ports := t.naabuPorts(); ports != "" {
+		args = append(args, "-p", ports)
+	} else {
+		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
 	_, err := t.Runner.Run(ctx, "naabu", args)
 	return err
@@ -558,13 +583,13 @@ func (t *ToolBox) RunDalfoxURL(ctx context.Context, targetURL string, outputFile
 
 // RunTlsx grabs TLS certificate information from live hosts.
 // Extracts SANs (extra subdomains), expiry info, and cipher details.
+// NOTE: -resp-only is only valid with -san/-cn alone; omit it when using -so/-ex.
 func (t *ToolBox) RunTlsx(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"-l", inputFile,
 		"-o", outputFile,
 		"-json",
 		"-san", "-cn", "-so", "-ex", // SANs, Common Name, Subject Org, Expiry
-		"-resp-only",
 		"-c", "50",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
@@ -587,27 +612,42 @@ func (t *ToolBox) RunTlsxHost(ctx context.Context, host string, outputFile strin
 
 // RunUncover queries search engines (Shodan, Censys, Fofa, etc.) for exposed assets.
 // 100% passive — no packets sent to the target.
+// Returns ErrNoAPIKeys if no API keys are configured for any engine.
 func (t *ToolBox) RunUncover(ctx context.Context, domain string, outputFile string) error {
+	engines := t.uncoverEngines()
+	if len(engines) == 0 {
+		return fmt.Errorf("no uncover API keys configured — set shodan/censys/fofa keys in config.yaml")
+	}
+
 	args := []string{
 		"-q", domain,
 		"-o", outputFile,
 		"-json",
 		"-silent",
-	}
-
-	// Add configured search engines
-	engines := t.uncoverEngines()
-	if len(engines) > 0 {
-		args = append(args, "-e", strings.Join(engines, ","))
+		"-e", strings.Join(engines, ","),
 	}
 
 	_, err := t.Runner.Run(ctx, "uncover", args)
 	return err
 }
 
+// uncoverEngines returns only the engines for which API keys are configured.
+// If no keys are set, returns an empty slice so RunUncover can skip gracefully.
 func (t *ToolBox) uncoverEngines() []string {
-	// Default to common search engines
-	return []string{"shodan", "censys", "fofa"}
+	if t.APIKeys == nil {
+		return nil
+	}
+	var engines []string
+	if t.APIKeys.Shodan != "" {
+		engines = append(engines, "shodan")
+	}
+	if t.APIKeys.Censys != "" || (t.APIKeys.CensysID != "" && t.APIKeys.CensysSecret != "") {
+		engines = append(engines, "censys")
+	}
+	if t.APIKeys.Fofa != "" {
+		engines = append(engines, "fofa")
+	}
+	return engines
 }
 
 // Helper
