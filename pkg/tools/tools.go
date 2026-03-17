@@ -436,57 +436,6 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 	return err
 }
 
-// --- Wordlist Generation ---
-
-// RunCewl generates custom wordlists from a target website
-func (t *ToolBox) RunCewl(ctx context.Context, url string, outputFile string, opts ...CewlOption) error {
-	cewlOpts := &cewlOptions{
-		minWordLen: 5,
-		depth:      2,
-		withCount:  false,
-	}
-	for _, opt := range opts {
-		opt(cewlOpts)
-	}
-
-	args := []string{
-		"-m", fmt.Sprintf("%d", cewlOpts.minWordLen),
-		"-d", fmt.Sprintf("%d", cewlOpts.depth),
-		"-w", outputFile,
-		url,
-	}
-	if cewlOpts.withCount {
-		args = append([]string{"-c"}, args...)
-	}
-	_, err := t.Runner.Run(ctx, "cewl", args)
-	return err
-}
-
-type cewlOptions struct {
-	minWordLen int
-	depth      int
-	withCount  bool
-}
-
-type CewlOption func(*cewlOptions)
-
-func CewlMinWordLen(n int) CewlOption {
-	return func(o *cewlOptions) {
-		o.minWordLen = n
-	}
-}
-
-func CewlDepth(n int) CewlOption {
-	return func(o *cewlOptions) {
-		o.depth = n
-	}
-}
-
-func CewlWithCount() CewlOption {
-	return func(o *cewlOptions) {
-		o.withCount = true
-	}
-}
 
 // --- GitHub Reconnaissance ---
 

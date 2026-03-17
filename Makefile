@@ -73,10 +73,10 @@ lint:
 	@golangci-lint run ./...
 	@echo "✅ Lint passed"
 
-## setup: Build, install chaathan, then install all required external tools
-setup: install
+## setup: Install all required external tools
+setup: build
 	@echo "Running tool setup..."
-	@$(BINARY_NAME) setup
+	@./$(BINARY_NAME) setup
 	@echo "✅ Setup complete"
 
 ## tools-check: Check which external tools are installed
