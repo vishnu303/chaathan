@@ -9,6 +9,7 @@ main
 Thumbs.db
 
 # IDE
+!.agent/
 .idea/
 .vscode/
 *.swp
