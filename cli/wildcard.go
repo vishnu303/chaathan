@@ -824,25 +824,10 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 15: Wordlist Generation (CeWL)
-	// =========================================================================
-	logger.Section("Step 17: Wordlist Generation (CeWL)")
-	cewlOut := filepath.Join(resultDir, "cewl_wordlist.txt")
-	logger.SubStep("Running CeWL...")
-	if err := tb.RunCewl(ctx, "https://"+targetDomain, cewlOut); err != nil {
-		if Verbose {
-			logger.Warning("CeWL failed: %v", err)
-		}
-	} else {
-		logger.SubStep("[Done] CeWL wordlist generated")
-	}
-	stateMgr.MarkStepComplete(scanState, "wordlist_gen")
-
-	// =========================================================================
-	// Step 16: Directory Fuzzing (ffuf)
+	// Step 17: Directory Fuzzing (ffuf)
 	// =========================================================================
 	if wordlistPath != "" {
-		logger.Section("Step 18: Directory Fuzzing (ffuf)")
+		logger.Section("Step 17: Directory Fuzzing (ffuf)")
 		ffufOut := filepath.Join(resultDir, "ffuf_results.json")
 		targetURL := fmt.Sprintf("https://%s/FUZZ", targetDomain)
 		logger.SubStep("Running ffuf with wordlist: %s", wordlistPath)
@@ -852,11 +837,8 @@ step2:
 			logger.SubStep("[Done] ffuf - Results: %s", ffufOut)
 		}
 	} else {
-		logger.Section("Step 18: Skipping ffuf (no wordlist provided)")
+		logger.Section("Step 17: Skipping ffuf (no wordlist provided)")
 		logger.Info("Use --wordlist to enable directory fuzzing")
-		if _, err := os.Stat(cewlOut); err == nil {
-			logger.Info("Tip: You can use the generated CeWL wordlist: %s", cewlOut)
-		}
 	}
 	stateMgr.MarkStepComplete(scanState, "dir_fuzzing")
 

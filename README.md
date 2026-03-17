@@ -22,12 +22,12 @@ git clone https://github.com/vishnu303/chaathan-flow.git
 cd chaathan-flow
 
 # One-command setup: builds, installs to /usr/local/bin, installs all tools
-make setup
+make all
 
 # Or step by step:
 make build          # Build binary
 make install        # Install to /usr/local/bin
-chaathan setup      # Install all external tools
+make setup          # Install all external tools
 ```
 
 **Requirements:** Go 1.21+, Git, Linux
@@ -283,12 +283,12 @@ chaathan setup          # install everything
 ```bash
 make build          # build binary
 make install        # build + install to /usr/local/bin
-make setup          # build + install + install all tools (one-stop)
+make setup          # build + install all tools
 make clean          # remove build artifacts
 make test           # run tests
 make vet            # static analysis
 make tools-check    # check installed tools
-make all            # build + install + setup
+make all            # build + install + setup (one-stop)
 ```
 
 ## Continuous Monitoring

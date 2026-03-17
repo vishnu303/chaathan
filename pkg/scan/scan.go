@@ -60,7 +60,6 @@ var WildcardSteps = []Step{
 	{Name: "js_subdomain_discovery", Description: "JavaScript Subdomain Extraction", Required: false, Tool: "subdomainizer"},
 	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
 	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
-	{Name: "wordlist_gen", Description: "Wordlist Generation", Required: false, Tool: "cewl"},
 	{Name: "dir_fuzzing", Description: "Directory Fuzzing", Required: false, Tool: "ffuf"},
 	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},
 	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},

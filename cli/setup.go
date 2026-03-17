@@ -93,12 +93,11 @@ func captureCommandOutput(cmd *exec.Cmd, toolName string) error {
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Install all dependency tools",
-	Long: `Installs the 28+ tools required for native execution mode.
+	Long: `Installs the tools required for native execution mode.
 
 Categories:
   - Go tools:     subfinder, httpx, nuclei, katana, naabu, etc.
-  - Python tools: sublist3r, subdomainizer, linkfinder, uro
-  - Ruby tools:   cewl (Custom Word List generator)
+  - Python tools: sublist3r, subdomainizer, linkfinder, arjun
   - From source:  massdns (high-performance DNS resolver)
 
 Already-installed tools are skipped automatically.
@@ -117,32 +116,30 @@ func init() {
 // ── Tool definitions ─────────────────────────────────────────────────────────
 
 var goTools = []struct {
-	name     string
-	url      string
-	needsCGO bool
+	name string
+	url  string
 }{
-	{"subfinder", "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest", false},
-	{"amass", "github.com/owasp-amass/amass/v4/...@latest", false},
-	{"nuclei", "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest", true},
-	{"httpx", "github.com/projectdiscovery/httpx/cmd/httpx@latest", false},
-	{"naabu", "github.com/projectdiscovery/naabu/v2/cmd/naabu@latest", true},
-	{"assetfinder", "github.com/tomnomnom/assetfinder@latest", false},
-	{"gau", "github.com/lc/gau/v2/cmd/gau@latest", false},
-	{"metabigor", "github.com/j3ssie/metabigor@latest", false},
-	{"shuffledns", "github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest", false},
-	{"anew", "github.com/tomnomnom/anew@latest", false},
-	{"dnsx", "github.com/projectdiscovery/dnsx/cmd/dnsx@latest", false},
-	{"katana", "github.com/projectdiscovery/katana/cmd/katana@latest", false},
-	{"ffuf", "github.com/ffuf/ffuf/v2@latest", false},
-	{"gospider", "github.com/jaeles-project/gospider@latest", false},
-	{"waybackurls", "github.com/tomnomnom/waybackurls@latest", false},
-	{"github-subdomains", "github.com/gwen001/github-subdomains@latest", false},
-	// --- Phase 3: New tools ---
-	{"alterx", "github.com/projectdiscovery/alterx/cmd/alterx@latest", false},
-	{"subjack", "github.com/haccer/subjack@latest", false},
-	{"dalfox", "github.com/hahwul/dalfox/v2@latest", false},
-	{"tlsx", "github.com/projectdiscovery/tlsx/cmd/tlsx@latest", false},
-	{"uncover", "github.com/projectdiscovery/uncover/cmd/uncover@latest", false},
+	{"subfinder", "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"},
+	{"amass", "github.com/owasp-amass/amass/v4/...@latest"},
+	{"nuclei", "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"},
+	{"httpx", "github.com/projectdiscovery/httpx/cmd/httpx@latest"},
+	{"naabu", "github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"},
+	{"assetfinder", "github.com/tomnomnom/assetfinder@latest"},
+	{"gau", "github.com/lc/gau/v2/cmd/gau@latest"},
+	{"metabigor", "github.com/j3ssie/metabigor@latest"},
+	{"shuffledns", "github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest"},
+	{"anew", "github.com/tomnomnom/anew@latest"},
+	{"dnsx", "github.com/projectdiscovery/dnsx/cmd/dnsx@latest"},
+	{"katana", "github.com/projectdiscovery/katana/cmd/katana@latest"},
+	{"ffuf", "github.com/ffuf/ffuf/v2@latest"},
+	{"gospider", "github.com/jaeles-project/gospider@latest"},
+	{"waybackurls", "github.com/tomnomnom/waybackurls@latest"},
+	{"github-subdomains", "github.com/gwen001/github-subdomains@latest"},
+	{"alterx", "github.com/projectdiscovery/alterx/cmd/alterx@latest"},
+	{"subjack", "github.com/haccer/subjack@latest"},
+	{"dalfox", "github.com/hahwul/dalfox/v2@latest"},
+	{"tlsx", "github.com/projectdiscovery/tlsx/cmd/tlsx@latest"},
+	{"uncover", "github.com/projectdiscovery/uncover/cmd/uncover@latest"},
 }
 
 var pyTools = []struct {
@@ -165,12 +162,6 @@ var pyScripts = []struct {
 	{"subdomainizer", "https://github.com/nsonaniya2010/SubDomainizer.git", "SubDomainizer.py"},
 }
 
-var rubyTools = []struct {
-	name    string
-	gemName string
-}{
-	{"cewl", "cewl"},
-}
 
 // ── Main setup entrypoint ────────────────────────────────────────────────────
 
@@ -203,12 +194,6 @@ func runSetup(cmd *cobra.Command, args []string) {
 
 	// Python tools
 	i, s, f = installPythonToolsSection()
-	totalInstalled += int32(i)
-	totalSkipped += int32(s)
-	totalFailed += int32(f)
-
-	// Ruby tools
-	i, s, f = installRubyToolsSection()
 	totalInstalled += int32(i)
 	totalSkipped += int32(s)
 	totalFailed += int32(f)
@@ -305,9 +290,8 @@ func runSysCmd(name string, args ...string) error {
 func installGoToolsSection() (installed, skipped, failed int) {
 	// Filter already-installed tools
 	var toInstall []struct {
-		name     string
-		url      string
-		needsCGO bool
+		name string
+		url  string
 	}
 	var skippedCount int
 	for _, t := range goTools {
@@ -340,18 +324,13 @@ func installGoToolsSection() (installed, skipped, failed int) {
 
 	for _, t := range toInstall {
 		wg.Add(1)
-		go func(tool struct {
-			name     string
-			url      string
-			needsCGO bool
-		}) {
+		go func(tool struct{ name, url string }) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			tracker.Start(tool.name)
-			err := installGoTool(tool.name, tool.url, tool.needsCGO)
-			if err != nil {
+			if err := installGoTool(tool.name, tool.url); err != nil {
 				tracker.Fail(tool.name, err.Error())
 			} else {
 				tracker.Complete(tool.name)
@@ -366,18 +345,11 @@ func installGoToolsSection() (installed, skipped, failed int) {
 	return i, skippedCount, f
 }
 
-func installGoTool(name, url string, needsCGO bool) error {
+func installGoTool(name, url string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "go", "install", "-v", url)
-
-	if needsCGO {
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
-	} else {
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	}
-
 	return captureCommandOutput(cmd, name)
 }
 
@@ -493,69 +465,6 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 			if err := os.WriteFile(dst, input, 0755); err != nil {
 				tracker.Fail(tool.name, "write failed")
 				return
-			}
-			tracker.Complete(tool.name)
-		}(t)
-	}
-
-	wg.Wait()
-	tracker.StopSpinner()
-
-	i, _, f := tracker.Stats()
-	return i, skippedCount, f
-}
-
-// ── Ruby Tools ───────────────────────────────────────────────────────────────
-
-func installRubyToolsSection() (installed, skipped, failed int) {
-	if _, err := exec.LookPath("gem"); err != nil {
-		progress.Section("Ruby Tools", "")
-		progress.ItemInfo("gem not found — skipping")
-		return 0, 0, 0
-	}
-
-	var toInstall []struct{ name, gem string }
-	var skippedCount int
-	for _, t := range rubyTools {
-		if _, err := exec.LookPath(t.name); err == nil {
-			skippedCount++
-			continue
-		}
-		toInstall = append(toInstall, struct{ name, gem string }{t.name, t.gemName})
-	}
-
-	detail := ""
-	if skippedCount > 0 {
-		detail = fmt.Sprintf("%d to install, %d already installed", len(toInstall), skippedCount)
-	} else {
-		detail = fmt.Sprintf("%d to install", len(toInstall))
-	}
-	progress.Section("Ruby Tools", detail)
-
-	if len(toInstall) == 0 {
-		progress.ItemInfo("Nothing to do")
-		return 0, skippedCount, 0
-	}
-
-	tracker := progress.NewTracker(len(toInstall))
-	tracker.RunSpinner()
-
-	var wg sync.WaitGroup
-	for _, t := range toInstall {
-		wg.Add(1)
-		go func(tool struct{ name, gem string }) {
-			defer wg.Done()
-			tracker.Start(tool.name)
-
-			// Try without sudo first
-			cmd := exec.Command("gem", "install", tool.gem)
-			if err := captureCommandOutput(cmd, tool.name); err != nil {
-				// Retry with sudo
-				cmd = exec.Command("sudo", "gem", "install", tool.gem)
-				if err := captureCommandOutput(cmd, tool.name+" (sudo)"); err != nil {
-					tracker.Fail(tool.name, err.Error())
-					return
-				}
 			}
 			tracker.Complete(tool.name)
 		}(t)
