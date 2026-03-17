@@ -74,9 +74,14 @@ type APIKeysConfig struct {
 	// Shodan API key
 	Shodan string `yaml:"shodan"`
 
-	// Censys API credentials
+	// Censys API credentials (used by uncover; set censys_id+censys_secret in env or config)
 	CensysID     string `yaml:"censys_id"`
 	CensysSecret string `yaml:"censys_secret"`
+	// Censys is a combined shorthand: set to "id:secret" for uncover -e censys support
+	Censys string `yaml:"censys"`
+
+	// Fofa API key for uncover -e fofa support
+	Fofa string `yaml:"fofa"`
 
 	// SecurityTrails API key
 	SecurityTrails string `yaml:"securitytrails"`
@@ -353,7 +358,7 @@ func DefaultConfig() *Config {
 			Naabu: NaabuConfig{
 				Threads:  25,
 				Rate:     1000,
-				Ports:    "top-1000",
+				Ports:    "", // empty = use -top-ports 1000 (set explicit ports like "80,443" to override)
 				ScanType: "s",
 				Retries:  3,
 			},
