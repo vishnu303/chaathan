@@ -22,7 +22,6 @@ var allTools = []struct {
 	{"assetfinder", "Enum", "Passive subdomain discovery", true},
 	{"sublist3r", "Enum", "Passive subdomain discovery (Python)", false},
 	{"amass", "Enum", "Active DNS enumeration", false},
-	{"alterx", "Enum", "Smart subdomain permutation", false},
 
 	// DNS & Resolution
 	{"dnsx", "DNS", "DNS resolution & record lookup", true},

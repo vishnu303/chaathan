@@ -158,7 +158,7 @@ func ScanSummary(status string, target string, scanID int64, duration time.Durat
 	fmt.Printf("  %s│%s  %s%s%s %sScan %s%s%-39s%s│%s\n",
 		Cyan+Bold, Reset, statusColor+Bold, statusIcon, Reset,
 		White+Bold, capitalize(status), Reset,
-		strings.Repeat(" ", 0), "", Cyan+Bold, Reset)
+		strings.Repeat(" ", 0), Cyan+Bold, Reset)
 	fmt.Printf("  %s│%s  %s🎯 %s%s %-39s%s│%s\n", Cyan+Bold, Reset, Dim, target, Reset, "", Cyan+Bold, Reset)
 	fmt.Printf("  %s│%s  %s⏱  %s%s %-39s%s│%s\n", Cyan+Bold, Reset, Dim, fmtDuration(duration), Reset, "", Cyan+Bold, Reset)
 

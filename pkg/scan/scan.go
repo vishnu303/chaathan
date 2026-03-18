@@ -49,9 +49,8 @@ var WildcardSteps = []Step{
 	{Name: "github_recon", Description: "GitHub Subdomain Discovery", Required: false, Tool: "github-subdomains"},
 	{Name: "search_engine_recon", Description: "Search Engine Dorking", Required: false, Tool: "uncover"},
 	{Name: "consolidation", Description: "Subdomain Consolidation", Required: true, Tool: ""},
-	{Name: "permutation", Description: "Smart Subdomain Permutation", Required: false, Tool: "alterx,dnsx"},
-	{Name: "dns_bruteforce", Description: "DNS Brute-force (ShuffleDNS)", Required: false, Tool: "shuffledns,massdns"},
 	{Name: "dns_resolution", Description: "DNS Resolution", Required: true, Tool: "dnsx"},
+	{Name: "dns_bruteforce", Description: "DNS Brute-force (ShuffleDNS)", Required: false, Tool: "shuffledns,massdns"},
 	{Name: "http_probing", Description: "HTTP Probing", Required: true, Tool: "httpx"},
 	{Name: "tls_analysis", Description: "TLS Certificate Analysis", Required: false, Tool: "tlsx"},
 	{Name: "port_scanning", Description: "Port Scanning", Required: false, Tool: "naabu"},
@@ -60,6 +59,7 @@ var WildcardSteps = []Step{
 	{Name: "js_subdomain_discovery", Description: "JavaScript Subdomain Extraction", Required: false, Tool: "subdomainizer"},
 	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
 	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
+	{Name: "wordlist_generation", Description: "Wordlist Generation", Required: false, Tool: "cewl"},
 	{Name: "dir_fuzzing", Description: "Directory Fuzzing", Required: false, Tool: "ffuf"},
 	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},
 	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},
@@ -130,8 +130,15 @@ func (m *Manager) UpdateState(state *State) error {
 
 // MarkStepComplete marks a step as completed
 func (m *Manager) MarkStepComplete(state *State, stepName string) error {
+	// Avoid double-counting steps (common when resume/skip paths re-mark).
+	for _, s := range state.CompletedSteps {
+		if s == stepName {
+			return m.UpdateState(state)
+		}
+	}
 	state.CompletedSteps = append(state.CompletedSteps, stepName)
-	state.CurrentStep++
+	// Keep CurrentStep aligned to the number of unique completed steps.
+	state.CurrentStep = len(state.CompletedSteps)
 	return m.UpdateState(state)
 }
 

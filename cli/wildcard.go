@@ -61,22 +61,21 @@ Runs a comprehensive 22-step recon & vulnerability scanning workflow:
  4. GitHub Subdomain Discovery [Requires GITHUB_TOKEN]
  5. Search Engine Dorking (Uncover/Shodan/Censys) [Optional, --skip-uncover]
  6. Consolidation & DNS Resolution (DNSx)
- 7. Smart Subdomain Permutation (Alterx → DNSx)
- 8. DNS Brute-force (ShuffleDNS/MassDNS) [Optional, --skip-shuffledns]
- 9. Live Web Probing (Httpx)
-10. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
-11. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
-12. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
-13. JavaScript Analysis (LinkFinder)
-14. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
-15. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
-16. URL Consolidation & Live Check (httpx)
-17. Wordlist Generation (CeWL)
-18. Directory Fuzzing (ffuf) [Requires --wordlist]
-19. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
-20. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
-21. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
-22. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
+  7. DNS Brute-force (ShuffleDNS/MassDNS) [Optional, --skip-shuffledns]
+  8. Live Web Probing (Httpx)
+  9. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
+ 10. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
+ 11. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
+ 12. JavaScript Analysis (LinkFinder)
+ 13. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
+ 14. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
+ 15. URL Consolidation & Live Check (httpx)
+ 16. Wordlist Generation (CeWL)
+ 17. Directory Fuzzing (ffuf) [Requires --wordlist]
+ 18. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
+ 19. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
+ 20. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
+ 21. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
 
 Press 's' at any time during scanning to skip the current tool.
 All results are stored in a SQLite database for querying and reporting.
@@ -254,7 +253,42 @@ func runWildcard(cmd *cobra.Command, args []string) {
 
 	// Declare variables used across steps (needed because goto labels skip declarations)
 	var wg sync.WaitGroup
-	var passiveFiles []string
+	subfinderOut := filepath.Join(resultDir, "subfinder.txt")
+	assetfinderOut := filepath.Join(resultDir, "assetfinder.txt")
+	sublist3rOut := filepath.Join(resultDir, "sublist3r.txt")
+	amassOut := filepath.Join(resultDir, "amass.txt")
+	githubSubsOut := filepath.Join(resultDir, "github_subdomains.txt")
+	waybackOut := filepath.Join(resultDir, "waybackurls.txt")
+	gauOut := filepath.Join(resultDir, "gau.txt")
+	uncoverOut := filepath.Join(resultDir, "uncover.json")
+	consolidatedSubs := filepath.Join(resultDir, "all_subdomains.txt")
+	dnsxOut := filepath.Join(resultDir, "dnsx_resolved.json")
+	shufflednsOut := filepath.Join(resultDir, "shuffledns_bruteforce.txt")
+	httpxOut := filepath.Join(resultDir, "httpx_live.json")
+	tlsxOut := filepath.Join(resultDir, "tlsx_certs.json")
+	naabuOut := filepath.Join(resultDir, "naabu_ports.txt")
+	katanaOut := filepath.Join(resultDir, "katana_urls.txt")
+	gospiderOut := filepath.Join(resultDir, "gospider_urls.txt")
+	linkfinderOut := filepath.Join(resultDir, "linkfinder_endpoints.txt")
+	subdomainizerOut := filepath.Join(resultDir, "subdomainizer_subs.txt")
+	arjunOut := filepath.Join(resultDir, "arjun_params.json")
+	allURLsRaw := filepath.Join(resultDir, "all_urls_raw.txt")
+	allURLsLive := filepath.Join(resultDir, "all_urls_live.txt")
+	generatedWordlistOut := filepath.Join(resultDir, "cewl_wordlist.txt")
+	ffufOut := filepath.Join(resultDir, "ffuf_results.json")
+	nucleiOut := filepath.Join(resultDir, "nuclei_vulns.json")
+	nucleiURLOut := filepath.Join(resultDir, "nuclei_url_vulns.json")
+	subjackOut := filepath.Join(resultDir, "subjack_takeovers.txt")
+	paramURLsFile := filepath.Join(resultDir, "param_urls_live.txt")
+	dalfoxOut := filepath.Join(resultDir, "dalfox_xss.json")
+	effectiveWordlist := wordlistPath
+	urlSources := []string{
+		waybackOut,
+		gauOut,
+		katanaOut,
+		gospiderOut,
+		linkfinderOut,
+	}
 
 	// =========================================================================
 	// Step 1: Passive Enumeration (Parallel)
@@ -264,24 +298,17 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		goto step2
 	}
 	logger.Section("Step 1: Passive Subdomain Enumeration")
-	stateMgr.MarkStepComplete(scanState, "passive_enum_start")
-
-	passiveFiles = []string{
-		filepath.Join(resultDir, "subfinder.txt"),
-		filepath.Join(resultDir, "assetfinder.txt"),
-		filepath.Join(resultDir, "sublist3r.txt"),
-	}
 
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		logger.SubStep("[Start] Subfinder")
-		if err := tb.RunSubfinder(ctx, targetDomain, passiveFiles[0]); err != nil {
+		if err := tb.RunSubfinder(ctx, targetDomain, subfinderOut); err != nil {
 			logger.Error("Subfinder failed: %v", err)
 		} else {
 			logger.SubStep("[Done] Subfinder")
 			if scanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(scanID, passiveFiles[0], "subfinder")
+				count, _ := utils.ParseSubdomainsFile(scanID, subfinderOut, "subfinder")
 				logger.Info("  Found %d subdomains", count)
 			}
 		}
@@ -290,12 +317,12 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	go func() {
 		defer wg.Done()
 		logger.SubStep("[Start] Assetfinder")
-		if err := tb.RunAssetfinder(ctx, targetDomain, passiveFiles[1]); err != nil {
+		if err := tb.RunAssetfinder(ctx, targetDomain, assetfinderOut); err != nil {
 			logger.Error("Assetfinder failed: %v", err)
 		} else {
 			logger.SubStep("[Done] Assetfinder")
 			if scanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(scanID, passiveFiles[1], "assetfinder")
+				count, _ := utils.ParseSubdomainsFile(scanID, assetfinderOut, "assetfinder")
 				logger.Info("  Found %d subdomains", count)
 			}
 		}
@@ -304,14 +331,14 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	go func() {
 		defer wg.Done()
 		logger.SubStep("[Start] Sublist3r")
-		if err := tb.RunSublist3r(ctx, targetDomain, passiveFiles[2]); err != nil {
+		if err := tb.RunSublist3r(ctx, targetDomain, sublist3rOut); err != nil {
 			if Verbose {
 				logger.Warning("Sublist3r failed: %v", err)
 			}
 		} else {
 			logger.SubStep("[Done] Sublist3r")
 			if scanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(scanID, passiveFiles[2], "sublist3r")
+				count, _ := utils.ParseSubdomainsFile(scanID, sublist3rOut, "sublist3r")
 				logger.Info("  Found %d subdomains", count)
 			}
 		}
@@ -330,46 +357,47 @@ step2:
 	// =========================================================================
 	// Step 2: URL Discovery (Parallel - Waybackurls + GAU)
 	// =========================================================================
-	logger.Section("Step 2: Historical URL Discovery")
+	if scanState.IsStepCompleted("url_discovery") {
+		logger.Section("Step 2: Historical URL Discovery [RESUMED — skipping]")
+	} else {
+		logger.Section("Step 2: Historical URL Discovery")
 
-	waybackOut := filepath.Join(resultDir, "waybackurls.txt")
-	gauOut := filepath.Join(resultDir, "gau.txt")
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] Waybackurls")
+			if err := tb.RunWaybackurls(ctx, targetDomain, waybackOut); err != nil {
+				if Verbose {
+					logger.Warning("Waybackurls failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] Waybackurls")
+				if scanID > 0 {
+					count, _ := utils.ParseURLsFile(scanID, waybackOut, "waybackurls")
+					logger.Info("  Found %d URLs", count)
+				}
+			}
+		}()
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] Waybackurls")
-		if err := tb.RunWaybackurls(ctx, targetDomain, waybackOut); err != nil {
-			if Verbose {
-				logger.Warning("Waybackurls failed: %v", err)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] GAU")
+			if err := tb.RunGau(ctx, targetDomain, gauOut); err != nil {
+				if Verbose {
+					logger.Warning("GAU failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] GAU")
+				if scanID > 0 {
+					count, _ := utils.ParseURLsFile(scanID, gauOut, "gau")
+					logger.Info("  Found %d URLs", count)
+				}
 			}
-		} else {
-			logger.SubStep("[Done] Waybackurls")
-			if scanID > 0 {
-				count, _ := utils.ParseURLsFile(scanID, waybackOut, "waybackurls")
-				logger.Info("  Found %d URLs", count)
-			}
-		}
-	}()
+		}()
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] GAU")
-		if err := tb.RunGau(ctx, targetDomain, gauOut); err != nil {
-			if Verbose {
-				logger.Warning("GAU failed: %v", err)
-			}
-		} else {
-			logger.SubStep("[Done] GAU")
-			if scanID > 0 {
-				count, _ := utils.ParseURLsFile(scanID, gauOut, "gau")
-				logger.Info("  Found %d URLs", count)
-			}
-		}
-	}()
-
-	wg.Wait()
-	stateMgr.MarkStepComplete(scanState, "url_discovery")
+		wg.Wait()
+		stateMgr.MarkStepComplete(scanState, "url_discovery")
+	}
 
 	if ctx.Err() != nil {
 		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
@@ -379,15 +407,15 @@ step2:
 	// =========================================================================
 	// Step 3: Active Enumeration (Amass - Optional)
 	// =========================================================================
-	amassOut := filepath.Join(resultDir, "amass.txt")
-	if !skipAmass {
+	if scanState.IsStepCompleted("active_enum") {
+		logger.Section("Step 3: Active Subdomain Enumeration (Amass) [RESUMED — skipping]")
+	} else if !skipAmass {
 		logger.Section("Step 3: Active Subdomain Enumeration (Amass)")
 		logger.SubStep("Running Amass (this may take a while)...")
 		if err := tb.RunAmass(ctx, targetDomain, amassOut); err != nil {
 			logger.Error("Amass failed: %v", err)
 			stateMgr.MarkStepFailed(scanState, "active_enum", err)
 		} else {
-			passiveFiles = append(passiveFiles, amassOut)
 			if scanID > 0 {
 				count, _ := utils.ParseSubdomainsFile(scanID, amassOut, "amass")
 				logger.Info("  Found %d subdomains", count)
@@ -407,14 +435,14 @@ step2:
 	// =========================================================================
 	// Step 4: GitHub Subdomain Discovery (Optional)
 	// =========================================================================
-	if githubToken != "" {
+	if scanState.IsStepCompleted("github_recon") {
+		logger.Section("Step 4: GitHub Subdomain Discovery [RESUMED — skipping]")
+	} else if githubToken != "" {
 		logger.Section("Step 4: GitHub Subdomain Discovery")
-		githubSubsOut := filepath.Join(resultDir, "github_subdomains.txt")
 		logger.SubStep("Running github-subdomains...")
 		if err := tb.RunGithubSubdomains(ctx, targetDomain, githubToken, githubSubsOut); err != nil {
 			logger.Warning("GitHub subdomains failed: %v", err)
 		} else {
-			passiveFiles = append(passiveFiles, githubSubsOut)
 			if scanID > 0 {
 				count, _ := utils.ParseSubdomainsFile(scanID, githubSubsOut, "github")
 				logger.Info("  Found %d subdomains", count)
@@ -435,9 +463,10 @@ step2:
 	// =========================================================================
 	// Step 5: Search Engine Dorking (Uncover) — passive, no target contact
 	// =========================================================================
-	if !skipUncover {
+	if scanState.IsStepCompleted("search_engine_recon") {
+		logger.Section("Step 5: Passive Search Engine Recon (Uncover) [RESUMED — skipping]")
+	} else if !skipUncover {
 		logger.Section("Step 5: Passive Search Engine Recon (Uncover)")
-		uncoverOut := filepath.Join(resultDir, "uncover.json")
 		logger.SubStep("Running Uncover (Shodan/Censys/Fofa)...")
 		if err := tb.RunUncover(ctx, targetDomain, uncoverOut); err != nil {
 			if Verbose {
@@ -463,58 +492,31 @@ step2:
 	// =========================================================================
 	// Step 6: Consolidation & DNS Resolution
 	// =========================================================================
-	logger.Section("Step 6: Consolidating Subdomains")
-	consolidatedSubs := filepath.Join(resultDir, "all_subdomains.txt")
-	if err := utils.MergeAndDeduplicate(passiveFiles, consolidatedSubs); err != nil {
-		logger.Error("Failed to consolidate: %v", err)
-	}
-	logger.Success("Consolidated list saved to %s", consolidatedSubs)
-
-	// DNS Resolution
-	logger.SubStep("Running DNSx for resolution...")
-	dnsxOut := filepath.Join(resultDir, "dnsx_resolved.json")
-	if err := tb.RunDnsx(ctx, consolidatedSubs, dnsxOut); err != nil {
-		logger.Error("DNSx failed: %v", err)
-	}
-	stateMgr.MarkStepComplete(scanState, "consolidation")
-	stateMgr.MarkStepComplete(scanState, "dns_resolution")
-
-	if ctx.Err() != nil {
-		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
-		return
-	}
-
-	// =========================================================================
-	// Step 7: Smart Subdomain Permutation (Alterx → DNSx)
-	// =========================================================================
-	logger.Section("Step 7: Smart Subdomain Permutation (Alterx)")
-	alterxOut := filepath.Join(resultDir, "alterx_permutations.txt")
-	alterxResolvedOut := filepath.Join(resultDir, "alterx_resolved.json")
-	logger.SubStep("Running Alterx to generate smart permutations...")
-	if err := tb.RunAlterx(ctx, consolidatedSubs, alterxOut); err != nil {
-		if Verbose {
-			logger.Warning("Alterx failed: %v", err)
-		}
+	if scanState.IsStepCompleted("consolidation") && scanState.IsStepCompleted("dns_resolution") {
+		logger.Section("Step 6: Consolidation & DNS Resolution [RESUMED — skipping]")
 	} else {
-		permCount, _ := utils.ParseAlterxOutput(alterxOut)
-		logger.Info("  Generated %d permutations, resolving with DNSx...", permCount)
-
-		// Resolve permutations to find new valid subdomains
-		if err := tb.RunDnsx(ctx, alterxOut, alterxResolvedOut); err != nil {
-			logger.Warning("DNSx on permutations failed: %v", err)
-		} else {
-			if scanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(scanID, alterxResolvedOut, "alterx")
-				logger.Info("  Found %d new subdomains via permutation", count)
-			}
-			// Merge new subs into consolidated list
-			utils.MergeAndDeduplicate(
-				[]string{consolidatedSubs, alterxResolvedOut},
-				consolidatedSubs,
-			)
+		logger.Section("Step 6: Consolidating Subdomains")
+		passiveSources := existingFiles(
+			subfinderOut,
+			assetfinderOut,
+			sublist3rOut,
+			amassOut,
+			githubSubsOut,
+			subdomainizerOut,
+		)
+		if err := utils.MergeAndDeduplicate(passiveSources, consolidatedSubs); err != nil {
+			logger.Error("Failed to consolidate: %v", err)
 		}
+		logger.Success("Consolidated list saved to %s", consolidatedSubs)
+		stateMgr.MarkStepComplete(scanState, "consolidation")
+
+		// DNS Resolution
+		logger.SubStep("Running DNSx for resolution...")
+		if err := tb.RunDnsx(ctx, consolidatedSubs, dnsxOut); err != nil {
+			logger.Error("DNSx failed: %v", err)
+		}
+		stateMgr.MarkStepComplete(scanState, "dns_resolution")
 	}
-	stateMgr.MarkStepComplete(scanState, "permutation")
 
 	if ctx.Err() != nil {
 		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
@@ -522,11 +524,12 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 8: DNS Brute-force (ShuffleDNS) — dictionary-based subdomain discovery
+	// Step 7: DNS Brute-force (ShuffleDNS) — dictionary-based subdomain discovery
 	// =========================================================================
-	if !skipShuffleDNS && dnsWordlistPath != "" {
-		logger.Section("Step 8: DNS Brute-force (ShuffleDNS)")
-		shufflednsOut := filepath.Join(resultDir, "shuffledns_bruteforce.txt")
+	if scanState.IsStepCompleted("dns_bruteforce") {
+		logger.Section("Step 7: DNS Brute-force (ShuffleDNS) [RESUMED — skipping]")
+	} else if !skipShuffleDNS && dnsWordlistPath != "" {
+		logger.Section("Step 7: DNS Brute-force (ShuffleDNS)")
 		logger.SubStep("Running ShuffleDNS with wordlist: %s", dnsWordlistPath)
 		if err := runWithSkip(ctx, "shuffledns", func(sCtx context.Context) error {
 			return tb.RunShuffleDNS(sCtx, targetDomain, dnsWordlistPath, resolversPath, shufflednsOut)
@@ -549,10 +552,10 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "dns_bruteforce")
 	} else if skipShuffleDNS {
-		logger.Section("Step 8: Skipping ShuffleDNS (--skip-shuffledns)")
+		logger.Section("Step 7: Skipping ShuffleDNS (--skip-shuffledns)")
 		stateMgr.MarkStepComplete(scanState, "dns_bruteforce")
 	} else {
-		logger.Section("Step 8: Skipping ShuffleDNS (no --dns-wordlist provided)")
+		logger.Section("Step 7: Skipping ShuffleDNS (no --dns-wordlist provided)")
 		logger.Info("Use --dns-wordlist to enable DNS brute-force")
 		stateMgr.MarkStepComplete(scanState, "dns_bruteforce")
 	}
@@ -563,20 +566,23 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 9: Live Web Probing (Httpx)
+	// Step 8: Live Web Probing (Httpx)
 	// =========================================================================
-	logger.Section("Step 9: Live Web Server Probing")
-	httpxOut := filepath.Join(resultDir, "httpx_live.json")
-	logger.SubStep("Running Httpx...")
-	if err := tb.RunHttpx(ctx, consolidatedSubs, httpxOut); err != nil {
-		logger.Error("Httpx failed: %v", err)
+	if scanState.IsStepCompleted("http_probing") {
+		logger.Section("Step 8: Live Web Server Probing [RESUMED — skipping]")
 	} else {
-		if scanID > 0 {
-			count, _ := utils.ParseHttpxOutput(scanID, httpxOut)
-			logger.Info("  Found %d live hosts", count)
+		logger.Section("Step 8: Live Web Server Probing")
+		logger.SubStep("Running Httpx...")
+		if err := tb.RunHttpx(ctx, consolidatedSubs, httpxOut); err != nil {
+			logger.Error("Httpx failed: %v", err)
+		} else {
+			if scanID > 0 {
+				count, _ := utils.ParseHttpxOutput(scanID, httpxOut)
+				logger.Info("  Found %d live hosts", count)
+			}
 		}
+		stateMgr.MarkStepComplete(scanState, "http_probing")
 	}
-	stateMgr.MarkStepComplete(scanState, "http_probing")
 
 	if ctx.Err() != nil {
 		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
@@ -586,9 +592,10 @@ step2:
 	// =========================================================================
 	// Step 9: TLS/SSL Certificate Analysis (tlsx)
 	// =========================================================================
-	if !skipTlsx {
-		logger.Section("Step 10: TLS Certificate Analysis (tlsx)")
-		tlsxOut := filepath.Join(resultDir, "tlsx_certs.json")
+	if scanState.IsStepCompleted("tls_analysis") {
+		logger.Section("Step 9: TLS Certificate Analysis (tlsx) [RESUMED — skipping]")
+	} else if !skipTlsx {
+		logger.Section("Step 9: TLS Certificate Analysis (tlsx)")
 		logger.SubStep("Running tlsx — extracting SANs and checking cert issues...")
 		if err := tb.RunTlsx(ctx, consolidatedSubs, tlsxOut); err != nil {
 			if Verbose {
@@ -607,7 +614,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "tls_analysis")
 	} else {
-		logger.Section("Step 10: Skipping tlsx (--skip-tlsx)")
+		logger.Section("Step 9: Skipping tlsx (--skip-tlsx)")
 		stateMgr.MarkStepComplete(scanState, "tls_analysis")
 	}
 
@@ -619,9 +626,10 @@ step2:
 	// =========================================================================
 	// Step 10: Port Scanning (Naabu) — scan ALL discovered subdomains
 	// =========================================================================
-	if !skipNaabu {
-		logger.Section("Step 11: Port Scanning")
-		naabuOut := filepath.Join(resultDir, "naabu_ports.txt")
+	if scanState.IsStepCompleted("port_scanning") {
+		logger.Section("Step 10: Port Scanning [RESUMED — skipping]")
+	} else if !skipNaabu {
+		logger.Section("Step 10: Port Scanning")
 		logger.SubStep("Running Naabu on all discovered subdomains...")
 		if err := tb.RunNaabuList(ctx, consolidatedSubs, naabuOut); err != nil {
 			logger.Error("Naabu failed: %v", err)
@@ -633,7 +641,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "port_scanning")
 	} else {
-		logger.Section("Step 11: Skipping Naabu (--skip-naabu)")
+		logger.Section("Step 10: Skipping Naabu (--skip-naabu)")
 		stateMgr.MarkStepComplete(scanState, "port_scanning")
 	}
 
@@ -645,10 +653,10 @@ step2:
 	// =========================================================================
 	// Step 11: Web Crawling (Parallel - Katana + GoSpider)
 	// =========================================================================
-	if !skipCrawl {
-		logger.Section("Step 12: Web Crawling")
-		katanaOut := filepath.Join(resultDir, "katana_urls.txt")
-		gospiderOut := filepath.Join(resultDir, "gospider_urls.txt")
+	if scanState.IsStepCompleted("web_crawling") {
+		logger.Section("Step 11: Web Crawling [RESUMED — skipping]")
+	} else if !skipCrawl {
+		logger.Section("Step 11: Web Crawling")
 
 		wg.Add(2)
 		go func() {
@@ -682,7 +690,7 @@ step2:
 		wg.Wait()
 		stateMgr.MarkStepComplete(scanState, "web_crawling")
 	} else {
-		logger.Section("Step 12: Skipping Web Crawling (--skip-crawl)")
+		logger.Section("Step 11: Skipping Web Crawling (--skip-crawl)")
 		stateMgr.MarkStepComplete(scanState, "web_crawling")
 	}
 
@@ -694,27 +702,31 @@ step2:
 	// =========================================================================
 	// Step 12: JS Analysis & Endpoint Discovery
 	// =========================================================================
-	logger.Section("Step 13: JavaScript Analysis")
-	linkfinderOut := filepath.Join(resultDir, "linkfinder_endpoints.txt")
-	logger.SubStep("Running Linkfinder...")
-	if err := tb.RunLinkfinder(ctx, "https://"+targetDomain, linkfinderOut); err != nil {
-		if Verbose {
-			logger.Warning("Linkfinder failed: %v", err)
-		}
+	if scanState.IsStepCompleted("js_analysis") {
+		logger.Section("Step 12: JavaScript Analysis [RESUMED — skipping]")
 	} else {
-		if scanID > 0 {
-			count, _ := utils.ParseEndpointsFile(scanID, linkfinderOut, "linkfinder")
-			logger.Info("  Found %d endpoints", count)
+		logger.Section("Step 12: JavaScript Analysis")
+		logger.SubStep("Running Linkfinder...")
+		if err := tb.RunLinkfinder(ctx, "https://"+targetDomain, linkfinderOut); err != nil {
+			if Verbose {
+				logger.Warning("Linkfinder failed: %v", err)
+			}
+		} else {
+			if scanID > 0 {
+				count, _ := utils.ParseEndpointsFile(scanID, linkfinderOut, "linkfinder")
+				logger.Info("  Found %d endpoints", count)
+			}
 		}
+		stateMgr.MarkStepComplete(scanState, "js_analysis")
 	}
-	stateMgr.MarkStepComplete(scanState, "js_analysis")
 
 	// =========================================================================
-	// Step 14: JavaScript Subdomain Extraction (SubDomainizer)
+	// Step 13: JavaScript Subdomain Extraction (SubDomainizer)
 	// =========================================================================
-	if !skipSubdomainizer {
-		logger.Section("Step 14: JavaScript Subdomain Extraction (SubDomainizer)")
-		subdomainizerOut := filepath.Join(resultDir, "subdomainizer_subs.txt")
+	if scanState.IsStepCompleted("js_subdomain_discovery") {
+		logger.Section("Step 13: JavaScript Subdomain Extraction (SubDomainizer) [RESUMED — skipping]")
+	} else if !skipSubdomainizer {
+		logger.Section("Step 13: JavaScript Subdomain Extraction (SubDomainizer)")
 		logger.SubStep("Running SubDomainizer on https://%s...", targetDomain)
 		if err := runWithSkip(ctx, "subdomainizer", func(sCtx context.Context) error {
 			return tb.RunSubdomainizer(sCtx, "https://"+targetDomain, subdomainizerOut)
@@ -741,7 +753,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "js_subdomain_discovery")
 	} else {
-		logger.Section("Step 14: Skipping SubDomainizer (--skip-subdomainizer)")
+		logger.Section("Step 13: Skipping SubDomainizer (--skip-subdomainizer)")
 		stateMgr.MarkStepComplete(scanState, "js_subdomain_discovery")
 	}
 
@@ -751,11 +763,12 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 15: HTTP Parameter Discovery (Arjun)
+	// Step 14: HTTP Parameter Discovery (Arjun)
 	// =========================================================================
-	arjunOut := filepath.Join(resultDir, "arjun_params.json")
-	if !skipArjun {
-		logger.Section("Step 15: HTTP Parameter Discovery (Arjun)")
+	if scanState.IsStepCompleted("param_discovery") {
+		logger.Section("Step 14: HTTP Parameter Discovery (Arjun) [RESUMED — skipping]")
+	} else if !skipArjun {
+		logger.Section("Step 14: HTTP Parameter Discovery (Arjun)")
 		logger.SubStep("Running Arjun on https://%s...", targetDomain)
 		if err := runWithSkip(ctx, "arjun", func(sCtx context.Context) error {
 			return tb.RunArjun(sCtx, "https://"+targetDomain, arjunOut)
@@ -769,7 +782,7 @@ step2:
 			logger.SubStep("[Done] Arjun parameter discovery")
 		}
 	} else {
-		logger.Section("Step 15: Skipping Arjun (--skip-arjun)")
+		logger.Section("Step 14: Skipping Arjun (--skip-arjun)")
 	}
 	stateMgr.MarkStepComplete(scanState, "param_discovery")
 
@@ -779,20 +792,13 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 14: URL Consolidation & Live Check
+	// Step 15: URL Consolidation & Live Check
 	// =========================================================================
-	logger.Section("Step 16: URL Consolidation & Live Check")
-	allURLsRaw := filepath.Join(resultDir, "all_urls_raw.txt")
-	allURLsLive := filepath.Join(resultDir, "all_urls_live.txt")
-
-	// Merge URLs from all URL-producing tools
-	urlSources := []string{
-		filepath.Join(resultDir, "waybackurls.txt"),
-		filepath.Join(resultDir, "gau.txt"),
-		filepath.Join(resultDir, "katana_urls.txt"),
-		filepath.Join(resultDir, "gospider_urls.txt"),
-		linkfinderOut,
+	if scanState.IsStepCompleted("url_consolidation") {
+		logger.Section("Step 15: URL Consolidation & Live Check [RESUMED — skipping]")
+		goto step16
 	}
+	logger.Section("Step 15: URL Consolidation & Live Check")
 
 	logger.SubStep("Merging URLs from %d sources...", len(urlSources))
 	if err := utils.MergeAndDeduplicate(urlSources, allURLsRaw); err != nil {
@@ -826,22 +832,67 @@ step2:
 		return
 	}
 
+step16:
+
+	// =========================================================================
+	// Step 16: Wordlist Generation (CeWL)
+	// =========================================================================
+	if scanState.IsStepCompleted("wordlist_generation") {
+		logger.Section("Step 16: Wordlist Generation (CeWL) [RESUMED — skipping]")
+		if effectiveWordlist == "" && utils.FileExists(generatedWordlistOut) {
+			effectiveWordlist = generatedWordlistOut
+		}
+		goto step17
+	}
+	if effectiveWordlist != "" {
+		logger.Section("Step 16: Skipping CeWL (using provided --wordlist)")
+	} else {
+		logger.Section("Step 16: Wordlist Generation (CeWL)")
+		logger.SubStep("Generating a target-specific wordlist with CeWL...")
+		if err := runWithSkip(ctx, "cewl", func(sCtx context.Context) error {
+			return tb.RunCewl(sCtx, "https://"+targetDomain, generatedWordlistOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				logger.Info("  CeWL skipped")
+			} else if Verbose {
+				logger.Warning("CeWL failed: %v", err)
+			}
+		} else if utils.FileExists(generatedWordlistOut) {
+			count, _ := utils.CountFileLines(generatedWordlistOut)
+			if count > 0 {
+				effectiveWordlist = generatedWordlistOut
+				logger.Info("  Generated %d words for ffuf", count)
+			}
+		}
+	}
+	stateMgr.MarkStepComplete(scanState, "wordlist_generation")
+
+	if ctx.Err() != nil {
+		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
+		return
+	}
+
+step17:
+
 	// =========================================================================
 	// Step 17: Directory Fuzzing (ffuf)
 	// =========================================================================
-	if wordlistPath != "" {
+	if scanState.IsStepCompleted("dir_fuzzing") {
+		logger.Section("Step 17: Directory Fuzzing (ffuf) [RESUMED — skipping]")
+		goto step18
+	}
+	if effectiveWordlist != "" {
 		logger.Section("Step 17: Directory Fuzzing (ffuf)")
-		ffufOut := filepath.Join(resultDir, "ffuf_results.json")
 		targetURL := fmt.Sprintf("https://%s/FUZZ", targetDomain)
-		logger.SubStep("Running ffuf with wordlist: %s", wordlistPath)
-		if err := tb.RunFfufWithFUZZ(ctx, targetURL, wordlistPath, ffufOut); err != nil {
+		logger.SubStep("Running ffuf with wordlist: %s", effectiveWordlist)
+		if err := tb.RunFfufWithFUZZ(ctx, targetURL, effectiveWordlist, ffufOut); err != nil {
 			logger.Warning("ffuf failed: %v", err)
 		} else {
 			logger.SubStep("[Done] ffuf - Results: %s", ffufOut)
 		}
 	} else {
-		logger.Section("Step 17: Skipping ffuf (no wordlist provided)")
-		logger.Info("Use --wordlist to enable directory fuzzing")
+		logger.Section("Step 17: Skipping ffuf (no usable wordlist available)")
+		logger.Info("Provide --wordlist or let CeWL generate one successfully")
 	}
 	stateMgr.MarkStepComplete(scanState, "dir_fuzzing")
 
@@ -850,12 +901,15 @@ step2:
 		return
 	}
 
+step18:
+
 	// =========================================================================
-	// Step 17: Vulnerability Scanning — Run 1: Infrastructure (Nuclei)
+	// Step 18: Vulnerability Scanning — Run 1: Infrastructure (Nuclei)
 	// =========================================================================
-	if !skipNuclei {
-		logger.Section("Step 19: Vulnerability Scanning — Infra (Nuclei)")
-		nucleiOut := filepath.Join(resultDir, "nuclei_vulns.json")
+	if scanState.IsStepCompleted("vuln_scanning") {
+		logger.Section("Step 18: Vulnerability Scanning — Infra (Nuclei) [RESUMED — skipping]")
+	} else if !skipNuclei {
+		logger.Section("Step 18: Vulnerability Scanning — Infra (Nuclei)")
 		logger.SubStep("Running Nuclei on discovered subdomains...")
 		if err := runWithSkip(ctx, "nuclei (infra)", func(sCtx context.Context) error {
 			return tb.RunNuclei(sCtx, consolidatedSubs, nucleiOut)
@@ -891,7 +945,7 @@ step2:
 			}
 		}
 	} else {
-		logger.Section("Step 19: Skipping Nuclei (--skip-nuclei)")
+		logger.Section("Step 18: Skipping Nuclei (--skip-nuclei)")
 	}
 	stateMgr.MarkStepComplete(scanState, "vuln_scanning")
 
@@ -901,11 +955,12 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 18: Vulnerability Scanning — Run 2: URLs (Nuclei)
+	// Step 19: Vulnerability Scanning — Run 2: URLs (Nuclei)
 	// =========================================================================
-	if !skipNuclei && utils.FileExists(allURLsLive) {
-		logger.Section("Step 20: Vulnerability Scanning — URLs (Nuclei)")
-		nucleiURLOut := filepath.Join(resultDir, "nuclei_url_vulns.json")
+	if scanState.IsStepCompleted("vuln_scanning_urls") {
+		logger.Section("Step 19: Vulnerability Scanning — URLs (Nuclei) [RESUMED — skipping]")
+	} else if !skipNuclei && utils.FileExists(allURLsLive) {
+		logger.Section("Step 19: Vulnerability Scanning — URLs (Nuclei)")
 		logger.SubStep("Running Nuclei on live URLs (stricter rate, medium+ severity)...")
 		if err := runWithSkip(ctx, "nuclei (URLs)", func(sCtx context.Context) error {
 			return tb.RunNucleiURLs(sCtx, allURLsLive, nucleiURLOut)
@@ -922,9 +977,9 @@ step2:
 			}
 		}
 	} else if skipNuclei {
-		logger.Section("Step 20: Skipping Nuclei URLs (--skip-nuclei)")
+		logger.Section("Step 19: Skipping Nuclei URLs (--skip-nuclei)")
 	} else {
-		logger.Section("Step 20: Skipping Nuclei URLs (no live URLs available)")
+		logger.Section("Step 19: Skipping Nuclei URLs (no live URLs available)")
 	}
 	stateMgr.MarkStepComplete(scanState, "vuln_scanning_urls")
 
@@ -934,11 +989,12 @@ step2:
 	}
 
 	// =========================================================================
-	// Step 19: Subdomain Takeover Detection (Subjack)
+	// Step 20: Subdomain Takeover Detection (Subjack)
 	// =========================================================================
-	if !skipSubjack {
-		logger.Section("Step 21: Subdomain Takeover Detection (Subjack)")
-		subjackOut := filepath.Join(resultDir, "subjack_takeovers.txt")
+	if scanState.IsStepCompleted("takeover_detection") {
+		logger.Section("Step 20: Subdomain Takeover Detection (Subjack) [RESUMED — skipping]")
+	} else if !skipSubjack {
+		logger.Section("Step 20: Subdomain Takeover Detection (Subjack)")
 		logger.SubStep("Running Subjack — checking for dangling CNAMEs...")
 		if err := tb.RunSubjack(ctx, consolidatedSubs, subjackOut); err != nil {
 			if Verbose {
@@ -972,24 +1028,22 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "takeover_detection")
 	} else {
-		logger.Section("Step 21: Skipping Subjack (--skip-subjack)")
+		logger.Section("Step 20: Skipping Subjack (--skip-subjack)")
 		stateMgr.MarkStepComplete(scanState, "takeover_detection")
 	}
 
 	// =========================================================================
-	// Step 20: XSS Scanning (Dalfox) — uses live URLs
+	// Step 21: XSS Scanning (Dalfox) — uses live URLs
 	// =========================================================================
-	if !skipDalfox {
-		logger.Section("Step 22: XSS Scanning (Dalfox)")
-		paramURLsFile := filepath.Join(resultDir, "param_urls_live.txt")
-		dalfoxOut := filepath.Join(resultDir, "dalfox_xss.json")
-
+	if scanState.IsStepCompleted("xss_scanning") {
+		logger.Section("Step 21: XSS Scanning (Dalfox) [RESUMED — skipping]")
+	} else if !skipDalfox {
+		logger.Section("Step 21: XSS Scanning (Dalfox)")
 		// Collect parameterized URLs from the live URLs file
 		logger.SubStep("Collecting parameterized URLs from live URLs...")
-		collectParamURLsFromFile(allURLsLive, paramURLsFile)
+		paramCount := collectParamURLsFromFile(allURLsLive, paramURLsFile)
 
-		if utils.FileExists(paramURLsFile) {
-			paramCount, _ := utils.CountFileLines(paramURLsFile)
+		if paramCount > 0 {
 			logger.Info("  Found %d parameterized URLs to test", paramCount)
 			logger.SubStep("Running Dalfox on parameterized URLs...")
 			if err := runWithSkip(ctx, "dalfox", func(sCtx context.Context) error {
@@ -1015,7 +1069,7 @@ step2:
 		}
 		stateMgr.MarkStepComplete(scanState, "xss_scanning")
 	} else {
-		logger.Section("Step 22: Skipping Dalfox (--skip-dalfox)")
+		logger.Section("Step 21: Skipping Dalfox (--skip-dalfox)")
 		stateMgr.MarkStepComplete(scanState, "xss_scanning")
 	}
 
@@ -1027,20 +1081,21 @@ step2:
 
 // collectParamURLsFromFile filters a single URL file for parameterized URLs
 // (URLs containing ?key=value). Used to extract XSS candidates from all_urls_live.txt.
-func collectParamURLsFromFile(inputFile, outputFile string) {
+func collectParamURLsFromFile(inputFile, outputFile string) int {
 	file, err := os.Open(inputFile)
 	if err != nil {
-		return
+		return 0
 	}
 	defer file.Close()
 
 	seen := make(map[string]bool)
 	f, err := os.Create(outputFile)
 	if err != nil {
-		return
+		return 0
 	}
 	defer f.Close()
 
+	count := 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1049,9 +1104,11 @@ func collectParamURLsFromFile(inputFile, outputFile string) {
 			if !seen[line] {
 				seen[line] = true
 				fmt.Fprintln(f, line)
+				count++
 			}
 		}
 	}
+	return count
 }
 
 // copyFile copies a file from src to dst
@@ -1159,6 +1216,8 @@ func finalizeScan(scanID int64, status string, stateMgr *scan.Manager, state *sc
 var ErrToolSkipped = fmt.Errorf("tool skipped by user")
 
 func runWithSkip(ctx context.Context, toolName string, fn func(ctx context.Context) error) error {
+	drainSkipSignal()
+
 	// Create a child context that we can cancel independently
 	toolCtx, toolCancel := context.WithCancel(ctx)
 	defer toolCancel()
@@ -1183,5 +1242,25 @@ func runWithSkip(ctx context.Context, toolName string, fn func(ctx context.Conte
 		toolCancel()
 		<-done
 		return ctx.Err()
+	}
+}
+
+func existingFiles(paths ...string) []string {
+	files := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if path != "" && utils.FileExists(path) {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
+func drainSkipSignal() {
+	for {
+		select {
+		case <-skipToolChan:
+		default:
+			return
+		}
 	}
 }

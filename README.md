@@ -13,7 +13,7 @@ A modular CLI pentesting framework for bug bounty reconnaissance and vulnerabili
 
 ## What It Does
 
-Chaathan runs a **22-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
+Chaathan runs a **21-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
 
 ## Install
 
@@ -38,7 +38,7 @@ make setup          # Install all external tools
 # Install tools (first time)
 chaathan setup
 
-# Run full 22-step domain recon
+# Run full 21-step domain recon
 chaathan wildcard -d target.com
 
 # Run company/org discovery
@@ -58,7 +58,7 @@ chaathan report generate 1 --format html
 
 ## Workflows
 
-### Wildcard Scan (22 Steps)
+### Wildcard Scan (21 Steps)
 
 ```bash
 chaathan wildcard -d target.com
@@ -72,22 +72,21 @@ chaathan wildcard -d target.com
 | 4 | github-subdomains | GitHub scraping for subdomains | needs `--github-token` |
 | 5 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
 | 6 | DNSx | Consolidation + DNS resolution | — |
-| 7 | Alterx → DNSx | Smart subdomain permutation | — |
-| 8 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
-| 9 | Httpx | HTTP probing + tech detection | — |
-| 10 | tlsx | TLS cert analysis + SAN extraction | `--skip-tlsx` |
-| 11 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
-| 12 | Katana, GoSpider | Web crawling | `--skip-crawl` |
-| 13 | LinkFinder | JavaScript endpoint extraction | — |
-| 14 | SubDomainizer | JS-based subdomain extraction | `--skip-subdomainizer` |
-| 15 | Arjun | HTTP parameter discovery | `--skip-arjun` |
-| 16 | Httpx | URL consolidation + live check | — |
-| 17 | CeWL | Custom wordlist generation | — |
-| 18 | ffuf | Directory fuzzing | needs `--wordlist` |
-| 19 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
-| 20 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
-| 21 | Subjack | Subdomain takeover detection | `--skip-subjack` |
-| 22 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
+| 7 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
+| 8 | Httpx | HTTP probing + tech detection | — |
+| 9 | tlsx | TLS cert analysis + SAN extraction | `--skip-tlsx` |
+| 10 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
+| 11 | Katana, GoSpider | Web crawling | `--skip-crawl` |
+| 12 | LinkFinder | JavaScript endpoint extraction | — |
+| 13 | SubDomainizer | JS-based subdomain extraction | `--skip-subdomainizer` |
+| 14 | Arjun | HTTP parameter discovery | `--skip-arjun` |
+| 15 | Httpx | URL consolidation + live check | — |
+| 16 | CeWL | Custom wordlist generation | — |
+| 17 | ffuf | Directory fuzzing | needs `--wordlist` |
+| 18 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
+| 19 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
+| 20 | Subjack | Subdomain takeover detection | `--skip-subjack` |
+| 21 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
 
 **Fast scan** (skip heavy tools):
 ```bash
@@ -117,7 +116,7 @@ chaathan company -n "Company Inc"
 
 | Command | What It Does |
 |---------|-------------|
-| `chaathan wildcard -d <domain>` | Run the 22-step domain recon workflow |
+| `chaathan wildcard -d <domain>` | Run the 21-step domain recon workflow |
 | `chaathan company -n <name>` | Run the 3-step company discovery workflow |
 | `chaathan status` | Dashboard — recent scans, progress, stats |
 | `chaathan tools list` | List all 28+ tools with categories |
@@ -228,7 +227,7 @@ Subdomain takeover findings trigger immediate notifications.
 
 | Category | Tools |
 |----------|-------|
-| **Subdomain Discovery** | subfinder, assetfinder, sublist3r, amass, alterx, subdomainizer |
+| **Subdomain Discovery** | subfinder, assetfinder, sublist3r, amass, subdomainizer |
 | **DNS** | dnsx, shuffledns, massdns |
 | **Web Probing** | httpx, tlsx |
 | **Port Scanning** | naabu |
@@ -268,7 +267,6 @@ chaathan setup          # install everything
 │       ├── nuclei_vulns.json
 │       ├── subjack_takeovers.txt
 │       ├── dalfox_xss.json
-│       ├── alterx_permutations.txt
 │       ├── uncover.json
 │       ├── SUMMARY.txt
 │       └── REPORT.md
@@ -312,7 +310,7 @@ chaathan-flow/
 ├── Makefile
 ├── cli/
 │   ├── root.go              # CLI setup, global flags
-│   ├── wildcard.go          # 22-step recon workflow
+│   ├── wildcard.go          # 21-step recon workflow
 │   ├── company.go           # 3-step company/org workflow
 │   ├── setup.go             # Tool installation + logging
 │   ├── scans.go             # Scan management

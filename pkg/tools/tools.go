@@ -316,6 +316,17 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 	return err
 }
 
+func (t *ToolBox) RunCewl(ctx context.Context, url string, outputFile string) error {
+	args := []string{
+		url,
+		"-w", outputFile,
+		"--lowercase",
+		"--with-numbers",
+	}
+	_, err := t.Runner.Run(ctx, "cewl", args)
+	return err
+}
+
 // --- Vulnerability Scanning ---
 
 func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile string) error {
@@ -461,7 +472,6 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 	return err
 }
 
-
 // --- GitHub Reconnaissance ---
 
 // RunGithubEndpoints searches GitHub for exposed endpoints/secrets
@@ -484,16 +494,6 @@ func (t *ToolBox) RunGithubSubdomains(ctx context.Context, domain string, github
 	}
 	args := []string{"-d", domain, "-t", githubToken, "-o", outputFile}
 	_, err := t.Runner.Run(ctx, "github-subdomains", args)
-	return err
-}
-
-// --- Subdomain Permutation ---
-
-// RunAlterx generates smart subdomain permutations from discovered subdomains.
-// Takes an input file of known subdomains and outputs permutation candidates.
-func (t *ToolBox) RunAlterx(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-l", inputFile, "-o", outputFile, "-en"}
-	_, err := t.Runner.Run(ctx, "alterx", args)
 	return err
 }
 
