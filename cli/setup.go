@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -129,6 +130,7 @@ var goTools = []struct {
 	{"metabigor", "github.com/j3ssie/metabigor@latest"},
 	{"shuffledns", "github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest"},
 	{"anew", "github.com/tomnomnom/anew@latest"},
+	{"gf", "github.com/tomnomnom/gf@latest"},
 	{"dnsx", "github.com/projectdiscovery/dnsx/cmd/dnsx@latest"},
 	{"katana", "github.com/projectdiscovery/katana/cmd/katana@latest"},
 	{"ffuf", "github.com/ffuf/ffuf/v2@latest"},
@@ -145,11 +147,12 @@ var pyTools = []struct {
 	name     string
 	package_ string
 	cmdName  string
+	module   string
 }{
-	{"cloud_enum", "git+https://github.com/initstring/cloud_enum.git", "cloud_enum.py"},
-	{"sublist3r", "git+https://github.com/aboul3la/Sublist3r.git", "sublist3r.py"},
-	{"linkfinder", "git+https://github.com/GerbenJavado/LinkFinder.git", "linkfinder.py"},
-	{"arjun", "arjun", "arjun"},
+	{"cloud_enum", "git+https://github.com/initstring/cloud_enum.git", "cloud_enum.py", "cloud_enum"},
+	{"sublist3r", "git+https://github.com/aboul3la/Sublist3r.git", "sublist3r.py", "sublist3r"},
+	{"linkfinder", "git+https://github.com/GerbenJavado/LinkFinder.git", "linkfinder.py", "linkfinder"},
+	{"arjun", "arjun", "arjun", "arjun"},
 }
 
 // Python scripts that need manual installation (not available via pip)
@@ -160,7 +163,6 @@ var pyScripts = []struct {
 }{
 	{"subdomainizer", "https://github.com/nsonaniya2010/SubDomainizer.git", "SubDomainizer.py"},
 }
-
 
 // ── Main setup entrypoint ────────────────────────────────────────────────────
 
@@ -187,6 +189,12 @@ func runSetup(cmd *cobra.Command, args []string) {
 
 	// Go tools
 	i, s, f := installGoToolsSection()
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
+	// gf patterns
+	i, s, f = installGFPatternsSection()
 	totalInstalled += int32(i)
 	totalSkipped += int32(s)
 	totalFailed += int32(f)
@@ -352,6 +360,111 @@ func installGoTool(name, url string) error {
 	return captureCommandOutput(cmd, name)
 }
 
+func installGFPatternsSection() (installed, skipped, failed int) {
+	progress.Section("gf Patterns", "installing local pattern pack for step 19 URL filtering")
+
+	if _, err := exec.LookPath("gf"); err != nil {
+		progress.ItemInfo("gf binary not installed yet — skipping pattern install")
+		return 0, 1, 0
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		progress.ItemFail("gf patterns", "cannot determine home directory")
+		return 0, 0, 1
+	}
+
+	gfDir := filepath.Join(home, ".gf")
+	if err := os.MkdirAll(gfDir, 0755); err != nil {
+		progress.ItemFail("gf patterns", err.Error())
+		return 0, 0, 1
+	}
+
+	patterns := map[string]map[string][]string{
+		"ssrf": {
+			"flags": {"-iE"},
+			"patterns": {
+				`([?&](url|uri|path|dest|destination|redirect|redirect_uri|redir|return|return_url|next|data|site|domain|feed|host|port|to|out|view|continue|callback|reference)=)`,
+			},
+		},
+		"redirect": {
+			"flags": {"-iE"},
+			"patterns": {
+				`([?&](redirect|redirect_url|redirect_uri|redir|return|return_to|return_url|next|continue|dest|destination|callback)=)`,
+			},
+		},
+		"lfi": {
+			"flags": {"-iE"},
+			"patterns": {
+				`([?&](file|filename|filepath|path|page|include|template|doc|folder|root|pg)=)`,
+			},
+		},
+		"sqli": {
+			"flags": {"-iE"},
+			"patterns": {
+				`([?&](id|ids|user|user_id|uid|account|number|order|sort|group|search|query|filter|report|category|item|product)=)`,
+			},
+		},
+		"xss": {
+			"flags": {"-iE"},
+			"patterns": {
+				`([?&](q|query|search|s|lang|keyword|term|text|message|comment|redirect|url|next|return)=)`,
+			},
+		},
+		"rce": {
+			"flags": {"-iE"},
+			"patterns": {
+				`([?&](cmd|exec|command|execute|ping|query|code|do|daemon|process|upload|download)=)`,
+			},
+		},
+		"idor": {
+			"flags": {"-iE"},
+			"patterns": {
+				`(/(users|user|accounts|orders|order|projects|project|files|file|documents|document|invoices|invoice|tickets|ticket|profiles|profile|messages|message|payments|payment|api)/[^/?#]+)`,
+				`([?&](id|user_id|account_id|order_id|project_id|file_id|doc_id|invoice_id|ticket_id|profile_id|message_id|payment_id|uid)=)`,
+			},
+		},
+		"debug_logic": {
+			"flags": {"-iE"},
+			"patterns": {
+				`(/(debug|test|staging|dev|console|actuator|swagger|openapi|internal|admin|config|health|metrics))`,
+			},
+		},
+	}
+
+	installedCount := 0
+	skippedCount := 0
+	for name, pattern := range patterns {
+		path := filepath.Join(gfDir, name+".json")
+		if _, err := os.Stat(path); err == nil {
+			skippedCount++
+			continue
+		}
+
+		data, err := json.MarshalIndent(pattern, "", "  ")
+		if err != nil {
+			progress.ItemFail(name, "failed to marshal pattern")
+			failed++
+			continue
+		}
+		if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil {
+			progress.ItemFail(name, err.Error())
+			failed++
+			continue
+		}
+		installedCount++
+	}
+
+	if installedCount > 0 {
+		progress.ItemOK(fmt.Sprintf("%d gf patterns installed", installedCount))
+	}
+	if installedCount == 0 && failed == 0 {
+		progress.ItemInfo("gf pattern pack already present")
+	}
+
+	return installedCount, skippedCount, failed
+}
+
 // ── Python Tools ─────────────────────────────────────────────────────────────
 
 func installPythonToolsSection() (installed, skipped, failed int) {
@@ -367,16 +480,17 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 
 	// Filter
 	type pyTool struct {
-		name, pkg, cmd string
+		name, pkg, cmd, module string
 	}
 	var toInstall []pyTool
 	var skippedCount int
 	for _, t := range pyTools {
-		if _, err := exec.LookPath(t.cmdName); err == nil {
+		if pythonToolInstalled(t.name, t.cmdName, t.module) {
+			_ = ensurePythonToolShim(t.name, t.module)
 			skippedCount++
 			continue
 		}
-		toInstall = append(toInstall, pyTool{t.name, t.package_, t.cmdName})
+		toInstall = append(toInstall, pyTool{t.name, t.package_, t.cmdName, t.module})
 	}
 
 	// Also count scripts
@@ -420,6 +534,8 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 
 			cmd := exec.Command(pip, "install", "--break-system-packages", tool.pkg)
 			if err := captureCommandOutput(cmd, tool.name); err != nil {
+				tracker.Fail(tool.name, err.Error())
+			} else if err := ensurePythonToolShim(tool.name, tool.module); err != nil {
 				tracker.Fail(tool.name, err.Error())
 			} else {
 				tracker.Complete(tool.name)
@@ -474,6 +590,54 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 
 	i, _, f := tracker.Stats()
 	return i, skippedCount, f
+}
+
+func pythonToolInstalled(name, cmdName, module string) bool {
+	if _, err := exec.LookPath(name); err == nil {
+		return true
+	}
+	if cmdName != "" {
+		if _, err := exec.LookPath(cmdName); err == nil {
+			return true
+		}
+	}
+	if module != "" && pythonModuleInstalled(module) {
+		return true
+	}
+	return false
+}
+
+func pythonModuleInstalled(module string) bool {
+	if module == "" {
+		return false
+	}
+	cmd := exec.Command("python3", "-c", "import "+module)
+	return cmd.Run() == nil
+}
+
+func ensurePythonToolShim(name, module string) error {
+	if name == "" || module == "" {
+		return nil
+	}
+	if _, err := exec.LookPath(name); err == nil {
+		return nil
+	}
+	if !pythonModuleInstalled(module) {
+		return fmt.Errorf("%s module is not importable after install", module)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return err
+	}
+
+	shimPath := filepath.Join(binDir, name)
+	shim := fmt.Sprintf("#!/usr/bin/env bash\npython3 -m %s \"$@\"\n", module)
+	return os.WriteFile(shimPath, []byte(shim), 0755)
 }
 
 // ── MassDNS ──────────────────────────────────────────────────────────────────

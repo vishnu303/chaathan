@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -127,6 +129,14 @@ func (t *ToolBox) nucleiSeverity() []string {
 		return t.Config.Nuclei.Severity
 	}
 	return nil // default: all severities
+}
+
+func (t *ToolBox) nucleiInfraTags() []string {
+	return []string{"cves", "exposures", "misconfiguration", "takeovers", "ssl"}
+}
+
+func (t *ToolBox) nucleiURLTags() []string {
+	return []string{"xss", "sqli", "ssrf", "lfi", "rce", "redirect", "exposures"}
 }
 
 func (t *ToolBox) ffufThreads() int {
@@ -334,6 +344,7 @@ func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile 
 		"-l", targetsFile,
 		"-c", strconv.Itoa(t.nucleiConcurrency()),
 		"-rl", strconv.Itoa(t.nucleiRateLimit()),
+		"-tags", strings.Join(t.nucleiInfraTags(), ","),
 		"-jsonl",
 		"-o", outputFile,
 	}
@@ -457,6 +468,7 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 		"-l", urlsFile,
 		"-c", strconv.Itoa(concurrency),
 		"-rl", strconv.Itoa(rateLimit),
+		"-tags", strings.Join(t.nucleiURLTags(), ","),
 		"-severity", "critical,high,medium",
 		"-jsonl",
 		"-o", outputFile,
@@ -470,6 +482,32 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 
 	_, err := t.Runner.Run(ctx, "nuclei", args)
 	return err
+}
+
+// RunGFPattern filters an input file with a single gf pattern and writes matches.
+func (t *ToolBox) RunGFPattern(ctx context.Context, pattern string, inputFile string, outputFile string) error {
+	if pattern == "" {
+		return fmt.Errorf("gf requires a pattern name")
+	}
+	if inputFile == "" {
+		return fmt.Errorf("gf requires an input file")
+	}
+
+	// gf is a local text-filtering utility that depends on the host's ~/.gf pattern pack.
+	// Run it natively so it works even when the main scan runner is in docker mode.
+	cmd := exec.CommandContext(ctx, "gf", pattern, inputFile)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if stderr.Len() > 0 {
+			return fmt.Errorf("%v: %s", err, stderr.String())
+		}
+		return err
+	}
+	return writeToFile(outputFile, stdout.String())
 }
 
 // --- GitHub Reconnaissance ---

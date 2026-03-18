@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -265,6 +266,7 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	dnsxOut := filepath.Join(resultDir, "dnsx_resolved.json")
 	shufflednsOut := filepath.Join(resultDir, "shuffledns_bruteforce.txt")
 	httpxOut := filepath.Join(resultDir, "httpx_live.json")
+	httpxLiveHosts := filepath.Join(resultDir, "httpx_live_hosts.txt")
 	tlsxOut := filepath.Join(resultDir, "tlsx_certs.json")
 	naabuOut := filepath.Join(resultDir, "naabu_ports.txt")
 	katanaOut := filepath.Join(resultDir, "katana_urls.txt")
@@ -278,6 +280,9 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	ffufOut := filepath.Join(resultDir, "ffuf_results.json")
 	nucleiOut := filepath.Join(resultDir, "nuclei_vulns.json")
 	nucleiURLOut := filepath.Join(resultDir, "nuclei_url_vulns.json")
+	nucleiURLTargets := filepath.Join(resultDir, "nuclei_url_targets.txt")
+	nucleiGFMatches := filepath.Join(resultDir, "nuclei_url_targets_gf.txt")
+	nucleiFallbackTargets := filepath.Join(resultDir, "nuclei_url_targets_fallback.txt")
 	subjackOut := filepath.Join(resultDir, "subjack_takeovers.txt")
 	paramURLsFile := filepath.Join(resultDir, "param_urls_live.txt")
 	dalfoxOut := filepath.Join(resultDir, "dalfox_xss.json")
@@ -441,6 +446,7 @@ step2:
 		logger.Section("Step 4: GitHub Subdomain Discovery")
 		logger.SubStep("Running github-subdomains...")
 		if err := tb.RunGithubSubdomains(ctx, targetDomain, githubToken, githubSubsOut); err != nil {
+			stateMgr.MarkStepFailed(scanState, "github_recon", err)
 			logger.Warning("GitHub subdomains failed: %v", err)
 		} else {
 			if scanID > 0 {
@@ -469,9 +475,8 @@ step2:
 		logger.Section("Step 5: Passive Search Engine Recon (Uncover)")
 		logger.SubStep("Running Uncover (Shodan/Censys/Fofa)...")
 		if err := tb.RunUncover(ctx, targetDomain, uncoverOut); err != nil {
-			if Verbose {
-				logger.Warning("Uncover failed: %v (check API keys in config)", err)
-			}
+			stateMgr.MarkStepFailed(scanState, "search_engine_recon", err)
+			logger.Warning("Uncover failed: %v (check API keys in config)", err)
 		} else {
 			if scanID > 0 {
 				subs, ports, _ := utils.ParseUncoverOutput(scanID, uncoverOut)
@@ -505,6 +510,7 @@ step2:
 			subdomainizerOut,
 		)
 		if err := utils.MergeAndDeduplicate(passiveSources, consolidatedSubs); err != nil {
+			stateMgr.MarkStepFailed(scanState, "consolidation", err)
 			logger.Error("Failed to consolidate: %v", err)
 		}
 		logger.Success("Consolidated list saved to %s", consolidatedSubs)
@@ -513,6 +519,7 @@ step2:
 		// DNS Resolution
 		logger.SubStep("Running DNSx for resolution...")
 		if err := tb.RunDnsx(ctx, consolidatedSubs, dnsxOut); err != nil {
+			stateMgr.MarkStepFailed(scanState, "dns_resolution", err)
 			logger.Error("DNSx failed: %v", err)
 		}
 		stateMgr.MarkStepComplete(scanState, "dns_resolution")
@@ -536,7 +543,8 @@ step2:
 		}); err != nil {
 			if err == ErrToolSkipped {
 				logger.Info("  ShuffleDNS skipped")
-			} else if Verbose {
+			} else {
+				stateMgr.MarkStepFailed(scanState, "dns_bruteforce", err)
 				logger.Warning("ShuffleDNS failed: %v", err)
 			}
 		} else {
@@ -574,6 +582,7 @@ step2:
 		logger.Section("Step 8: Live Web Server Probing")
 		logger.SubStep("Running Httpx...")
 		if err := tb.RunHttpx(ctx, consolidatedSubs, httpxOut); err != nil {
+			stateMgr.MarkStepFailed(scanState, "http_probing", err)
 			logger.Error("Httpx failed: %v", err)
 		} else {
 			if scanID > 0 {
@@ -598,9 +607,8 @@ step2:
 		logger.Section("Step 9: TLS Certificate Analysis (tlsx)")
 		logger.SubStep("Running tlsx — extracting SANs and checking cert issues...")
 		if err := tb.RunTlsx(ctx, consolidatedSubs, tlsxOut); err != nil {
-			if Verbose {
-				logger.Warning("tlsx failed: %v", err)
-			}
+			stateMgr.MarkStepFailed(scanState, "tls_analysis", err)
+			logger.Warning("tlsx failed: %v", err)
 		} else {
 			if scanID > 0 {
 				newSubs, certVulns, _ := utils.ParseTlsxOutput(scanID, tlsxOut, targetDomain)
@@ -632,6 +640,7 @@ step2:
 		logger.Section("Step 10: Port Scanning")
 		logger.SubStep("Running Naabu on all discovered subdomains...")
 		if err := tb.RunNaabuList(ctx, consolidatedSubs, naabuOut); err != nil {
+			stateMgr.MarkStepFailed(scanState, "port_scanning", err)
 			logger.Error("Naabu failed: %v", err)
 		} else {
 			if scanID > 0 {
@@ -657,12 +666,17 @@ step2:
 		logger.Section("Step 11: Web Crawling [RESUMED — skipping]")
 	} else if !skipCrawl {
 		logger.Section("Step 11: Web Crawling")
+		crawlFailed := false
+		var crawlFailMu sync.Mutex
 
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Katana")
 			if err := tb.RunKatana(ctx, "https://"+targetDomain, katanaOut); err != nil {
+				crawlFailMu.Lock()
+				crawlFailed = true
+				crawlFailMu.Unlock()
 				logger.Warning("Katana failed: %v", err)
 			} else {
 				logger.SubStep("[Done] Katana")
@@ -677,6 +691,9 @@ step2:
 			defer wg.Done()
 			logger.SubStep("[Start] GoSpider")
 			if err := tb.RunGoSpider(ctx, "https://"+targetDomain, gospiderOut); err != nil {
+				crawlFailMu.Lock()
+				crawlFailed = true
+				crawlFailMu.Unlock()
 				logger.Warning("GoSpider failed: %v", err)
 			} else {
 				logger.SubStep("[Done] GoSpider")
@@ -688,6 +705,9 @@ step2:
 		}()
 
 		wg.Wait()
+		if crawlFailed {
+			stateMgr.MarkStepFailed(scanState, "web_crawling", fmt.Errorf("one or more crawlers failed"))
+		}
 		stateMgr.MarkStepComplete(scanState, "web_crawling")
 	} else {
 		logger.Section("Step 11: Skipping Web Crawling (--skip-crawl)")
@@ -708,9 +728,8 @@ step2:
 		logger.Section("Step 12: JavaScript Analysis")
 		logger.SubStep("Running Linkfinder...")
 		if err := tb.RunLinkfinder(ctx, "https://"+targetDomain, linkfinderOut); err != nil {
-			if Verbose {
-				logger.Warning("Linkfinder failed: %v", err)
-			}
+			stateMgr.MarkStepFailed(scanState, "js_analysis", err)
+			logger.Warning("Linkfinder failed: %v", err)
 		} else {
 			if scanID > 0 {
 				count, _ := utils.ParseEndpointsFile(scanID, linkfinderOut, "linkfinder")
@@ -733,7 +752,8 @@ step2:
 		}); err != nil {
 			if err == ErrToolSkipped {
 				logger.Info("  SubDomainizer skipped")
-			} else if Verbose {
+			} else {
+				stateMgr.MarkStepFailed(scanState, "js_subdomain_discovery", err)
 				logger.Warning("SubDomainizer failed: %v", err)
 			}
 		} else {
@@ -774,9 +794,8 @@ step2:
 			return tb.RunArjun(sCtx, "https://"+targetDomain, arjunOut)
 		}); err != nil {
 			if err != ErrToolSkipped {
-				if Verbose {
-					logger.Warning("Arjun failed: %v", err)
-				}
+				stateMgr.MarkStepFailed(scanState, "param_discovery", err)
+				logger.Warning("Arjun failed: %v", err)
 			}
 		} else {
 			logger.SubStep("[Done] Arjun parameter discovery")
@@ -802,6 +821,7 @@ step2:
 
 	logger.SubStep("Merging URLs from %d sources...", len(urlSources))
 	if err := utils.MergeAndDeduplicate(urlSources, allURLsRaw); err != nil {
+		stateMgr.MarkStepFailed(scanState, "url_consolidation", err)
 		logger.Warning("URL merge failed: %v", err)
 	} else {
 		rawCount, _ := utils.CountFileLines(allURLsRaw)
@@ -814,6 +834,7 @@ step2:
 		return tb.RunHttpxURLCheck(sCtx, allURLsRaw, allURLsLive)
 	}); err != nil {
 		if err != ErrToolSkipped {
+			stateMgr.MarkStepFailed(scanState, "url_consolidation", err)
 			logger.Warning("URL live-check failed: %v", err)
 		}
 		// Fallback: use raw URLs if live-check fails
@@ -854,7 +875,8 @@ step16:
 		}); err != nil {
 			if err == ErrToolSkipped {
 				logger.Info("  CeWL skipped")
-			} else if Verbose {
+			} else {
+				stateMgr.MarkStepFailed(scanState, "wordlist_generation", err)
 				logger.Warning("CeWL failed: %v", err)
 			}
 		} else if utils.FileExists(generatedWordlistOut) {
@@ -886,6 +908,7 @@ step17:
 		targetURL := fmt.Sprintf("https://%s/FUZZ", targetDomain)
 		logger.SubStep("Running ffuf with wordlist: %s", effectiveWordlist)
 		if err := tb.RunFfufWithFUZZ(ctx, targetURL, effectiveWordlist, ffufOut); err != nil {
+			stateMgr.MarkStepFailed(scanState, "dir_fuzzing", err)
 			logger.Warning("ffuf failed: %v", err)
 		} else {
 			logger.SubStep("[Done] ffuf - Results: %s", ffufOut)
@@ -910,35 +933,41 @@ step18:
 		logger.Section("Step 18: Vulnerability Scanning — Infra (Nuclei) [RESUMED — skipping]")
 	} else if !skipNuclei {
 		logger.Section("Step 18: Vulnerability Scanning — Infra (Nuclei)")
-		logger.SubStep("Running Nuclei on discovered subdomains...")
-		if err := runWithSkip(ctx, "nuclei (infra)", func(sCtx context.Context) error {
-			return tb.RunNuclei(sCtx, consolidatedSubs, nucleiOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				logger.Info("  Nuclei infra scan skipped")
-			} else {
-				logger.Error("Nuclei failed: %v", err)
-			}
+		liveHostCount := collectLiveHostTargetsFromHttpx(httpxOut, httpxLiveHosts)
+		if liveHostCount == 0 {
+			logger.Info("  Skipping Nuclei infra scan (no live httpx hosts available)")
 		} else {
-			if scanID > 0 {
-				count, _ := utils.ParseNucleiOutput(scanID, nucleiOut)
-				logger.Info("  Found %d vulnerabilities", count)
+			logger.SubStep("Running Nuclei on %d live httpx hosts...", liveHostCount)
+			if err := runWithSkip(ctx, "nuclei (infra)", func(sCtx context.Context) error {
+				return tb.RunNuclei(sCtx, httpxLiveHosts, nucleiOut)
+			}); err != nil {
+				if err == ErrToolSkipped {
+					logger.Info("  Nuclei infra scan skipped")
+				} else {
+					stateMgr.MarkStepFailed(scanState, "vuln_scanning", err)
+					logger.Error("Nuclei failed: %v", err)
+				}
+			} else {
+				if scanID > 0 {
+					count, _ := utils.ParseNucleiOutput(scanID, nucleiOut)
+					logger.Info("  Found %d vulnerabilities", count)
 
-				// Send notifications for critical/high findings
-				if notifier != nil && count > 0 {
-					vulns, _ := database.GetVulnerabilities(scanID)
-					for _, v := range vulns {
-						if v.Severity == "critical" || v.Severity == "high" {
-							notifier.SendFinding(notify.Finding{
-								Target:      targetDomain,
-								Type:        "vulnerability",
-								Name:        v.Name,
-								Severity:    v.Severity,
-								Description: v.Description,
-								URL:         v.URL,
-								TemplateID:  v.TemplateID,
-								Timestamp:   time.Now(),
-							})
+					// Send notifications for critical/high findings
+					if notifier != nil && count > 0 {
+						vulns, _ := database.GetVulnerabilities(scanID)
+						for _, v := range vulns {
+							if v.Severity == "critical" || v.Severity == "high" {
+								notifier.SendFinding(notify.Finding{
+									Target:      targetDomain,
+									Type:        "vulnerability",
+									Name:        v.Name,
+									Severity:    v.Severity,
+									Description: v.Description,
+									URL:         v.URL,
+									TemplateID:  v.TemplateID,
+									Timestamp:   time.Now(),
+								})
+							}
 						}
 					}
 				}
@@ -961,19 +990,45 @@ step18:
 		logger.Section("Step 19: Vulnerability Scanning — URLs (Nuclei) [RESUMED — skipping]")
 	} else if !skipNuclei && utils.FileExists(allURLsLive) {
 		logger.Section("Step 19: Vulnerability Scanning — URLs (Nuclei)")
-		logger.SubStep("Running Nuclei on live URLs (stricter rate, medium+ severity)...")
-		if err := runWithSkip(ctx, "nuclei (URLs)", func(sCtx context.Context) error {
-			return tb.RunNucleiURLs(sCtx, allURLsLive, nucleiURLOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				logger.Info("  Nuclei URL scan skipped")
-			} else if Verbose {
-				logger.Warning("Nuclei URL scan failed: %v", err)
+		gfCount := 0
+		if isGFUsable() {
+			logger.SubStep("Filtering live URLs with gf patterns before nuclei...")
+			gfCount = collectGFTargetURLs(ctx, tb, allURLsLive, nucleiGFMatches)
+			if gfCount > 0 {
+				logger.Info("  gf matched %d URLs across vulnerability patterns", gfCount)
+			} else {
+				logger.Info("  gf found no matches or no usable patterns; keeping fallback filter active")
 			}
 		} else {
-			if scanID > 0 {
-				count, _ := utils.ParseNucleiOutput(scanID, nucleiURLOut)
-				logger.Info("  Found %d URL-specific vulnerabilities", count)
+			logger.Info("  gf not available or pattern pack missing; using fallback URL filter")
+		}
+
+		fallbackCount := collectHighValueURLsFromFile(allURLsLive, nucleiFallbackTargets)
+		urlTargetCount := 0
+		if err := utils.MergeAndDeduplicate(existingFiles(nucleiGFMatches, nucleiFallbackTargets), nucleiURLTargets); err == nil {
+			urlTargetCount, _ = utils.CountFileLines(nucleiURLTargets)
+		}
+		if urlTargetCount == 0 {
+			logger.Info("  Skipping Nuclei URL scan (no parameterized or high-value URLs available)")
+		} else {
+			logger.SubStep("Running Nuclei on %d filtered URLs (gf + fallback high-value paths)...", urlTargetCount)
+			if fallbackCount > 0 {
+				logger.Info("  Fallback filter contributed %d parameterized/high-value URLs", fallbackCount)
+			}
+			if err := runWithSkip(ctx, "nuclei (URLs)", func(sCtx context.Context) error {
+				return tb.RunNucleiURLs(sCtx, nucleiURLTargets, nucleiURLOut)
+			}); err != nil {
+				if err == ErrToolSkipped {
+					logger.Info("  Nuclei URL scan skipped")
+				} else {
+					stateMgr.MarkStepFailed(scanState, "vuln_scanning_urls", err)
+					logger.Warning("Nuclei URL scan failed: %v", err)
+				}
+			} else {
+				if scanID > 0 {
+					count, _ := utils.ParseNucleiOutput(scanID, nucleiURLOut)
+					logger.Info("  Found %d URL-specific vulnerabilities", count)
+				}
 			}
 		}
 	} else if skipNuclei {
@@ -997,9 +1052,8 @@ step18:
 		logger.Section("Step 20: Subdomain Takeover Detection (Subjack)")
 		logger.SubStep("Running Subjack — checking for dangling CNAMEs...")
 		if err := tb.RunSubjack(ctx, consolidatedSubs, subjackOut); err != nil {
-			if Verbose {
-				logger.Warning("Subjack failed: %v", err)
-			}
+			stateMgr.MarkStepFailed(scanState, "takeover_detection", err)
+			logger.Warning("Subjack failed: %v", err)
 		} else {
 			if scanID > 0 {
 				count, _ := utils.ParseSubjackOutput(scanID, subjackOut)
@@ -1051,7 +1105,8 @@ step18:
 			}); err != nil {
 				if err == ErrToolSkipped {
 					logger.Info("  Dalfox skipped")
-				} else if Verbose {
+				} else {
+					stateMgr.MarkStepFailed(scanState, "xss_scanning", err)
 					logger.Warning("Dalfox failed: %v", err)
 				}
 			} else {
@@ -1109,6 +1164,174 @@ func collectParamURLsFromFile(inputFile, outputFile string) int {
 		}
 	}
 	return count
+}
+
+func collectLiveHostTargetsFromHttpx(inputFile, outputFile string) int {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	type httpxTarget struct {
+		URL string `json:"url"`
+	}
+
+	seen := make(map[string]bool)
+	count := 0
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var result httpxTarget
+		if err := json.Unmarshal([]byte(line), &result); err != nil {
+			continue
+		}
+		if result.URL == "" || seen[result.URL] {
+			continue
+		}
+
+		seen[result.URL] = true
+		fmt.Fprintln(f, result.URL)
+		count++
+	}
+
+	return count
+}
+
+func collectHighValueURLsFromFile(inputFile, outputFile string) int {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	seen := make(map[string]bool)
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || seen[line] {
+			continue
+		}
+		if !isHighValueURL(line) {
+			continue
+		}
+
+		seen[line] = true
+		fmt.Fprintln(f, line)
+		count++
+	}
+
+	return count
+}
+
+func collectGFTargetURLs(ctx context.Context, tb *tools.ToolBox, inputFile, outputFile string) int {
+	patterns := []string{"ssrf", "redirect", "lfi", "sqli", "xss", "rce", "idor", "debug_logic"}
+	tmpFiles := make([]string, 0, len(patterns))
+
+	for _, pattern := range patterns {
+		tmpFile := outputFile + "." + pattern
+		if err := tb.RunGFPattern(ctx, pattern, inputFile, tmpFile); err != nil {
+			continue
+		}
+		if utils.FileExists(tmpFile) {
+			tmpFiles = append(tmpFiles, tmpFile)
+		}
+	}
+
+	if len(tmpFiles) == 0 {
+		return 0
+	}
+
+	if err := utils.MergeAndDeduplicate(tmpFiles, outputFile); err != nil {
+		return 0
+	}
+	count, _ := utils.CountFileLines(outputFile)
+	return count
+}
+
+func isGFUsable() bool {
+	if _, err := exec.LookPath("gf"); err != nil {
+		return false
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+
+	gfDir := filepath.Join(home, ".gf")
+	if _, err := os.Stat(gfDir); err != nil {
+		return false
+	}
+
+	entries, err := os.ReadDir(gfDir)
+	if err != nil {
+		return false
+	}
+
+	return len(entries) > 0
+}
+
+func isHighValueURL(raw string) bool {
+	lower := strings.ToLower(raw)
+	if strings.Contains(lower, "?") && strings.Contains(lower, "=") {
+		return true
+	}
+
+	highValueMarkers := []string{
+		"/admin",
+		"/login",
+		"/signin",
+		"/signup",
+		"/auth",
+		"/oauth",
+		"/token",
+		"/graphql",
+		"/api",
+		"/v1/",
+		"/v2/",
+		"/rest/",
+		"/debug",
+		"/console",
+		"/actuator",
+		"/swagger",
+		"/openapi",
+		"/health",
+		"/metrics",
+		"/config",
+		"/upload",
+		"/callback",
+		"/redirect",
+		"/reset",
+		"/password",
+	}
+
+	for _, marker := range highValueMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // copyFile copies a file from src to dst
