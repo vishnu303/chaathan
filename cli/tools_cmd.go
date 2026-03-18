@@ -58,6 +58,7 @@ var allTools = []struct {
 
 	// Utility
 	{"anew", "Util", "Append unique lines to file", false},
+	{"gf", "Util", "Pattern-based URL/param filtering", false},
 }
 
 var toolsCmd = &cobra.Command{

@@ -130,6 +130,17 @@ func (m *Manager) UpdateState(state *State) error {
 
 // MarkStepComplete marks a step as completed
 func (m *Manager) MarkStepComplete(state *State, stepName string) error {
+	// Clear prior failure records if this step later succeeds or is explicitly skipped.
+	if len(state.FailedSteps) > 0 {
+		filtered := state.FailedSteps[:0]
+		for _, fs := range state.FailedSteps {
+			if fs.Name != stepName {
+				filtered = append(filtered, fs)
+			}
+		}
+		state.FailedSteps = filtered
+	}
+
 	// Avoid double-counting steps (common when resume/skip paths re-mark).
 	for _, s := range state.CompletedSteps {
 		if s == stepName {
