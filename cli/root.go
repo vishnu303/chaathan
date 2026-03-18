@@ -34,14 +34,14 @@ Chaathan is a powerful, modular CLI pentesting tool for comprehensive
 bug bounty reconnaissance and vulnerability scanning.
 
 Workflows:
-  - Wildcard Scan : 22-step domain recon & vuln assessment pipeline
+  - Wildcard Scan : 21-step domain recon & vuln assessment pipeline
   - Company Scan  : 3-step organization-level discovery (ASN, domains, cloud)
 
 Capabilities:
   - 28+ integrated tools (subfinder, nuclei, httpx, katana, and more)
-  - Passive & active subdomain enumeration
-  - DNS brute-force (ShuffleDNS) & smart permutation (Alterx)
-  - JavaScript subdomain extraction (SubDomainizer)
+  - Passive - Search Engine Dorking (Uncover, Shodan, Censys)
+  - DNS brute-force (ShuffleDNS)
+  - JavaScript analysis and endpoint extraction (LinkFinder, SubDomainizer)
   - Live host detection, TLS analysis & port scanning
   - Web crawling, JS analysis & parameter discovery
   - Vulnerability scanning (Nuclei) & XSS detection (Dalfox)
@@ -59,7 +59,7 @@ Modes:
 
 Quick Start:
   chaathan setup                     # Install all tools
-  chaathan wildcard -d target.com    # Run full 22-step recon
+  chaathan wildcard -d target.com    # Run full 21-step recon
   chaathan company -n "Company Inc"  # Run company discovery
   chaathan scans list                # View past scans
   chaathan report generate 1         # Generate report for scan #1
@@ -143,7 +143,7 @@ var versionCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("%s%sChaathan%s v2.0.0\n", logger.BrightCyan, logger.Bold, logger.Reset)
 		fmt.Printf("%sAdvanced Pentesting Recon Framework%s\n", logger.Dim, logger.Reset)
-		fmt.Printf("%s28+ tools • 22-step wildcard scan • 3-step company scan%s\n", logger.Dim, logger.Reset)
+		fmt.Printf("%s28+ tools • 21-step wildcard scan • 3-step company scan%s\n", logger.Dim, logger.Reset)
 		fmt.Printf("%shttps://github.com/vishnu303/chaathan-flow%s\n", logger.Dim, logger.Reset)
 	},
 }

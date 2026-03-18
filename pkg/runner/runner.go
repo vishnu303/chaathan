@@ -273,8 +273,7 @@ func getDockerImage(tool string) string {
 	case "github-subdomains":
 		return "gwen001/github-subdomains"
 	// Phase 3 tools
-	case "alterx":
-		return "projectdiscovery/alterx"
+
 	case "tlsx":
 		return "projectdiscovery/tlsx"
 	case "uncover":
@@ -297,7 +296,7 @@ func getDockerImage(tool string) string {
 func isEntrypointImage(tool string) bool {
 	switch tool {
 	case "amass", "nuclei", "httpx", "naabu", "subfinder", "dnsx", "katana", "ffuf", "cewl", "linkfinder",
-		"alterx", "tlsx", "uncover", "dalfox", "arjun", "shuffledns":
+		"tlsx", "uncover", "dalfox", "arjun", "shuffledns":
 		return true
 	default:
 		return false

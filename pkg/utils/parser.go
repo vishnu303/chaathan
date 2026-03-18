@@ -579,21 +579,4 @@ func ParseDalfoxOutput(scanID int64, filePath string) (int, error) {
 	return count, scanner.Err()
 }
 
-// ParseAlterxOutput reads the generated permutation list and counts entries.
-// The output is a plain text file (one subdomain per line) that gets fed into DNSx.
-func ParseAlterxOutput(filePath string) (int, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
 
-	count := 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) != "" {
-			count++
-		}
-	}
-	return count, scanner.Err()
-}

@@ -135,7 +135,6 @@ var goTools = []struct {
 	{"gospider", "github.com/jaeles-project/gospider@latest"},
 	{"waybackurls", "github.com/tomnomnom/waybackurls@latest"},
 	{"github-subdomains", "github.com/gwen001/github-subdomains@latest"},
-	{"alterx", "github.com/projectdiscovery/alterx/cmd/alterx@latest"},
 	{"subjack", "github.com/haccer/subjack@latest"},
 	{"dalfox", "github.com/hahwul/dalfox/v2@latest"},
 	{"tlsx", "github.com/projectdiscovery/tlsx/cmd/tlsx@latest"},
