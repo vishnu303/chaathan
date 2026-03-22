@@ -3,6 +3,8 @@ package utils
 import (
 	"bufio"
 	"encoding/json"
+	"net"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -173,6 +175,13 @@ type NaabuResult struct {
 	Port int    `json:"port"`
 }
 
+// FfufResult represents a single ffuf discovery item.
+type FfufResult struct {
+	Input map[string]string `json:"input"`
+	URL   string            `json:"url"`
+	Status int              `json:"status"`
+}
+
 // ParseNaabuOutput parses naabu output and stores in database
 func ParseNaabuOutput(scanID int64, filePath string) (int, error) {
 	file, err := os.Open(filePath)
@@ -280,6 +289,36 @@ func ParseURLsFile(scanID int64, filePath, source string) (int, error) {
 	}
 
 	return count, scanner.Err()
+}
+
+// ParseFfufOutput parses ffuf JSON output and stores discovered paths as both
+// URLs and endpoints so later ranking/reporting can use the fuzzing data.
+func ParseFfufOutput(scanID int64, filePath string) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	var payload struct {
+		Results []FfufResult `json:"results"`
+	}
+	if err := json.NewDecoder(file).Decode(&payload); err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, result := range payload.Results {
+		if strings.TrimSpace(result.URL) == "" {
+			continue
+		}
+
+		_ = database.AddURL(scanID, result.URL, result.Status, "", "", "", "ffuf")
+		_ = database.AddEndpoint(scanID, result.URL, "GET", "ffuf")
+		count++
+	}
+
+	return count, nil
 }
 
 func isHTTPMethod(s string) bool {
@@ -453,6 +492,18 @@ func ParseTlsxOutput(scanID int64, filePath string, targetDomain string) (newSub
 			)
 			vulns++
 		}
+
+		host := normalizeHostValue(result.Host)
+		if host != "" {
+			weakTLS := isWeakTLSVersion(result.TLSVersion)
+			_ = database.UpsertHostMetadata(scanID, database.HostMetadata{
+				Host:          host,
+				SSLExpired:    result.Expired,
+				SSLSelfSigned: result.SelfSigned,
+				SSLMismatch:   result.MisMatched,
+				WeakTLS:       weakTLS,
+			})
+		}
 	}
 
 	return newSubs, vulns, scanner.Err()
@@ -579,4 +630,30 @@ func ParseDalfoxOutput(scanID int64, filePath string) (int, error) {
 	return count, scanner.Err()
 }
 
+func normalizeHostValue(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
 
+	if strings.Contains(raw, "://") {
+		if parsed, err := neturl.Parse(raw); err == nil {
+			return strings.ToLower(parsed.Hostname())
+		}
+	}
+
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		return strings.ToLower(host)
+	}
+
+	return strings.ToLower(strings.Trim(raw, "[]"))
+}
+
+func isWeakTLSVersion(version string) bool {
+	version = strings.ToLower(strings.TrimSpace(version))
+	return strings.Contains(version, "tls10") ||
+		strings.Contains(version, "tls1.0") ||
+		strings.Contains(version, "tls11") ||
+		strings.Contains(version, "tls1.1") ||
+		strings.Contains(version, "ssl3")
+}

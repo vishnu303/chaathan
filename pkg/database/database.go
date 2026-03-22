@@ -154,6 +154,40 @@ func createTables() error {
 		UNIQUE(scan_id, url)
 	);
 
+	CREATE TABLE IF NOT EXISTS host_metadata (
+		scan_id INTEGER NOT NULL,
+		host TEXT NOT NULL,
+		base_url TEXT,
+		headers_json TEXT,
+		has_csp BOOLEAN DEFAULT FALSE,
+		has_cache_headers BOOLEAN DEFAULT FALSE,
+		login_surface BOOLEAN DEFAULT FALSE,
+		response_bytes INTEGER DEFAULT 0,
+		ssl_expired BOOLEAN DEFAULT FALSE,
+		ssl_self_signed BOOLEAN DEFAULT FALSE,
+		ssl_mismatch BOOLEAN DEFAULT FALSE,
+		weak_tls BOOLEAN DEFAULT FALSE,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (scan_id, host),
+		FOREIGN KEY (scan_id) REFERENCES scans(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS url_metadata (
+		scan_id INTEGER NOT NULL,
+		url TEXT NOT NULL,
+		host TEXT,
+		headers_json TEXT,
+		has_csp BOOLEAN DEFAULT FALSE,
+		has_cache_headers BOOLEAN DEFAULT FALSE,
+		login_surface BOOLEAN DEFAULT FALSE,
+		response_bytes INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (scan_id, url),
+		FOREIGN KEY (scan_id) REFERENCES scans(id)
+	);
+
 	CREATE TABLE IF NOT EXISTS vulnerabilities (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		scan_id INTEGER NOT NULL,
@@ -184,6 +218,8 @@ func createTables() error {
 	CREATE INDEX IF NOT EXISTS idx_subdomains_domain ON subdomains(domain);
 	CREATE INDEX IF NOT EXISTS idx_ports_scan ON ports(scan_id);
 	CREATE INDEX IF NOT EXISTS idx_urls_scan ON urls(scan_id);
+	CREATE INDEX IF NOT EXISTS idx_host_metadata_scan ON host_metadata(scan_id);
+	CREATE INDEX IF NOT EXISTS idx_url_metadata_scan ON url_metadata(scan_id);
 	CREATE INDEX IF NOT EXISTS idx_vulns_scan ON vulnerabilities(scan_id);
 	CREATE INDEX IF NOT EXISTS idx_vulns_severity ON vulnerabilities(severity);
 	CREATE INDEX IF NOT EXISTS idx_endpoints_scan ON endpoints(scan_id);

@@ -55,11 +55,20 @@ var queryEndpointsCmd = &cobra.Command{
 	Run:   runQueryEndpoints,
 }
 
+var queryROICmd = &cobra.Command{
+	Use:   "roi [scan_id]",
+	Short: "Rank URLs by likely testing ROI",
+	Args:  cobra.ExactArgs(1),
+	Run:   runQueryROI,
+}
+
 var (
 	queryLiveOnly   bool
 	querySeverity   string
 	queryOutputJSON bool
 	queryGrep       string
+	queryLimit      int
+	queryOutputFile string
 )
 
 func init() {
@@ -74,12 +83,17 @@ func init() {
 	queryPortsCmd.Flags().BoolVar(&queryOutputJSON, "json", false, "Output as JSON")
 	queryUrlsCmd.Flags().BoolVar(&queryOutputJSON, "json", false, "Output as JSON")
 	queryEndpointsCmd.Flags().BoolVar(&queryOutputJSON, "json", false, "Output as JSON")
+	queryROICmd.Flags().BoolVar(&queryOutputJSON, "json", false, "Output as JSON")
+	queryROICmd.Flags().IntVar(&queryLimit, "limit", 20, "Maximum number of ranked URLs to show")
+	queryROICmd.Flags().StringVar(&queryGrep, "grep", "", "Filter ROI targets by pattern")
+	queryROICmd.Flags().StringVarP(&queryOutputFile, "output", "o", "", "Write ROI results to a file (best with --json)")
 
 	queryCmd.AddCommand(querySubdomainsCmd)
 	queryCmd.AddCommand(queryPortsCmd)
 	queryCmd.AddCommand(queryVulnsCmd)
 	queryCmd.AddCommand(queryUrlsCmd)
 	queryCmd.AddCommand(queryEndpointsCmd)
+	queryCmd.AddCommand(queryROICmd)
 	rootCmd.AddCommand(queryCmd)
 }
 
@@ -296,6 +310,109 @@ func runQueryEndpoints(cmd *cobra.Command, args []string) {
 	w.Flush()
 
 	logger.Info("\nTotal: %d endpoints", len(endpoints))
+}
+
+func runQueryROI(cmd *cobra.Command, args []string) {
+	scanID, err := utils.ParseScanID(args[0])
+	if err != nil {
+		logger.Error("%v", err)
+		return
+	}
+
+	targets, err := database.GetRankedURLs(scanID, 0)
+	if err != nil {
+		logger.Error("Failed to compute ROI targets: %v", err)
+		return
+	}
+
+	if queryGrep != "" {
+		var filtered []database.URLROI
+		pattern := strings.ToLower(queryGrep)
+		for _, t := range targets {
+			if strings.Contains(strings.ToLower(t.URL), pattern) ||
+				strings.Contains(strings.ToLower(t.Title), pattern) ||
+				strings.Contains(strings.ToLower(strings.Join(t.InterestingTerms, " ")), pattern) {
+				filtered = append(filtered, t)
+			}
+		}
+		targets = filtered
+	}
+
+	if queryLimit > 0 && len(targets) > queryLimit {
+		targets = targets[:queryLimit]
+	}
+
+	if queryOutputJSON {
+		data, _ := json.MarshalIndent(targets, "", "  ")
+		if queryOutputFile != "" {
+			if err := os.WriteFile(queryOutputFile, data, 0644); err != nil {
+				logger.Error("Failed to write ROI output: %v", err)
+				return
+			}
+			logger.Success("ROI results saved to: %s", queryOutputFile)
+			return
+		}
+		fmt.Println(string(data))
+		return
+	}
+
+	if len(targets) == 0 {
+		logger.Info("No ROI-ranked URLs found.")
+		return
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "SCORE\tSTATUS\tURL\tENDPOINTS\tVULNS\tTECH")
+	for _, t := range targets {
+		vulnSummary := summarizeSeverityCounts(t.ExactVulnCounts, t.HostVulnCounts)
+		techSummary := "-"
+		if len(t.Tech) > 0 {
+			techSummary = strings.Join(t.Tech, ",")
+			if len(techSummary) > 30 {
+				techSummary = techSummary[:27] + "..."
+			}
+		}
+		fmt.Fprintf(w, "%d\t%d\t%s\t%d\t%s\t%s\n",
+			t.Score,
+			t.StatusCode,
+			truncateURL(t.URL, 70),
+			t.EndpointCount,
+			vulnSummary,
+			techSummary,
+		)
+	}
+	w.Flush()
+
+	for _, t := range targets {
+		logger.Section(fmt.Sprintf("ROI %d - %s", t.Score, t.URL))
+		if t.Title != "" {
+			fmt.Printf("Title: %s\n", t.Title)
+		}
+		if len(t.Reasons) > 0 {
+			fmt.Println("Why it ranked:")
+			for _, reason := range t.Reasons {
+				fmt.Printf("  - %s\n", reason)
+			}
+		}
+		fmt.Println()
+	}
+
+	logger.Info("Showing %d ranked targets", len(targets))
+}
+
+func summarizeSeverityCounts(exact, host map[string]int) string {
+	order := []string{"critical", "high", "medium", "low", "info"}
+	var parts []string
+	for _, sev := range order {
+		total := exact[sev] + host[sev]
+		if total > 0 {
+			parts = append(parts, fmt.Sprintf("%s:%d", sev[:1], total))
+		}
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
 }
 
 func truncateURL(url string, max int) string {

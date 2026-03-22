@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/config"
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/metadata"
 	"github.com/vishnu303/chaathan-flow/pkg/notify"
 	"github.com/vishnu303/chaathan-flow/pkg/report"
 	"github.com/vishnu303/chaathan-flow/pkg/runner"
@@ -54,7 +56,7 @@ var wildcardCmd = &cobra.Command{
 	Aliases: []string{"scan"},
 	Short:   "Run the Wildcard Reconnaissance Workflow",
 	Long: `
-Runs a comprehensive 22-step recon & vulnerability scanning workflow:
+Runs a comprehensive 20-step recon & vulnerability scanning workflow:
 
  1. Passive Enumeration (Subfinder, Assetfinder, Sublist3r) [Parallel]
  2. URL Discovery (Waybackurls, GAU) [Parallel]
@@ -71,12 +73,11 @@ Runs a comprehensive 22-step recon & vulnerability scanning workflow:
  13. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
  14. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
  15. URL Consolidation & Live Check (httpx)
- 16. Wordlist Generation (CeWL)
- 17. Directory Fuzzing (ffuf) [Requires --wordlist]
- 18. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
- 19. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
- 20. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
- 21. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
+ 16. Directory Fuzzing (ffuf) [Requires --wordlist]
+ 17. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
+ 18. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
+ 19. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
+ 20. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
 
 Press 's' at any time during scanning to skip the current tool.
 All results are stored in a SQLite database for querying and reporting.
@@ -276,7 +277,7 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	arjunOut := filepath.Join(resultDir, "arjun_params.json")
 	allURLsRaw := filepath.Join(resultDir, "all_urls_raw.txt")
 	allURLsLive := filepath.Join(resultDir, "all_urls_live.txt")
-	generatedWordlistOut := filepath.Join(resultDir, "cewl_wordlist.txt")
+	roiMetadataTargets := filepath.Join(resultDir, "roi_metadata_targets.txt")
 	ffufOut := filepath.Join(resultDir, "ffuf_results.json")
 	nucleiOut := filepath.Join(resultDir, "nuclei_vulns.json")
 	nucleiURLOut := filepath.Join(resultDir, "nuclei_url_vulns.json")
@@ -497,7 +498,7 @@ step2:
 	// =========================================================================
 	// Step 6: Consolidation & DNS Resolution
 	// =========================================================================
-	if scanState.IsStepCompleted("consolidation") && scanState.IsStepCompleted("dns_resolution") {
+	if scanState.IsStepCompleted("dns_resolution") {
 		logger.Section("Step 6: Consolidation & DNS Resolution [RESUMED — skipping]")
 	} else {
 		logger.Section("Step 6: Consolidating Subdomains")
@@ -510,11 +511,10 @@ step2:
 			subdomainizerOut,
 		)
 		if err := utils.MergeAndDeduplicate(passiveSources, consolidatedSubs); err != nil {
-			stateMgr.MarkStepFailed(scanState, "consolidation", err)
+			stateMgr.MarkStepFailed(scanState, "dns_resolution", err)
 			logger.Error("Failed to consolidate: %v", err)
 		}
 		logger.Success("Consolidated list saved to %s", consolidatedSubs)
-		stateMgr.MarkStepComplete(scanState, "consolidation")
 
 		// DNS Resolution
 		logger.SubStep("Running DNSx for resolution...")
@@ -624,6 +624,19 @@ step2:
 	} else {
 		logger.Section("Step 9: Skipping tlsx (--skip-tlsx)")
 		stateMgr.MarkStepComplete(scanState, "tls_analysis")
+	}
+
+	if scanID > 0 && utils.FileExists(httpxOut) {
+		hostTargetCount := collectLiveHostTargetsFromHttpx(httpxOut, httpxLiveHosts)
+		if hostTargetCount > 0 {
+			logger.SubStep("Collecting lightweight host metadata for ROI scoring...")
+			hostTargets := loadLineSlice(httpxLiveHosts, 250)
+			if count, err := metadata.CollectHostMetadata(scanID, hostTargets); err != nil {
+				logger.Warning("Host metadata enrichment failed: %v", err)
+			} else if count > 0 {
+				logger.Info("  Stored metadata for %d live hosts", count)
+			}
+		}
 	}
 
 	if ctx.Err() != nil {
@@ -846,6 +859,19 @@ step2:
 		liveCount, _ := utils.CountFileLines(allURLsLive)
 		logger.Success("  %d live URLs confirmed", liveCount)
 	}
+
+	if scanID > 0 && utils.FileExists(allURLsLive) {
+		metaTargetCount := collectROIMetadataTargetsFromFile(allURLsLive, roiMetadataTargets, 3, 150)
+		if metaTargetCount > 0 {
+			logger.SubStep("Collecting lightweight metadata for %d high-value URLs...", metaTargetCount)
+			metaTargets := loadLineSlice(roiMetadataTargets, 150)
+			if count, err := metadata.CollectURLMetadata(scanID, metaTargets); err != nil {
+				logger.Warning("URL metadata enrichment failed: %v", err)
+			} else if count > 0 {
+				logger.Info("  Stored path metadata for %d ROI candidate URLs", count)
+			}
+		}
+	}
 	stateMgr.MarkStepComplete(scanState, "url_consolidation")
 
 	if ctx.Err() != nil {
@@ -856,38 +882,35 @@ step2:
 step16:
 
 	// =========================================================================
-	// Step 16: Wordlist Generation (CeWL)
+	// Step 16: Directory Fuzzing (ffuf)
 	// =========================================================================
-	if scanState.IsStepCompleted("wordlist_generation") {
-		logger.Section("Step 16: Wordlist Generation (CeWL) [RESUMED — skipping]")
-		if effectiveWordlist == "" && utils.FileExists(generatedWordlistOut) {
-			effectiveWordlist = generatedWordlistOut
-		}
+	if scanState.IsStepCompleted("dir_fuzzing") {
+		logger.Section("Step 16: Directory Fuzzing (ffuf) [RESUMED — skipping]")
 		goto step17
 	}
 	if effectiveWordlist != "" {
-		logger.Section("Step 16: Skipping CeWL (using provided --wordlist)")
-	} else {
-		logger.Section("Step 16: Wordlist Generation (CeWL)")
-		logger.SubStep("Generating a target-specific wordlist with CeWL...")
-		if err := runWithSkip(ctx, "cewl", func(sCtx context.Context) error {
-			return tb.RunCewl(sCtx, "https://"+targetDomain, generatedWordlistOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				logger.Info("  CeWL skipped")
-			} else {
-				stateMgr.MarkStepFailed(scanState, "wordlist_generation", err)
-				logger.Warning("CeWL failed: %v", err)
-			}
-		} else if utils.FileExists(generatedWordlistOut) {
-			count, _ := utils.CountFileLines(generatedWordlistOut)
-			if count > 0 {
-				effectiveWordlist = generatedWordlistOut
-				logger.Info("  Generated %d words for ffuf", count)
+		logger.Section("Step 16: Directory Fuzzing (ffuf)")
+		targetURL := fmt.Sprintf("https://%s/FUZZ", targetDomain)
+		logger.SubStep("Running ffuf with wordlist: %s", effectiveWordlist)
+		if err := tb.RunFfufWithFUZZ(ctx, targetURL, effectiveWordlist, ffufOut); err != nil {
+			stateMgr.MarkStepFailed(scanState, "dir_fuzzing", err)
+			logger.Warning("ffuf failed: %v", err)
+		} else {
+			logger.SubStep("[Done] ffuf - Results: %s", ffufOut)
+			if scanID > 0 {
+				count, err := utils.ParseFfufOutput(scanID, ffufOut)
+				if err != nil {
+					logger.Warning("Failed to parse ffuf results: %v", err)
+				} else if count > 0 {
+					logger.Info("  Stored %d ffuf discoveries for ROI ranking", count)
+				}
 			}
 		}
+	} else {
+		logger.Section("Step 16: Skipping ffuf (no --wordlist provided)")
+		logger.Info("Provide --wordlist to enable ffuf")
 	}
-	stateMgr.MarkStepComplete(scanState, "wordlist_generation")
+	stateMgr.MarkStepComplete(scanState, "dir_fuzzing")
 
 	if ctx.Err() != nil {
 		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
@@ -897,42 +920,12 @@ step16:
 step17:
 
 	// =========================================================================
-	// Step 17: Directory Fuzzing (ffuf)
-	// =========================================================================
-	if scanState.IsStepCompleted("dir_fuzzing") {
-		logger.Section("Step 17: Directory Fuzzing (ffuf) [RESUMED — skipping]")
-		goto step18
-	}
-	if effectiveWordlist != "" {
-		logger.Section("Step 17: Directory Fuzzing (ffuf)")
-		targetURL := fmt.Sprintf("https://%s/FUZZ", targetDomain)
-		logger.SubStep("Running ffuf with wordlist: %s", effectiveWordlist)
-		if err := tb.RunFfufWithFUZZ(ctx, targetURL, effectiveWordlist, ffufOut); err != nil {
-			stateMgr.MarkStepFailed(scanState, "dir_fuzzing", err)
-			logger.Warning("ffuf failed: %v", err)
-		} else {
-			logger.SubStep("[Done] ffuf - Results: %s", ffufOut)
-		}
-	} else {
-		logger.Section("Step 17: Skipping ffuf (no usable wordlist available)")
-		logger.Info("Provide --wordlist or let CeWL generate one successfully")
-	}
-	stateMgr.MarkStepComplete(scanState, "dir_fuzzing")
-
-	if ctx.Err() != nil {
-		finalizeScan(scanID, "cancelled", stateMgr, scanState, notifier, startTime, resultDir)
-		return
-	}
-
-step18:
-
-	// =========================================================================
-	// Step 18: Vulnerability Scanning — Run 1: Infrastructure (Nuclei)
+	// Step 17: Vulnerability Scanning — Run 1: Infrastructure (Nuclei)
 	// =========================================================================
 	if scanState.IsStepCompleted("vuln_scanning") {
-		logger.Section("Step 18: Vulnerability Scanning — Infra (Nuclei) [RESUMED — skipping]")
+		logger.Section("Step 17: Vulnerability Scanning — Infra (Nuclei) [RESUMED — skipping]")
 	} else if !skipNuclei {
-		logger.Section("Step 18: Vulnerability Scanning — Infra (Nuclei)")
+		logger.Section("Step 17: Vulnerability Scanning — Infra (Nuclei)")
 		liveHostCount := collectLiveHostTargetsFromHttpx(httpxOut, httpxLiveHosts)
 		if liveHostCount == 0 {
 			logger.Info("  Skipping Nuclei infra scan (no live httpx hosts available)")
@@ -974,7 +967,7 @@ step18:
 			}
 		}
 	} else {
-		logger.Section("Step 18: Skipping Nuclei (--skip-nuclei)")
+		logger.Section("Step 17: Skipping Nuclei (--skip-nuclei)")
 	}
 	stateMgr.MarkStepComplete(scanState, "vuln_scanning")
 
@@ -984,12 +977,12 @@ step18:
 	}
 
 	// =========================================================================
-	// Step 19: Vulnerability Scanning — Run 2: URLs (Nuclei)
+	// Step 18: Vulnerability Scanning — Run 2: URLs (Nuclei)
 	// =========================================================================
 	if scanState.IsStepCompleted("vuln_scanning_urls") {
-		logger.Section("Step 19: Vulnerability Scanning — URLs (Nuclei) [RESUMED — skipping]")
+		logger.Section("Step 18: Vulnerability Scanning — URLs (Nuclei) [RESUMED — skipping]")
 	} else if !skipNuclei && utils.FileExists(allURLsLive) {
-		logger.Section("Step 19: Vulnerability Scanning — URLs (Nuclei)")
+		logger.Section("Step 18: Vulnerability Scanning — URLs (Nuclei)")
 		gfCount := 0
 		if isGFUsable() {
 			logger.SubStep("Filtering live URLs with gf patterns before nuclei...")
@@ -1032,9 +1025,9 @@ step18:
 			}
 		}
 	} else if skipNuclei {
-		logger.Section("Step 19: Skipping Nuclei URLs (--skip-nuclei)")
+		logger.Section("Step 18: Skipping Nuclei URLs (--skip-nuclei)")
 	} else {
-		logger.Section("Step 19: Skipping Nuclei URLs (no live URLs available)")
+		logger.Section("Step 18: Skipping Nuclei URLs (no live URLs available)")
 	}
 	stateMgr.MarkStepComplete(scanState, "vuln_scanning_urls")
 
@@ -1044,12 +1037,12 @@ step18:
 	}
 
 	// =========================================================================
-	// Step 20: Subdomain Takeover Detection (Subjack)
+	// Step 19: Subdomain Takeover Detection (Subjack)
 	// =========================================================================
 	if scanState.IsStepCompleted("takeover_detection") {
-		logger.Section("Step 20: Subdomain Takeover Detection (Subjack) [RESUMED — skipping]")
+		logger.Section("Step 19: Subdomain Takeover Detection (Subjack) [RESUMED — skipping]")
 	} else if !skipSubjack {
-		logger.Section("Step 20: Subdomain Takeover Detection (Subjack)")
+		logger.Section("Step 19: Subdomain Takeover Detection (Subjack)")
 		logger.SubStep("Running Subjack — checking for dangling CNAMEs...")
 		if err := tb.RunSubjack(ctx, consolidatedSubs, subjackOut); err != nil {
 			stateMgr.MarkStepFailed(scanState, "takeover_detection", err)
@@ -1082,17 +1075,17 @@ step18:
 		}
 		stateMgr.MarkStepComplete(scanState, "takeover_detection")
 	} else {
-		logger.Section("Step 20: Skipping Subjack (--skip-subjack)")
+		logger.Section("Step 19: Skipping Subjack (--skip-subjack)")
 		stateMgr.MarkStepComplete(scanState, "takeover_detection")
 	}
 
 	// =========================================================================
-	// Step 21: XSS Scanning (Dalfox) — uses live URLs
+	// Step 20: XSS Scanning (Dalfox) — uses live URLs
 	// =========================================================================
 	if scanState.IsStepCompleted("xss_scanning") {
-		logger.Section("Step 21: XSS Scanning (Dalfox) [RESUMED — skipping]")
+		logger.Section("Step 20: XSS Scanning (Dalfox) [RESUMED — skipping]")
 	} else if !skipDalfox {
-		logger.Section("Step 21: XSS Scanning (Dalfox)")
+		logger.Section("Step 20: XSS Scanning (Dalfox)")
 		// Collect parameterized URLs from the live URLs file
 		logger.SubStep("Collecting parameterized URLs from live URLs...")
 		paramCount := collectParamURLsFromFile(allURLsLive, paramURLsFile)
@@ -1124,7 +1117,7 @@ step18:
 		}
 		stateMgr.MarkStepComplete(scanState, "xss_scanning")
 	} else {
-		logger.Section("Step 21: Skipping Dalfox (--skip-dalfox)")
+		logger.Section("Step 20: Skipping Dalfox (--skip-dalfox)")
 		stateMgr.MarkStepComplete(scanState, "xss_scanning")
 	}
 
@@ -1205,6 +1198,72 @@ func collectLiveHostTargetsFromHttpx(inputFile, outputFile string) int {
 		seen[result.URL] = true
 		fmt.Fprintln(f, result.URL)
 		count++
+	}
+
+	return count
+}
+
+func loadLineSlice(inputFile string, limit int) []string {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+		if limit > 0 && len(lines) >= limit {
+			break
+		}
+	}
+	return lines
+}
+
+func collectROIMetadataTargetsFromFile(inputFile, outputFile string, perHostLimit, totalLimit int) int {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	seen := make(map[string]bool)
+	perHost := make(map[string]int)
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || seen[line] || !isHighValueURL(line) {
+			continue
+		}
+
+		host := hostFromRawURL(line)
+		if host == "" {
+			continue
+		}
+		if perHostLimit > 0 && perHost[host] >= perHostLimit {
+			continue
+		}
+
+		seen[line] = true
+		perHost[host]++
+		fmt.Fprintln(f, line)
+		count++
+
+		if totalLimit > 0 && count >= totalLimit {
+			break
+		}
 	}
 
 	return count
@@ -1332,6 +1391,14 @@ func isHighValueURL(raw string) bool {
 	}
 
 	return false
+}
+
+func hostFromRawURL(raw string) string {
+	parsed, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
 }
 
 // copyFile copies a file from src to dst

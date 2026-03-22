@@ -266,8 +266,6 @@ func getDockerImage(tool string) string {
 		return "sxcurity/waybackurls"
 	case "linkfinder":
 		return "ghcr.io/gerben-stavenga/linkfinder"
-	case "cewl":
-		return "digininja/cewl"
 	case "github-endpoints":
 		return "gwen001/github-endpoints"
 	case "github-subdomains":
@@ -295,7 +293,7 @@ func getDockerImage(tool string) string {
 
 func isEntrypointImage(tool string) bool {
 	switch tool {
-	case "amass", "nuclei", "httpx", "naabu", "subfinder", "dnsx", "katana", "ffuf", "cewl", "linkfinder",
+	case "amass", "nuclei", "httpx", "naabu", "subfinder", "dnsx", "katana", "ffuf", "linkfinder",
 		"tlsx", "uncover", "dalfox", "arjun", "shuffledns":
 		return true
 	default:

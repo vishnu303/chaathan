@@ -29,6 +29,7 @@ type Report struct {
 	LiveSubdomains  []database.Subdomain     `json:"live_subdomains"`
 	Ports           []database.Port          `json:"ports"`
 	URLs            []database.URL           `json:"urls"`
+	TopTargets      []database.URLROI        `json:"top_targets"`
 	Vulnerabilities []database.Vulnerability `json:"vulnerabilities"`
 	Endpoints       []database.Endpoint      `json:"endpoints"`
 	GeneratedAt     time.Time                `json:"generated_at"`
@@ -66,6 +67,11 @@ func Generate(scanID int64) (*Report, error) {
 		return nil, fmt.Errorf("failed to get urls: %w", err)
 	}
 
+	topTargets, err := database.GetRankedURLs(scanID, 10)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get roi targets: %w", err)
+	}
+
 	vulns, err := database.GetVulnerabilities(scanID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vulnerabilities: %w", err)
@@ -83,6 +89,7 @@ func Generate(scanID int64) (*Report, error) {
 		LiveSubdomains:  liveSubdomains,
 		Ports:           ports,
 		URLs:            urls,
+		TopTargets:      topTargets,
 		Vulnerabilities: vulns,
 		Endpoints:       endpoints,
 		GeneratedAt:     time.Now(),
@@ -226,6 +233,19 @@ No URLs discovered.
 
 ---
 
+## Top ROI Targets ({{len .TopTargets}})
+
+{{if .TopTargets}}
+| Score | URL | Why |
+|-------|-----|-----|
+{{range .TopTargets}}| {{.Score}} | {{.URL}} | {{joinReasons .Reasons}} |
+{{end}}
+{{else}}
+No ROI targets available.
+{{end}}
+
+---
+
 ## Endpoints ({{len .Endpoints}})
 
 {{if .Endpoints}}
@@ -243,7 +263,8 @@ No endpoints found.
 `
 
 	funcMap := template.FuncMap{
-		"ToUpper": strings.ToUpper,
+		"ToUpper":     strings.ToUpper,
+		"joinReasons": joinReasons,
 	}
 
 	t, err := template.New("report").Funcs(funcMap).Parse(tmpl)
@@ -422,6 +443,16 @@ func (r *Report) toHTML() (string, error) {
             </tbody>
         </table>
 
+        <h2>Top ROI Targets ({{len .TopTargets}})</h2>
+        <table>
+            <thead><tr><th>Score</th><th>URL</th><th>Why</th></tr></thead>
+            <tbody>
+            {{range .TopTargets}}
+            <tr><td>{{.Score}}</td><td>{{.URL}}</td><td>{{joinReasons .Reasons}}</td></tr>
+            {{end}}
+            </tbody>
+        </table>
+
         <h2>Open Ports ({{len .Ports}})</h2>
         <table>
             <thead><tr><th>Host</th><th>Port</th><th>Protocol</th><th>Service</th></tr></thead>
@@ -439,7 +470,9 @@ func (r *Report) toHTML() (string, error) {
 </body>
 </html>`
 
-	t, err := template.New("html-report").Parse(tmpl)
+	t, err := template.New("html-report").Funcs(template.FuncMap{
+		"joinReasons": joinReasons,
+	}).Parse(tmpl)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse HTML template: %w", err)
 	}
@@ -471,6 +504,19 @@ func (r *Report) toText() (string, error) {
 	sb.WriteString(fmt.Sprintf("Open Ports: %d\n", r.Stats.TotalPorts))
 	sb.WriteString(fmt.Sprintf("URLs: %d\n", r.Stats.TotalURLs))
 	sb.WriteString(fmt.Sprintf("Endpoints: %d\n", r.Stats.TotalEndpoints))
+
+	if len(r.TopTargets) > 0 {
+		sb.WriteString("\nTop ROI Targets:\n")
+		for i, target := range r.TopTargets {
+			if i >= 5 {
+				break
+			}
+			sb.WriteString(fmt.Sprintf("  %d. [%d] %s\n", i+1, target.Score, target.URL))
+			if len(target.Reasons) > 0 {
+				sb.WriteString(fmt.Sprintf("     %s\n", joinReasons(target.Reasons)))
+			}
+		}
+	}
 
 	sb.WriteString("\nVulnerabilities:\n")
 	for sev, count := range r.Stats.Vulnerabilities {
@@ -526,4 +572,14 @@ func (r *Report) QuickSummary() string {
 		criticalCount,
 		highCount,
 	)
+}
+
+func joinReasons(reasons []string) string {
+	if len(reasons) == 0 {
+		return "-"
+	}
+	if len(reasons) > 3 {
+		reasons = reasons[:3]
+	}
+	return strings.Join(reasons, "; ")
 }

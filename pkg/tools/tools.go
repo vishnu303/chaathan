@@ -326,17 +326,6 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 	return err
 }
 
-func (t *ToolBox) RunCewl(ctx context.Context, url string, outputFile string) error {
-	args := []string{
-		url,
-		"-w", outputFile,
-		"--lowercase",
-		"--with-numbers",
-	}
-	_, err := t.Runner.Run(ctx, "cewl", args)
-	return err
-}
-
 // --- Vulnerability Scanning ---
 
 func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile string) error {
