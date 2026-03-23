@@ -99,9 +99,9 @@ func UpsertURLMetadata(scanID int64, meta URLMetadata) error {
 				WHEN excluded.headers_json != '' THEN excluded.headers_json
 				ELSE url_metadata.headers_json
 			END,
-			has_csp = excluded.has_csp,
-			has_cache_headers = excluded.has_cache_headers,
-			login_surface = excluded.login_surface,
+			has_csp = url_metadata.has_csp OR excluded.has_csp,
+			has_cache_headers = url_metadata.has_cache_headers OR excluded.has_cache_headers,
+			login_surface = url_metadata.login_surface OR excluded.login_surface,
 			response_bytes = CASE
 				WHEN excluded.response_bytes > url_metadata.response_bytes THEN excluded.response_bytes
 				ELSE url_metadata.response_bytes

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/scan"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	wf "github.com/vishnu303/chaathan-flow/pkg/wildcard_flow"
 )
 
 var scansCmd = &cobra.Command{
@@ -98,9 +100,9 @@ func runScansList(cmd *cobra.Command, args []string) {
 
 		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
 			s.ID,
-			truncate(s.Target, 30),
+			utils.Truncate(s.Target, 30),
 			s.Type,
-			colorStatus(s.Status),
+			logger.ColorStatus(s.Status),
 			s.StartedAt.Format("2006-01-02 15:04"),
 			duration,
 		)
@@ -130,7 +132,7 @@ func runScansShow(cmd *cobra.Command, args []string) {
 	logger.Section("Scan #%d", s.ID)
 	fmt.Printf("Target:     %s\n", s.Target)
 	fmt.Printf("Type:       %s\n", s.Type)
-	fmt.Printf("Status:     %s\n", colorStatus(s.Status))
+	fmt.Printf("Status:     %s\n", logger.ColorStatus(s.Status))
 	fmt.Printf("Started:    %s\n", s.StartedAt.Format("2006-01-02 15:04:05"))
 	if s.CompletedAt != nil {
 		fmt.Printf("Completed:  %s\n", s.CompletedAt.Format("2006-01-02 15:04:05"))
@@ -147,7 +149,7 @@ func runScansShow(cmd *cobra.Command, args []string) {
 	if len(stats.Vulnerabilities) > 0 {
 		logger.Section("Vulnerabilities")
 		for sev, count := range stats.Vulnerabilities {
-			fmt.Printf("  %s: %d\n", colorSeverity(sev), count)
+			fmt.Printf("  %s: %d\n", logger.ColorSeverity(sev), count)
 		}
 	}
 
@@ -158,7 +160,7 @@ func runScansShow(cmd *cobra.Command, args []string) {
 		if v.Severity == "critical" || v.Severity == "high" {
 			criticalHigh++
 			if criticalHigh <= 5 {
-				fmt.Printf("\n[%s] %s\n  Host: %s\n", colorSeverity(v.Severity), v.Name, v.Host)
+				fmt.Printf("\n[%s] %s\n  Host: %s\n", logger.ColorSeverity(v.Severity), v.Name, v.Host)
 			}
 		}
 	}
@@ -211,9 +213,61 @@ func runScansResume(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// TODO: Actually resume the scan by calling the workflow with the state
-	logger.Warning("\nTo continue this scan, run:")
-	logger.Info("  chaathan wildcard -d %s --resume %d", state.Target, scanID)
+	// Recover options from stored config JSON
+	var opts map[string]interface{}
+	if err := json.Unmarshal(state.Config, &opts); err != nil {
+		logger.Warning("Could not parse stored config: %v — resuming with default flags", err)
+		opts = map[string]interface{}{}
+	}
+	boolOpt := func(key string) bool {
+		v, _ := opts[key].(bool)
+		return v
+	}
+	strOpt := func(key string) string {
+		v, _ := opts[key].(string)
+		return v
+	}
+
+	switch state.Type {
+	case "wildcard":
+		// Resolve GitHub token from config file (token not stored in state for security)
+		token := ""
+		if Cfg != nil {
+			if t := Cfg.GetAPIKey("github"); t != "" {
+				token = t
+			}
+		}
+
+		if err := wf.Run(wf.RunConfig{
+			Domain:            state.Target,
+			ResultDir:         state.ResultDir,
+			Mode:              Mode,
+			Verbose:           Verbose,
+			Cfg:               Cfg,
+			SkipAmass:         boolOpt("skip_amass"),
+			SkipNuclei:        boolOpt("skip_nuclei"),
+			SkipNaabu:         boolOpt("skip_naabu"),
+			SkipCrawl:         boolOpt("skip_crawl"),
+			SkipSubjack:       boolOpt("skip_subjack"),
+			SkipDalfox:        boolOpt("skip_dalfox"),
+			SkipUncover:       boolOpt("skip_uncover"),
+			SkipTlsx:          boolOpt("skip_tlsx"),
+			SkipArjun:         boolOpt("skip_arjun"),
+			SkipShuffleDNS:    boolOpt("skip_shuffledns"),
+			SkipSubdomainizer: boolOpt("skip_subdomainizer"),
+			WordlistPath:      strOpt("wordlist"),
+			DNSWordlistPath:   strOpt("dns_wordlist"),
+			GitHubToken:       token,
+			ResumeScanID:      scanID,
+			GenerateReport:    true,
+		}); err != nil {
+			logger.Error("Resume failed: %v", err)
+		}
+
+	default:
+		logger.Error("Resume not supported for scan type: %s", state.Type)
+		logger.Info("Only wildcard scans support automatic resume.")
+	}
 }
 
 func runScansDelete(cmd *cobra.Command, args []string) {
@@ -242,43 +296,5 @@ func runScansDelete(cmd *cobra.Command, args []string) {
 	logger.Success("Scan #%d deleted", scanID)
 }
 
-// Helper functions
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
-}
-
-func colorStatus(status string) string {
-	switch status {
-	case "completed":
-		return "\033[32m" + status + "\033[0m" // Green
-	case "running":
-		return "\033[33m" + status + "\033[0m" // Yellow
-	case "failed":
-		return "\033[31m" + status + "\033[0m" // Red
-	case "cancelled":
-		return "\033[90m" + status + "\033[0m" // Gray
-	default:
-		return status
-	}
-}
-
-func colorSeverity(sev string) string {
-	switch sev {
-	case "critical":
-		return "\033[91m" + sev + "\033[0m" // Bright red
-	case "high":
-		return "\033[31m" + sev + "\033[0m" // Red
-	case "medium":
-		return "\033[33m" + sev + "\033[0m" // Yellow
-	case "low":
-		return "\033[32m" + sev + "\033[0m" // Green
-	case "info":
-		return "\033[34m" + sev + "\033[0m" // Blue
-	default:
-		return sev
-	}
-}
+// truncate and colorStatus/colorSeverity have been moved to
+// pkg/utils.Truncate and pkg/logger.ColorStatus / pkg/logger.ColorSeverity.

@@ -220,7 +220,7 @@ func runQueryVulns(cmd *cobra.Command, args []string) {
 
 	// Group by severity for display
 	for _, v := range vulns {
-		sevColor := colorSeverity(v.Severity)
+		sevColor := logger.ColorSeverity(v.Severity)
 		fmt.Printf("[%s] %s\n", sevColor, v.Name)
 		fmt.Printf("  Host: %s\n", v.Host)
 		if v.URL != "" {
@@ -236,7 +236,7 @@ func runQueryVulns(cmd *cobra.Command, args []string) {
 	counts, _ := database.CountVulnerabilities(scanID)
 	logger.Section("Summary")
 	for sev, count := range counts {
-		fmt.Printf("  %s: %d\n", colorSeverity(sev), count)
+		fmt.Printf("  %s: %d\n", logger.ColorSeverity(sev), count)
 	}
 }
 
@@ -271,7 +271,7 @@ func runQueryUrls(cmd *cobra.Command, args []string) {
 		if len(title) > 40 {
 			title = title[:37] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", truncateURL(u.URL, 60), u.StatusCode, title, u.Source)
+		fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", utils.TruncateURL(u.URL, 60), u.StatusCode, title, u.Source)
 	}
 	w.Flush()
 
@@ -305,7 +305,7 @@ func runQueryEndpoints(cmd *cobra.Command, args []string) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ENDPOINT\tMETHOD\tSOURCE")
 	for _, e := range endpoints {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", truncateURL(e.URL, 80), e.Method, e.Source)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", utils.TruncateURL(e.URL, 80), e.Method, e.Source)
 	}
 	w.Flush()
 
@@ -364,7 +364,7 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "SCORE\tSTATUS\tURL\tENDPOINTS\tVULNS\tTECH")
 	for _, t := range targets {
-		vulnSummary := summarizeSeverityCounts(t.ExactVulnCounts, t.HostVulnCounts)
+		vulnSummary := utils.SummarizeSeverityCounts(t.ExactVulnCounts, t.HostVulnCounts)
 		techSummary := "-"
 		if len(t.Tech) > 0 {
 			techSummary = strings.Join(t.Tech, ",")
@@ -375,7 +375,7 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(w, "%d\t%d\t%s\t%d\t%s\t%s\n",
 			t.Score,
 			t.StatusCode,
-			truncateURL(t.URL, 70),
+			utils.TruncateURL(t.URL, 70),
 			t.EndpointCount,
 			vulnSummary,
 			techSummary,
@@ -400,24 +400,5 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 	logger.Info("Showing %d ranked targets", len(targets))
 }
 
-func summarizeSeverityCounts(exact, host map[string]int) string {
-	order := []string{"critical", "high", "medium", "low", "info"}
-	var parts []string
-	for _, sev := range order {
-		total := exact[sev] + host[sev]
-		if total > 0 {
-			parts = append(parts, fmt.Sprintf("%s:%d", sev[:1], total))
-		}
-	}
-	if len(parts) == 0 {
-		return "-"
-	}
-	return strings.Join(parts, " ")
-}
-
-func truncateURL(url string, max int) string {
-	if len(url) <= max {
-		return url
-	}
-	return url[:max-3] + "..."
-}
+// summarizeSeverityCounts, truncateURL, and colorSeverity have been moved to
+// pkg/utils.SummarizeSeverityCounts, pkg/utils.TruncateURL, and pkg/logger.ColorSeverity.

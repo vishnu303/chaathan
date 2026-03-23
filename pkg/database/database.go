@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -95,10 +96,20 @@ func Initialize(dbPath string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// SQLite is single-writer. Capping to one open connection prevents
+	// "database is locked" errors when concurrent goroutines (parallel scan
+	// steps) all issue writes at the same time. WAL handles concurrent reads fine.
+	DB.SetMaxOpenConns(1)
+	DB.SetMaxIdleConns(1)
+
 	// Create tables
 	if err := createTables(); err != nil {
 		return fmt.Errorf("failed to create tables: %w", err)
 	}
+
+	// Best-effort schema migrations — won't fail init if data constraints
+	// can't be met on an existing database (e.g. pre-existing duplicates).
+	runMigrations()
 
 	return nil
 }
@@ -223,10 +234,23 @@ func createTables() error {
 	CREATE INDEX IF NOT EXISTS idx_vulns_scan ON vulnerabilities(scan_id);
 	CREATE INDEX IF NOT EXISTS idx_vulns_severity ON vulnerabilities(severity);
 	CREATE INDEX IF NOT EXISTS idx_endpoints_scan ON endpoints(scan_id);
+	CREATE INDEX IF NOT EXISTS idx_scans_target   ON scans(target);
 	`
 
 	_, err := DB.Exec(schema)
 	return err
+}
+
+// runMigrations applies incremental schema improvements that are safe to skip
+// on existing databases where constraints cannot be satisfied (e.g. prior
+// duplicate vulnerabilities). All errors are intentionally swallowed so that
+// existing installs keep working without a hard migration step.
+func runMigrations() {
+	// Unique compound index on vulnerabilities — prevents duplicates when a scan
+	// is resumed or the same nuclei template fires on the same host+URL twice.
+	// IFNULL() normalises NULL → '' so empty strings and NULLs compare equal.
+	_, _ = DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vulns_unique
+		ON vulnerabilities(scan_id, host, IFNULL(template_id, ''), IFNULL(url, ''))`)
 }
 
 // Close closes the database connection
@@ -432,11 +456,13 @@ func GetLiveSubdomains(scanID int64) ([]Subdomain, error) {
 }
 
 func CountSubdomains(scanID int64) (total int, live int, err error) {
-	err = DB.QueryRow(`SELECT COUNT(*) FROM subdomains WHERE scan_id = ?`, scanID).Scan(&total)
-	if err != nil {
-		return
-	}
-	err = DB.QueryRow(`SELECT COUNT(*) FROM subdomains WHERE scan_id = ? AND is_live = TRUE`, scanID).Scan(&live)
+	// Single round-trip: COUNT(*) for total, conditional SUM for live hosts.
+	// COALESCE handles the NULL SUM that SQLite returns when no rows match.
+	err = DB.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_live THEN 1 ELSE 0 END), 0)
+		 FROM subdomains WHERE scan_id = ?`,
+		scanID,
+	).Scan(&total, &live)
 	return
 }
 
@@ -448,6 +474,32 @@ func AddPort(scanID int64, host string, port int, protocol, service string) erro
 		scanID, host, port, protocol, service,
 	)
 	return err
+}
+
+// AddPorts inserts a slice of ports in a single transaction,
+// skipping duplicates (INSERT OR IGNORE). Mirrors AddSubdomains pattern.
+func AddPorts(scanID int64, items []Port) error {
+	if len(items) == 0 {
+		return nil
+	}
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO ports (scan_id, host, port, protocol, service) VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, p := range items {
+		if _, err := stmt.Exec(scanID, p.Host, p.Port, p.Protocol, p.Service); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func GetPorts(scanID int64) ([]Port, error) {
@@ -526,7 +578,7 @@ func GetURLs(scanID int64) ([]URL, error) {
 
 func AddVulnerability(scanID int64, host, url, templateID, name, severity, description, matcher, evidence string) error {
 	_, err := DB.Exec(
-		`INSERT INTO vulnerabilities (scan_id, host, url, template_id, name, severity, description, matcher, evidence) 
+		`INSERT OR IGNORE INTO vulnerabilities (scan_id, host, url, template_id, name, severity, description, matcher, evidence)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		scanID, host, url, templateID, name, severity, description, matcher, evidence,
 	)
@@ -642,6 +694,32 @@ func AddEndpoint(scanID int64, url, method, source string) error {
 	return err
 }
 
+// AddEndpoints inserts a slice of endpoints in a single transaction,
+// skipping duplicates (INSERT OR IGNORE). Mirrors AddSubdomains pattern.
+func AddEndpoints(scanID int64, items []Endpoint) error {
+	if len(items) == 0 {
+		return nil
+	}
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO endpoints (scan_id, url, method, source) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, e := range items {
+		if _, err := stmt.Exec(scanID, e.URL, e.Method, e.Source); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func GetEndpoints(scanID int64) ([]Endpoint, error) {
 	rows, err := DB.Query(
 		`SELECT id, scan_id, url, method, source, created_at 
@@ -682,29 +760,21 @@ type ScanStats struct {
 func GetScanStats(scanID int64) (*ScanStats, error) {
 	stats := &ScanStats{}
 
-	// Subdomains
-	var err error
-	stats.TotalSubdomains, stats.LiveSubdomains, err = CountSubdomains(scanID)
+	// One round-trip for all numeric counts via correlated subqueries.
+	err := DB.QueryRow(
+		`SELECT
+			(SELECT COUNT(*)                                                FROM subdomains WHERE scan_id = ?),
+			(SELECT COALESCE(SUM(CASE WHEN is_live THEN 1 ELSE 0 END), 0) FROM subdomains WHERE scan_id = ?),
+			(SELECT COUNT(*) FROM ports     WHERE scan_id = ?),
+			(SELECT COUNT(*) FROM urls      WHERE scan_id = ?),
+			(SELECT COUNT(*) FROM endpoints WHERE scan_id = ?)`,
+		scanID, scanID, scanID, scanID, scanID,
+	).Scan(&stats.TotalSubdomains, &stats.LiveSubdomains, &stats.TotalPorts, &stats.TotalURLs, &stats.TotalEndpoints)
 	if err != nil {
 		return nil, err
 	}
 
-	// Ports
-	if err := DB.QueryRow(`SELECT COUNT(*) FROM ports WHERE scan_id = ?`, scanID).Scan(&stats.TotalPorts); err != nil {
-		return nil, err
-	}
-
-	// URLs
-	if err := DB.QueryRow(`SELECT COUNT(*) FROM urls WHERE scan_id = ?`, scanID).Scan(&stats.TotalURLs); err != nil {
-		return nil, err
-	}
-
-	// Endpoints
-	if err := DB.QueryRow(`SELECT COUNT(*) FROM endpoints WHERE scan_id = ?`, scanID).Scan(&stats.TotalEndpoints); err != nil {
-		return nil, err
-	}
-
-	// Vulnerabilities
+	// Vulnerabilities need GROUP BY — one additional round-trip.
 	stats.Vulnerabilities, err = CountVulnerabilities(scanID)
 	if err != nil {
 		return nil, err
@@ -727,8 +797,16 @@ func DeleteScan(scanID int64) error {
 	}
 	defer tx.Rollback()
 
-	// Delete from all related tables
-	tables := []string{"endpoints", "vulnerabilities", "urls", "ports", "subdomains"}
+	// Delete from all related tables (order matters: child rows before parent)
+	tables := []string{
+		"host_metadata",
+		"url_metadata",
+		"endpoints",
+		"vulnerabilities",
+		"urls",
+		"ports",
+		"subdomains",
+	}
 	for _, table := range tables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE scan_id = ?", table), scanID); err != nil {
 			return fmt.Errorf("failed to delete from %s: %w", table, err)
@@ -745,21 +823,22 @@ func DeleteScan(scanID int64) error {
 
 // DeleteScansByTarget deletes all scans and related data for a specific target
 func DeleteScansByTarget(target string) (int, error) {
-	// First get all scan IDs for this target
+	// Collect IDs first, then close the cursor before starting destructive writes.
 	rows, err := DB.Query("SELECT id FROM scans WHERE target = ?", target)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
 
 	var scanIDs []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return 0, err
 		}
 		scanIDs = append(scanIDs, id)
 	}
+	rows.Close() // explicitly closed before delete transactions begin
 
 	if len(scanIDs) == 0 {
 		return 0, nil
@@ -775,10 +854,6 @@ func DeleteScansByTarget(target string) (int, error) {
 	return len(scanIDs), nil
 }
 
-// DeleteAllScansForTarget deletes all data for a target (alias for DeleteScansByTarget)
-func DeleteAllScansForTarget(target string) (deleted int, err error) {
-	return DeleteScansByTarget(target)
-}
 
 // GetAllTargets returns a list of all unique targets in the database
 func GetAllTargets() ([]string, error) {
@@ -810,65 +885,76 @@ func GetTargetStats(target string) (map[string]int, error) {
 	}
 	stats["scans"] = scanCount
 
-	// Get scan IDs for this target
+	// Collect scan IDs for this target, then close the cursor.
 	rows, err := DB.Query("SELECT id FROM scans WHERE target = ?", target)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var scanIDs []int64
 	for rows.Next() {
 		var id int64
-		rows.Scan(&id)
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		scanIDs = append(scanIDs, id)
 	}
+	rows.Close()
 
 	if len(scanIDs) == 0 {
 		return stats, nil
 	}
 
-	// Build IN clause
-	inClause := "("
-	for i := range scanIDs {
-		if i > 0 {
-			inClause += ","
-		}
-		inClause += fmt.Sprintf("%d", scanIDs[i])
+	// Build a parameterised IN clause: (?, ?, ...)
+	placeholders := strings.Repeat("?,", len(scanIDs))
+	placeholders = "(" + placeholders[:len(placeholders)-1] + ")"
+
+	// Convert []int64 to []interface{} for variadic Scan.
+	args := make([]interface{}, len(scanIDs))
+	for i, id := range scanIDs {
+		args[i] = id
 	}
-	inClause += ")"
 
-	// Count subdomains
-	var subCount int
-	DB.QueryRow(fmt.Sprintf("SELECT COUNT(DISTINCT domain) FROM subdomains WHERE scan_id IN %s", inClause)).Scan(&subCount)
-	stats["subdomains"] = subCount
+	countQuery := func(q string) (int, error) {
+		var n int
+		err := DB.QueryRow(q+placeholders, args...).Scan(&n)
+		return n, err
+	}
 
-	// Count ports
-	var portCount int
-	DB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM ports WHERE scan_id IN %s", inClause)).Scan(&portCount)
-	stats["ports"] = portCount
+	var n int
 
-	// Count URLs
-	var urlCount int
-	DB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM urls WHERE scan_id IN %s", inClause)).Scan(&urlCount)
-	stats["urls"] = urlCount
+	if n, err = countQuery("SELECT COUNT(DISTINCT domain) FROM subdomains WHERE scan_id IN "); err != nil {
+		return nil, fmt.Errorf("subdomains count: %w", err)
+	}
+	stats["subdomains"] = n
 
-	// Count vulnerabilities
-	var vulnCount int
-	DB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM vulnerabilities WHERE scan_id IN %s", inClause)).Scan(&vulnCount)
-	stats["vulnerabilities"] = vulnCount
+	if n, err = countQuery("SELECT COUNT(*) FROM ports WHERE scan_id IN "); err != nil {
+		return nil, fmt.Errorf("ports count: %w", err)
+	}
+	stats["ports"] = n
 
-	// Count endpoints
-	var endpointCount int
-	DB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM endpoints WHERE scan_id IN %s", inClause)).Scan(&endpointCount)
-	stats["endpoints"] = endpointCount
+	if n, err = countQuery("SELECT COUNT(*) FROM urls WHERE scan_id IN "); err != nil {
+		return nil, fmt.Errorf("urls count: %w", err)
+	}
+	stats["urls"] = n
+
+	if n, err = countQuery("SELECT COUNT(*) FROM vulnerabilities WHERE scan_id IN "); err != nil {
+		return nil, fmt.Errorf("vulnerabilities count: %w", err)
+	}
+	stats["vulnerabilities"] = n
+
+	if n, err = countQuery("SELECT COUNT(*) FROM endpoints WHERE scan_id IN "); err != nil {
+		return nil, fmt.Errorf("endpoints count: %w", err)
+	}
+	stats["endpoints"] = n
 
 	return stats, nil
 }
 
 // PurgeOldScans deletes scans older than the specified number of days
 func PurgeOldScans(daysOld int) (int, error) {
-	// Get scans older than specified days
+	// Collect IDs first, then close the cursor before starting destructive writes.
 	rows, err := DB.Query(
 		"SELECT id FROM scans WHERE started_at < datetime('now', ? || ' days')",
 		fmt.Sprintf("-%d", daysOld),
@@ -876,14 +962,17 @@ func PurgeOldScans(daysOld int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
 
 	var scanIDs []int64
 	for rows.Next() {
 		var id int64
-		rows.Scan(&id)
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
 		scanIDs = append(scanIDs, id)
 	}
+	rows.Close() // explicitly closed before delete transactions begin
 
 	// Delete each scan
 	for _, scanID := range scanIDs {
