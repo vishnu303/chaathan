@@ -1,21 +1,27 @@
 # Chaathan Agent Guide
 
-This repository contains Codex-specific skills under `.codex/skills/`, but the project guidance below is written to be usable by any code agent that can read repository files.
+Chaathan is a Go CLI pentesting orchestration framework.
 
-Use this file as the primary entrypoint for non-Codex agents.
+Use this file as the primary entrypoint for any code agent.
 
 ## Repository overview
 
-Chaathan is a Go CLI pentesting orchestration framework.
-
-- `main.go` starts the Cobra CLI.
-- `cli/` owns commands, flags, and argument parsing.
-- `pkg/wildcard_flow/` owns the wildcard/domain recon workflow.
-- `pkg/company_flow/` owns the company recon workflow.
-- `pkg/database/` owns persistence and ROI ranking.
-- `pkg/report/` owns report generation.
-- `pkg/setup/` owns external tool installation and checks.
-- `pkg/tools/` and `pkg/runner/` own external command execution.
+- `main.go` — starts the Cobra CLI.
+- `cli/` — commands, flags, and argument parsing.
+- `pkg/wildcard_flow/` — wildcard/domain recon workflow.
+- `pkg/company_flow/` — company recon workflow.
+- `pkg/database/` — persistence and ROI ranking.
+- `pkg/report/` — report generation.
+- `pkg/setup/` — external tool installation and checks.
+- `pkg/tools/` and `pkg/runner/` — external command execution.
+- `pkg/scan/` — scan lifecycle management.
+- `pkg/scope/` — scope parsing and filtering.
+- `pkg/config/` — configuration loading.
+- `pkg/logger/` — structured logging.
+- `pkg/notify/` — notifications.
+- `pkg/progress/` — progress tracking.
+- `pkg/metadata/` — scan metadata.
+- `pkg/utils/` — shared utilities.
 
 ## Core architecture rules
 
@@ -39,19 +45,8 @@ go build -buildvcs=false -o chaathan .
 
 If a change affects CLI behavior, also inspect the relevant help text.
 
-## Cross-agent playbooks
-
-Read the playbook that matches the task:
-
-- [Development](docs/ai/chaathan-dev.md)
-- [Recon Workflows](docs/ai/chaathan-recon-workflows.md)
-- [Tooling And Setup](docs/ai/chaathan-tooling-setup.md)
-- [Reporting And Query](docs/ai/chaathan-reporting-query.md)
-- [Code Review](docs/ai/chaathan-code-review.md)
-- [Architecture Principles](docs/ai/chaathan-architecture-principles.md)
-
 ## Agent-specific notes
 
-- Codex can use `.codex/skills/`.
-- Any agent can read `AGENTS.md` and `docs/ai/*.md`.
-- If an agent supports repository instruction files with a different name, mirror or reference this file rather than inventing a second conflicting source of truth.
+- Antigravity IDE and Codex agents: deep-dive skills are in `.agents/skills/`.
+- Other agents (Cursor, Claude, etc.): read this file and the relevant skill `SKILL.md` directly from `.agents/skills/<skill-name>/SKILL.md`.
+- Do not invent a second source of truth — mirror or reference this file for other agent config formats.
