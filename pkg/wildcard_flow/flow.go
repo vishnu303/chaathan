@@ -93,6 +93,7 @@ type Files struct {
 	LinkfinderOut      string
 	SubdomainizerOut   string
 	ArjunOut           string
+	ArjunURLsOut       string
 	AllURLsRaw         string
 	AllURLsLive        string
 	ROIMetadataTargets string
@@ -108,8 +109,16 @@ type Files struct {
 }
 
 // newFiles builds all output paths from the result directory.
+// Intermediate tool outputs go into intermediate_files/; the workflow
+// reads and writes these during the scan. Final product files are
+// exported into final_files/ by finalizeScan after all steps complete.
 func newFiles(dir string) Files {
-	j := func(name string) string { return filepath.Join(dir, name) }
+	iDir := filepath.Join(dir, "intermediate_files")
+	j := func(name string) string { return filepath.Join(iDir, name) }
+	// final_files/ paths for outputs that are also consumed as pipeline inputs
+	fDir := filepath.Join(dir, "final_files")
+	jf := func(name string) string { return filepath.Join(fDir, name) }
+	_ = jf // suppress unused warning; used below for nuclei json outputs
 	return Files{
 		SubfinderOut:       j("subfinder.txt"),
 		AssetfinderOut:     j("assetfinder.txt"),
@@ -131,18 +140,21 @@ func newFiles(dir string) Files {
 		LinkfinderOut:      j("linkfinder_endpoints.txt"),
 		SubdomainizerOut:   j("subdomainizer_subs.txt"),
 		ArjunOut:           j("arjun_params.json"),
+		ArjunURLsOut:       j("arjun_urls.txt"),
 		AllURLsRaw:         j("all_urls_raw.txt"),
 		AllURLsLive:        j("all_urls_live.txt"),
 		ROIMetadataTargets: j("roi_metadata_targets.txt"),
 		FfufOut:            j("ffuf_results.json"),
-		NucleiOut:          j("nuclei_vulns.json"),
-		NucleiURLOut:       j("nuclei_url_vulns.json"),
-		NucleiURLTargets:   j("nuclei_url_targets.txt"),
-		NucleiGFMatches:    j("nuclei_url_targets_gf.txt"),
-		NucleiFallback:     j("nuclei_url_targets_fallback.txt"),
-		SubjackOut:         j("subjack_takeovers.txt"),
-		ParamURLsFile:      j("param_urls_live.txt"),
-		DalfoxOut:          j("dalfox_xss.json"),
+		// Nuclei JSON outputs go to final_files/ — they are product files
+		NucleiOut:        jf("nuclei_vulns.json"),
+		NucleiURLOut:     jf("nuclei_url_vulns.json"),
+		DalfoxOut:        jf("dalfox_xss.json"),
+		// Nuclei working files (URL target lists) stay in intermediate_files/
+		NucleiURLTargets: j("nuclei_url_targets.txt"),
+		NucleiGFMatches:  j("nuclei_url_targets_gf.txt"),
+		NucleiFallback:   j("nuclei_url_targets_fallback.txt"),
+		SubjackOut:       j("subjack_takeovers.txt"),
+		ParamURLsFile:    j("param_urls_live.txt"),
 	}
 }
 
@@ -203,6 +215,7 @@ func (c *Ctx) urlSources() []string {
 		c.F.KatanaOut,
 		c.F.GospiderOut,
 		c.F.LinkfinderOut,
+		c.F.ArjunURLsOut,
 	}
 }
 
@@ -331,6 +344,14 @@ func Run(cfg RunConfig) error {
 		notifier = notify.New(&cfg.Cfg.Notifications)
 	}
 
+	// ── Ensure output subdirectories exist ───────────────────
+	if err := os.MkdirAll(filepath.Join(cfg.ResultDir, "intermediate_files"), 0755); err != nil {
+		return fmt.Errorf("cannot create intermediate_files dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(cfg.ResultDir, "final_files"), 0755); err != nil {
+		return fmt.Errorf("cannot create final_files dir: %w", err)
+	}
+
 	// ── Build shared Ctx ─────────────────────────────────────
 	c := &Ctx{
 		GoCtx:             goCtx,
@@ -369,12 +390,8 @@ func Run(cfg RunConfig) error {
 
 	// ── Execute all steps ────────────────────────────────────
 
-	// ── Passive Enumeration (Steps 1–5) ──────────────────────
+	// ── Phase 1: Asset Discovery (Steps 1–4) ──────────────────────
 	if stepPassiveEnum(c) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if stepURLDiscovery(c) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
@@ -391,7 +408,7 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── DNS (Steps 6–7) ──────────────────────────────────────
+	// ── Phase 2: Validation & Probing (Steps 5–9) ──────────────────
 	if stepDNSConsolidation(c) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -400,8 +417,6 @@ func Run(cfg RunConfig) error {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-
-	// ── Probing (Steps 8–9) ──────────────────────────────────
 	if stepHTTPProbing(c) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -410,14 +425,18 @@ func Run(cfg RunConfig) error {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-
-	// ── Port Scanning (Step 10) ──────────────────────────────
 	if stepPortScanning(c) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
-	// ── Crawling & JS Analysis (Steps 11–13) ─────────────────
+	// ── Phase 3: Content Discovery (Steps 10–16) ─────────────────
+	// Step 10: Historical URL Discovery (Wayback/GAU) — runs here so URLs
+	// are collected only for validated live hosts, not dead subdomains.
+	if stepURLDiscovery(c) {
+		finalizeScan(c, "cancelled")
+		return nil
+	}
 	if stepWebCrawling(c) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -430,8 +449,6 @@ func Run(cfg RunConfig) error {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-
-	// ── Params & URL Consolidation (Steps 14–15) ─────────────
 	if stepParamDiscovery(c) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -441,13 +458,13 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── Directory Fuzzing (Step 16) ──────────────────────────
+	// ── Phase 3 (cont.) Step 16: Directory Fuzzing ──────────────
 	if stepDirFuzzing(c) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
-	// ── Vulnerability Scanning (Steps 17–18) ─────────────────
+	// ── Phase 4: Vulnerability Scanning (Steps 17–20) ──────────
 	if stepVulnScanningInfra(c) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -457,13 +474,13 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── Subdomain Takeover (Step 19) ─────────────────────────
+	// ── Phase 4 (cont.) Steps 19–20 ───────────────────────────
 	if stepTakeoverDetection(c) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
-	// ── XSS Scanning (Step 20) ───────────────────────────────
+	// ── Phase 4 Step 20: XSS Scanning ──────────────────────────
 	stepXSSScanning(c)
 
 	finalizeScan(c, "completed")
@@ -515,15 +532,16 @@ func finalizeScan(c *Ctx, status string) {
 		logger.ScanSummary(status, c.Domain, c.ScanID, duration, stats)
 		logger.Success("Results saved in: %s", c.ResultDir)
 
-		// Export results
+		// Export results into final_files/
 		if status == "completed" || status == "cancelled" {
-			logger.Info("\nExporting results to text files...")
-			if err := utils.ExportResults(c.ScanID, c.ResultDir); err != nil {
+			finalDir := filepath.Join(c.ResultDir, "final_files")
+			logger.Info("\nExporting results to final_files/...")
+			if err := utils.ExportResults(c.ScanID, finalDir); err != nil {
 				logger.Warning("Failed to export some results: %v", err)
 			} else {
-				logger.Success("Results exported to text files")
+				logger.Success("Results exported to final_files/")
 			}
-			if err := utils.ExportSummary(c.ScanID, c.ResultDir, c.Domain); err != nil {
+			if err := utils.ExportSummary(c.ScanID, finalDir, c.Domain); err != nil {
 				logger.Warning("Failed to create summary: %v", err)
 			}
 		}

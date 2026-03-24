@@ -1,10 +1,13 @@
-// Passive Enumeration — Steps 1–5
+// Phase 1 — Asset Discovery (Steps 1–4)
+//
+// Collects all possible subdomains/assets before any validation.
+// Wayback/GAU are intentionally excluded — they run in Phase 3
+// (Content Discovery) after live hosts are known.
 //
 //  1. Passive Subdomain Enumeration (Subfinder + Assetfinder + Sublist3r) [Parallel]
-//  2. Historical URL Discovery (Waybackurls + GAU) [Parallel]
-//  3. Active Subdomain Enumeration (Amass) [Optional]
-//  4. GitHub Subdomain Discovery [Requires token]
-//  5. Search-Engine Dorking (Uncover) [Optional]
+//  2. Active Subdomain Enumeration (Amass) [Optional]
+//  3. GitHub Subdomain Discovery [Requires token]
+//  4. Search-Engine Dorking (Uncover) [Optional]
 package wildcard_flow
 
 import (
@@ -80,69 +83,16 @@ func stepPassiveEnum(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 2 — Historical URL Discovery
-// ─────────────────────────────────────────────────────────────
-
-// stepURLDiscovery runs Waybackurls and GAU in parallel.
-// Returns true if the scan should be cancelled.
-func stepURLDiscovery(c *Ctx) bool {
-	if c.State.IsStepCompleted("url_discovery") {
-		logger.Section("Step 2: Historical URL Discovery [RESUMED — skipping]")
-		return false
-	}
-	logger.Section("Step 2: Historical URL Discovery")
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] Waybackurls")
-		if err := c.Tb.RunWaybackurls(c.GoCtx, c.Domain, c.F.WaybackOut); err != nil {
-			if c.Verbose {
-				logger.Warning("Waybackurls failed: %v", err)
-			}
-		} else {
-			logger.SubStep("[Done] Waybackurls")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls")
-				logger.Info("  Found %d URLs", count)
-			}
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] GAU")
-		if err := c.Tb.RunGau(c.GoCtx, c.Domain, c.F.GauOut); err != nil {
-			if c.Verbose {
-				logger.Warning("GAU failed: %v", err)
-			}
-		} else {
-			logger.SubStep("[Done] GAU")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau")
-				logger.Info("  Found %d URLs", count)
-			}
-		}
-	}()
-
-	wg.Wait()
-	c.StateMgr.MarkStepComplete(c.State, "url_discovery")
-	return c.cancelled()
-}
-
-// ─────────────────────────────────────────────────────────────
-// Step 3 — Active Subdomain Enumeration (Amass)
+// Step 2 — Active Subdomain Enumeration (Amass)
 // ─────────────────────────────────────────────────────────────
 
 // stepActiveEnum runs Amass unless --skip-amass is set.
 // Returns true if the scan should be cancelled.
 func stepActiveEnum(c *Ctx) bool {
 	if c.State.IsStepCompleted("active_enum") {
-		logger.Section("Step 3: Active Subdomain Enumeration (Amass) [RESUMED — skipping]")
+		logger.Section("Step 2: Active Subdomain Enumeration (Amass) [RESUMED — skipping]")
 	} else if !c.SkipAmass {
-		logger.Section("Step 3: Active Subdomain Enumeration (Amass)")
+		logger.Section("Step 2: Active Subdomain Enumeration (Amass)")
 		logger.SubStep("Running Amass (this may take a while)...")
 		if err := c.Tb.RunAmass(c.GoCtx, c.Domain, c.F.AmassOut); err != nil {
 			logger.Error("Amass failed: %v", err)
@@ -155,23 +105,23 @@ func stepActiveEnum(c *Ctx) bool {
 			c.StateMgr.MarkStepComplete(c.State, "active_enum")
 		}
 	} else {
-		logger.Section("Step 3: Skipping Amass (--skip-amass)")
+		logger.Section("Step 2: Skipping Amass (--skip-amass)")
 		c.StateMgr.MarkStepComplete(c.State, "active_enum")
 	}
 	return c.cancelled()
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 4 — GitHub Subdomain Discovery
+// Step 3 — GitHub Subdomain Discovery
 // ─────────────────────────────────────────────────────────────
 
 // stepGitHubRecon runs github-subdomains when a token is available.
 // Returns true if the scan should be cancelled.
 func stepGitHubRecon(c *Ctx) bool {
 	if c.State.IsStepCompleted("github_recon") {
-		logger.Section("Step 4: GitHub Subdomain Discovery [RESUMED — skipping]")
+		logger.Section("Step 3: GitHub Subdomain Discovery [RESUMED — skipping]")
 	} else if c.GitHubToken != "" {
-		logger.Section("Step 4: GitHub Subdomain Discovery")
+		logger.Section("Step 3: GitHub Subdomain Discovery")
 		logger.SubStep("Running github-subdomains...")
 		if err := c.Tb.RunGithubSubdomains(c.GoCtx, c.Domain, c.GitHubToken, c.F.GithubSubsOut); err != nil {
 			c.StateMgr.MarkStepFailed(c.State, "github_recon", err)
@@ -184,7 +134,7 @@ func stepGitHubRecon(c *Ctx) bool {
 			logger.SubStep("[Done] GitHub Subdomains")
 		}
 	} else {
-		logger.Section("Step 4: Skipping GitHub Recon (no token provided)")
+		logger.Section("Step 3: Skipping GitHub Recon (no token provided)")
 		logger.Warning("Set GITHUB_TOKEN env var or use --github-token for GitHub recon")
 	}
 	c.StateMgr.MarkStepComplete(c.State, "github_recon")
@@ -192,16 +142,16 @@ func stepGitHubRecon(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 5 — Search-Engine Dorking (Uncover)
+// Step 4 — Search-Engine Dorking (Uncover)
 // ─────────────────────────────────────────────────────────────
 
 // stepSearchEngineRecon runs Uncover unless --skip-uncover is set.
 // Returns true if the scan should be cancelled.
 func stepSearchEngineRecon(c *Ctx) bool {
 	if c.State.IsStepCompleted("search_engine_recon") {
-		logger.Section("Step 5: Passive Search Engine Recon (Uncover) [RESUMED — skipping]")
+		logger.Section("Step 4: Passive Search Engine Recon (Uncover) [RESUMED — skipping]")
 	} else if !c.SkipUncover {
-		logger.Section("Step 5: Passive Search Engine Recon (Uncover)")
+		logger.Section("Step 4: Passive Search Engine Recon (Uncover)")
 		logger.SubStep("Running Uncover (Shodan/Censys/Fofa)...")
 		if err := c.Tb.RunUncover(c.GoCtx, c.Domain, c.F.UncoverOut); err != nil {
 			c.StateMgr.MarkStepFailed(c.State, "search_engine_recon", err)
@@ -214,7 +164,7 @@ func stepSearchEngineRecon(c *Ctx) bool {
 		}
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
 	} else {
-		logger.Section("Step 5: Skipping Uncover (--skip-uncover)")
+		logger.Section("Step 4: Skipping Uncover (--skip-uncover)")
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
 	}
 	return c.cancelled()

@@ -11,7 +11,7 @@ Use this skill for normal development work in this repository.
 
 - `main.go` starts the Cobra CLI.
 - `cli/` contains command definitions and argument parsing.
-- `pkg/wildcard_flow/` contains the 20+ step domain recon workflow.
+- `pkg/wildcard_flow/` contains the 20-step domain recon workflow (4 phase files: `asset_discovery.go`, `validation.go`, `content_discovery.go`, `vulnerability_scanning.go`).
 - `pkg/company_flow/` contains the 3-step company recon workflow.
 - `pkg/database/` stores scan metadata and query/report support data.
 - `pkg/report/` formats reports.
@@ -66,7 +66,7 @@ If you change CLI wiring, also inspect:
 - New flag or command behavior:
   Read the matching file in `cli/`, then update the owning package in `pkg/`.
 - Wildcard scan change:
-  Start in `cli/wildcard.go`, then `pkg/wildcard_flow/flow.go`, then the relevant step file.
+  Start in `cli/wildcard.go`, then `pkg/wildcard_flow/flow.go`, then the relevant phase file (`asset_discovery.go`, `validation.go`, `content_discovery.go`, or `vulnerability_scanning.go`).
 - Company scan change:
   Start in `cli/company.go`, then `pkg/company_flow/flow.go`.
 - Query/report/export change:

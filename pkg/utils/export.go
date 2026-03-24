@@ -68,7 +68,8 @@ func ExportSubdomains(scanID int64, resultDir string) error {
 	return nil
 }
 
-// ExportLiveSubdomains exports only live subdomains to a text file
+// ExportLiveSubdomains exports only live subdomains.
+// Format: "domain,ip" when IP is known, otherwise just "domain".
 func ExportLiveSubdomains(scanID int64, resultDir string) error {
 	subs, err := database.GetLiveSubdomains(scanID)
 	if err != nil {
@@ -83,36 +84,24 @@ func ExportLiveSubdomains(scanID int64, resultDir string) error {
 	defer f.Close()
 
 	for _, s := range subs {
-		fmt.Fprintln(f, s.Domain)
-	}
-
-	// Also create a file with IPs
-	pathWithIP := filepath.Join(resultDir, "live_subdomains_with_ip.txt")
-	fIP, err := os.Create(pathWithIP)
-	if err != nil {
-		return err
-	}
-	defer fIP.Close()
-
-	for _, s := range subs {
 		if s.IPAddress != "" {
-			fmt.Fprintf(fIP, "%s,%s\n", s.Domain, s.IPAddress)
+			fmt.Fprintf(f, "%s,%s\n", s.Domain, s.IPAddress)
 		} else {
-			fmt.Fprintln(fIP, s.Domain)
+			fmt.Fprintln(f, s.Domain)
 		}
 	}
 
 	return nil
 }
 
-// ExportPorts exports open ports to text files
+// ExportPorts exports open ports.
+// Format: "host:port (protocol/service)" — one file with full detail.
 func ExportPorts(scanID int64, resultDir string) error {
 	ports, err := database.GetPorts(scanID)
 	if err != nil {
 		return err
 	}
 
-	// Format: host:port
 	path := filepath.Join(resultDir, "open_ports.txt")
 	f, err := os.Create(path)
 	if err != nil {
@@ -121,56 +110,26 @@ func ExportPorts(scanID int64, resultDir string) error {
 	defer f.Close()
 
 	for _, p := range ports {
-		fmt.Fprintf(f, "%s:%d\n", p.Host, p.Port)
-	}
-
-	// Also create detailed format
-	pathDetailed := filepath.Join(resultDir, "open_ports_detailed.txt")
-	fDetailed, err := os.Create(pathDetailed)
-	if err != nil {
-		return err
-	}
-	defer fDetailed.Close()
-
-	for _, p := range ports {
 		service := p.Service
 		if service == "" {
 			service = "unknown"
 		}
-		fmt.Fprintf(fDetailed, "%s:%d (%s/%s)\n", p.Host, p.Port, p.Protocol, service)
-	}
-
-	// Create unique hosts with open ports for further scanning
-	pathHosts := filepath.Join(resultDir, "hosts_with_ports.txt")
-	fHosts, err := os.Create(pathHosts)
-	if err != nil {
-		return err
-	}
-	defer fHosts.Close()
-
-	hostSet := make(map[string][]int)
-	for _, p := range ports {
-		hostSet[p.Host] = append(hostSet[p.Host], p.Port)
-	}
-	for host, portList := range hostSet {
-		var portStrs []string
-		for _, p := range portList {
-			portStrs = append(portStrs, fmt.Sprintf("%d", p))
-		}
-		fmt.Fprintf(fHosts, "%s [%s]\n", host, strings.Join(portStrs, ","))
+		fmt.Fprintf(f, "%s:%d (%s/%s)\n", p.Host, p.Port, p.Protocol, service)
 	}
 
 	return nil
 }
 
-// ExportURLs exports discovered URLs to text files
+// ExportURLs exports discovered URLs.
+// all_urls.txt — all URLs with inline status code.
+// urls_200.txt  — 200 OK URLs only.
 func ExportURLs(scanID int64, resultDir string) error {
 	urls, err := database.GetURLs(scanID)
 	if err != nil {
 		return err
 	}
 
-	// All URLs
+	// All URLs with status
 	path := filepath.Join(resultDir, "all_urls.txt")
 	f, err := os.Create(path)
 	if err != nil {
@@ -179,26 +138,14 @@ func ExportURLs(scanID int64, resultDir string) error {
 	defer f.Close()
 
 	for _, u := range urls {
-		fmt.Fprintln(f, u.URL)
-	}
-
-	// URLs with status codes (for filtering)
-	pathWithStatus := filepath.Join(resultDir, "urls_with_status.txt")
-	fStatus, err := os.Create(pathWithStatus)
-	if err != nil {
-		return err
-	}
-	defer fStatus.Close()
-
-	for _, u := range urls {
 		if u.StatusCode > 0 {
-			fmt.Fprintf(fStatus, "[%d] %s\n", u.StatusCode, u.URL)
+			fmt.Fprintf(f, "[%d] %s\n", u.StatusCode, u.URL)
 		} else {
-			fmt.Fprintln(fStatus, u.URL)
+			fmt.Fprintln(f, u.URL)
 		}
 	}
 
-	// 200 OK URLs only (usually most interesting)
+	// 200 OK URLs only
 	path200 := filepath.Join(resultDir, "urls_200.txt")
 	f200, err := os.Create(path200)
 	if err != nil {
@@ -212,31 +159,19 @@ func ExportURLs(scanID int64, resultDir string) error {
 		}
 	}
 
-	// URLs with titles (useful for manual review)
-	pathTitles := filepath.Join(resultDir, "urls_with_titles.txt")
-	fTitles, err := os.Create(pathTitles)
-	if err != nil {
-		return err
-	}
-	defer fTitles.Close()
-
-	for _, u := range urls {
-		if u.Title != "" {
-			fmt.Fprintf(fTitles, "%s | %s\n", u.URL, u.Title)
-		}
-	}
-
 	return nil
 }
 
-// ExportVulnerabilities exports vulnerabilities to text files
+// ExportVulnerabilities exports vulnerabilities.
+// vulnerabilities.txt              — all vulns in detailed block format.
+// vulnerabilities_critical_high.txt — critical/high only, compact format.
 func ExportVulnerabilities(scanID int64, resultDir string) error {
 	vulns, err := database.GetVulnerabilities(scanID)
 	if err != nil {
 		return err
 	}
 
-	// All vulns summary
+	// All vulns — detailed blocks
 	path := filepath.Join(resultDir, "vulnerabilities.txt")
 	f, err := os.Create(path)
 	if err != nil {
@@ -245,38 +180,26 @@ func ExportVulnerabilities(scanID int64, resultDir string) error {
 	defer f.Close()
 
 	for _, v := range vulns {
-		fmt.Fprintf(f, "[%s] %s - %s\n", strings.ToUpper(v.Severity), v.Name, v.Host)
-	}
-
-	// Detailed vulns
-	pathDetailed := filepath.Join(resultDir, "vulnerabilities_detailed.txt")
-	fDetailed, err := os.Create(pathDetailed)
-	if err != nil {
-		return err
-	}
-	defer fDetailed.Close()
-
-	for _, v := range vulns {
-		fmt.Fprintf(fDetailed, "================================================================================\n")
-		fmt.Fprintf(fDetailed, "[%s] %s\n", strings.ToUpper(v.Severity), v.Name)
-		fmt.Fprintf(fDetailed, "================================================================================\n")
-		fmt.Fprintf(fDetailed, "Host:     %s\n", v.Host)
+		fmt.Fprintf(f, "================================================================================\n")
+		fmt.Fprintf(f, "[%s] %s\n", strings.ToUpper(v.Severity), v.Name)
+		fmt.Fprintf(f, "================================================================================\n")
+		fmt.Fprintf(f, "Host:     %s\n", v.Host)
 		if v.URL != "" {
-			fmt.Fprintf(fDetailed, "URL:      %s\n", v.URL)
+			fmt.Fprintf(f, "URL:      %s\n", v.URL)
 		}
 		if v.TemplateID != "" {
-			fmt.Fprintf(fDetailed, "Template: %s\n", v.TemplateID)
+			fmt.Fprintf(f, "Template: %s\n", v.TemplateID)
 		}
 		if v.Description != "" {
-			fmt.Fprintf(fDetailed, "Description:\n%s\n", v.Description)
+			fmt.Fprintf(f, "Description:\n%s\n", v.Description)
 		}
 		if v.Evidence != "" {
-			fmt.Fprintf(fDetailed, "Evidence:\n%s\n", v.Evidence)
+			fmt.Fprintf(f, "Evidence:\n%s\n", v.Evidence)
 		}
-		fmt.Fprintln(fDetailed)
+		fmt.Fprintln(f)
 	}
 
-	// Critical and High only (for quick review)
+	// Critical and High only — compact
 	pathCritical := filepath.Join(resultDir, "vulnerabilities_critical_high.txt")
 	fCritical, err := os.Create(pathCritical)
 	if err != nil {
@@ -295,33 +218,19 @@ func ExportVulnerabilities(scanID int64, resultDir string) error {
 		}
 	}
 
-	// Unique vulnerable hosts
-	pathHosts := filepath.Join(resultDir, "vulnerable_hosts.txt")
-	fHosts, err := os.Create(pathHosts)
-	if err != nil {
-		return err
-	}
-	defer fHosts.Close()
-
-	hostSet := make(map[string]bool)
-	for _, v := range vulns {
-		hostSet[v.Host] = true
-	}
-	for host := range hostSet {
-		fmt.Fprintln(fHosts, host)
-	}
-
 	return nil
 }
 
-// ExportEndpoints exports API endpoints to text files
+// ExportEndpoints exports API endpoints.
+// endpoints.txt             — all endpoints with method inline.
+// endpoints_interesting.txt — filtered to API, admin, auth, etc.
 func ExportEndpoints(scanID int64, resultDir string) error {
 	endpoints, err := database.GetEndpoints(scanID)
 	if err != nil {
 		return err
 	}
 
-	// All endpoints
+	// All endpoints with method
 	path := filepath.Join(resultDir, "endpoints.txt")
 	f, err := os.Create(path)
 	if err != nil {
@@ -330,22 +239,10 @@ func ExportEndpoints(scanID int64, resultDir string) error {
 	defer f.Close()
 
 	for _, e := range endpoints {
-		fmt.Fprintln(f, e.URL)
-	}
-
-	// Endpoints with methods
-	pathWithMethod := filepath.Join(resultDir, "endpoints_with_methods.txt")
-	fMethod, err := os.Create(pathWithMethod)
-	if err != nil {
-		return err
-	}
-	defer fMethod.Close()
-
-	for _, e := range endpoints {
 		if e.Method != "" {
-			fmt.Fprintf(fMethod, "%s %s\n", e.Method, e.URL)
+			fmt.Fprintf(f, "%s %s\n", e.Method, e.URL)
 		} else {
-			fmt.Fprintln(fMethod, e.URL)
+			fmt.Fprintln(f, e.URL)
 		}
 	}
 
@@ -372,7 +269,11 @@ func ExportEndpoints(scanID int64, resultDir string) error {
 		urlLower := strings.ToLower(e.URL)
 		for _, pattern := range interestingPatterns {
 			if strings.Contains(urlLower, pattern) {
-				fmt.Fprintln(fInteresting, e.URL)
+				if e.Method != "" {
+					fmt.Fprintf(fInteresting, "%s %s\n", e.Method, e.URL)
+				} else {
+					fmt.Fprintln(fInteresting, e.URL)
+				}
 				break
 			}
 		}
@@ -418,17 +319,22 @@ func ExportSummary(scanID int64, resultDir string, target string) error {
 	}
 	fmt.Fprintf(f, "%-10s: %d\n", "TOTAL", totalVulns)
 
-	fmt.Fprintln(f, "\nOUTPUT FILES")
+	fmt.Fprintln(f, "\nOUTPUT FILES  (all files are inside final_files/)")
 	fmt.Fprintln(f, "------------")
-	fmt.Fprintln(f, "final_subdomains.txt        - All discovered subdomains")
-	fmt.Fprintln(f, "live_subdomains.txt         - Only live/responsive subdomains")
-	fmt.Fprintln(f, "open_ports.txt              - Open ports (host:port format)")
-	fmt.Fprintln(f, "all_urls.txt                - All discovered URLs")
-	fmt.Fprintln(f, "urls_200.txt                - URLs returning 200 OK")
-	fmt.Fprintln(f, "vulnerabilities.txt         - All vulnerabilities summary")
-	fmt.Fprintln(f, "vulnerabilities_critical_high.txt - Critical/High vulns only")
-	fmt.Fprintln(f, "endpoints.txt               - All discovered endpoints")
-	fmt.Fprintln(f, "endpoints_interesting.txt   - Interesting endpoints (API, admin, etc.)")
+	fmt.Fprintln(f, "final_subdomains.txt              - All discovered subdomains")
+	fmt.Fprintln(f, "live_subdomains.txt               - Live/responsive subdomains (with IP)")
+	fmt.Fprintln(f, "open_ports.txt                    - Open ports (host:port proto/service)")
+	fmt.Fprintln(f, "all_urls.txt                      - All discovered URLs with status codes")
+	fmt.Fprintln(f, "urls_200.txt                      - URLs returning HTTP 200 OK")
+	fmt.Fprintln(f, "vulnerabilities.txt               - All vulnerabilities (detailed)")
+	fmt.Fprintln(f, "vulnerabilities_critical_high.txt - Critical/High severity vulns only")
+	fmt.Fprintln(f, "endpoints.txt                     - All discovered endpoints (with method)")
+	fmt.Fprintln(f, "endpoints_interesting.txt         - Interesting endpoints (API, admin, etc.)")
+	fmt.Fprintln(f, "nuclei_vulns.json                 - Nuclei infra scan raw output")
+	fmt.Fprintln(f, "nuclei_url_vulns.json             - Nuclei URL scan raw output")
+	fmt.Fprintln(f, "dalfox_xss.json                   - Dalfox XSS scan raw output")
+	fmt.Fprintln(f, "")
+	fmt.Fprintln(f, "Raw tool outputs are in intermediate_files/ (subfinder, gau, httpx, etc.)")
 
 	fmt.Fprintln(f, "\n================================================================================")
 	fmt.Fprintln(f, "Generated by Chaathan - https://github.com/yourusername/chaathan")

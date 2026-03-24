@@ -41,24 +41,35 @@ type Step struct {
 	Tool        string
 }
 
-// WildcardSteps defines the steps in the wildcard workflow
+// WildcardSteps defines the steps in the wildcard workflow.
+// Order matches the 4-phase execution sequence in pkg/wildcard_flow/flow.go:
+//
+//	Phase 1 (Asset Discovery):   passive_enum, active_enum, github_recon, search_engine_recon
+//	Phase 2 (Validation):        dns_resolution, dns_bruteforce, http_probing, tls_analysis, port_scanning
+//	Phase 3 (Content Discovery): url_discovery, web_crawling, js_analysis, js_subdomain_discovery,
+//	                             param_discovery, url_consolidation, dir_fuzzing
+//	Phase 4 (Vuln Scanning):     vuln_scanning, vuln_scanning_urls, takeover_detection, xss_scanning
 var WildcardSteps = []Step{
+	// Phase 1 — Asset Discovery
 	{Name: "passive_enum", Description: "Passive Subdomain Enumeration", Required: true, Tool: "subfinder,assetfinder,sublist3r"},
-	{Name: "url_discovery", Description: "Historical URL Discovery", Required: false, Tool: "waybackurls,gau"},
 	{Name: "active_enum", Description: "Active Subdomain Enumeration", Required: false, Tool: "amass"},
 	{Name: "github_recon", Description: "GitHub Subdomain Discovery", Required: false, Tool: "github-subdomains"},
 	{Name: "search_engine_recon", Description: "Search Engine Dorking", Required: false, Tool: "uncover"},
+	// Phase 2 — Validation & Fingerprint
 	{Name: "dns_resolution", Description: "Consolidation & DNS Resolution", Required: true, Tool: "dnsx"},
 	{Name: "dns_bruteforce", Description: "DNS Brute-force (ShuffleDNS)", Required: false, Tool: "shuffledns,massdns"},
 	{Name: "http_probing", Description: "HTTP Probing", Required: true, Tool: "httpx"},
 	{Name: "tls_analysis", Description: "TLS Certificate Analysis", Required: false, Tool: "tlsx"},
 	{Name: "port_scanning", Description: "Port Scanning", Required: false, Tool: "naabu"},
+	// Phase 3 — Content Discovery
+	{Name: "url_discovery", Description: "Historical URL Discovery", Required: false, Tool: "waybackurls,gau"},
 	{Name: "web_crawling", Description: "Web Crawling", Required: false, Tool: "katana,gospider"},
 	{Name: "js_analysis", Description: "JavaScript Analysis", Required: false, Tool: "linkfinder"},
 	{Name: "js_subdomain_discovery", Description: "JavaScript Subdomain Extraction", Required: false, Tool: "subdomainizer"},
 	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
 	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
 	{Name: "dir_fuzzing", Description: "Directory Fuzzing", Required: false, Tool: "ffuf"},
+	// Phase 4 — Vulnerability Scanning
 	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},
 	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},
 	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "subjack"},

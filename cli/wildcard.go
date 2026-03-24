@@ -47,24 +47,33 @@ var wildcardCmd = &cobra.Command{
 	Aliases: []string{"scan"},
 	Short:   "Run the Wildcard Reconnaissance Workflow",
 	Long: `
-Runs a comprehensive 20-step recon & vulnerability scanning workflow:
+Runs a comprehensive 20-step recon & vulnerability scanning workflow
+organised into 4 clean phases:
 
- 1. Passive Enumeration (Subfinder, Assetfinder, Sublist3r) [Parallel]
- 2. URL Discovery (Waybackurls, GAU) [Parallel]
- 3. Active Enumeration (Amass) [Optional, --skip-amass]
- 4. GitHub Subdomain Discovery [Requires GITHUB_TOKEN]
- 5. Search Engine Dorking (Uncover/Shodan/Censys) [Optional, --skip-uncover]
- 6. Consolidation & DNS Resolution (DNSx)
-  7. DNS Brute-force (ShuffleDNS/MassDNS) [Optional, --skip-shuffledns]
-  8. Live Web Probing (Httpx)
-  9. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
- 10. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
+ PHASE 1 — ASSET DISCOVERY (Steps 1–4)
+  1. Passive Enumeration (Subfinder, Assetfinder, Sublist3r) [Parallel]
+  2. Active Enumeration (Amass) [Optional, --skip-amass]
+  3. GitHub Subdomain Discovery [Requires GITHUB_TOKEN]
+  4. Search Engine Dorking (Uncover/Shodan/Censys) [Optional, --skip-uncover]
+
+ PHASE 2 — VALIDATION (Steps 5–9)
+  5. Consolidation & DNS Resolution (DNSx)
+  6. DNS Brute-force (ShuffleDNS/MassDNS) [Optional, --skip-shuffledns]
+  7. Live Web Probing (Httpx)  [+ host metadata collection for ROI]
+  8. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
+  9. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
+
+ PHASE 3 — CONTENT DISCOVERY (Steps 10–16)
+ 10. Historical URL Discovery (Waybackurls, GAU) [Parallel]
  11. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
  12. JavaScript Analysis (LinkFinder)
  13. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
+     └─ Mini re-probe: new subs are httpx-probed and merged into live hosts
  14. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
  15. URL Consolidation & Live Check (httpx)
  16. Directory Fuzzing (ffuf) [Requires --wordlist]
+
+ PHASE 4 — VULNERABILITY SCANNING (Steps 17–20)
  17. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
  18. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
  19. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
