@@ -46,8 +46,8 @@ var wildcardCmd = &cobra.Command{
 	Use:     "wildcard",
 	Aliases: []string{"scan"},
 	Short:   "Run the Wildcard Reconnaissance Workflow",
-	Long: `
-Runs a comprehensive 20-step recon & vulnerability scanning workflow
+Long: `
+Runs a comprehensive 21-step recon & vulnerability scanning workflow
 organised into 4 clean phases:
 
  PHASE 1 — ASSET DISCOVERY (Steps 1–4)
@@ -63,7 +63,7 @@ organised into 4 clean phases:
   8. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
   9. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
 
- PHASE 3 — CONTENT DISCOVERY (Steps 10–16)
+ PHASE 3 — CONTENT DISCOVERY (Steps 10–17)
  10. Historical URL Discovery (Waybackurls, GAU) [Parallel]
  11. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
  12. JavaScript Analysis (LinkFinder)
@@ -71,13 +71,14 @@ organised into 4 clean phases:
      └─ Mini re-probe: new subs are httpx-probed and merged into live hosts
  14. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
  15. URL Consolidation & Live Check (httpx)
- 16. Directory Fuzzing (ffuf) [Requires --wordlist]
+ 16. JS Secret Scan (gf + httpx)
+ 17. Directory Fuzzing (ffuf) [Requires --wordlist]
 
- PHASE 4 — VULNERABILITY SCANNING (Steps 17–20)
- 17. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
- 18. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
- 19. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
- 20. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
+ PHASE 4 — VULNERABILITY SCANNING (Steps 18–21)
+ 18. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
+ 19. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
+ 20. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
+ 21. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
 
 Press 's' at any time during scanning to skip the current tool.
 All results are stored in a SQLite database for querying and reporting.

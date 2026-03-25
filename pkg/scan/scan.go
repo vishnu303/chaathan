@@ -47,7 +47,7 @@ type Step struct {
 //	Phase 1 (Asset Discovery):   passive_enum, active_enum, github_recon, search_engine_recon
 //	Phase 2 (Validation):        dns_resolution, dns_bruteforce, http_probing, tls_analysis, port_scanning
 //	Phase 3 (Content Discovery): url_discovery, web_crawling, js_analysis, js_subdomain_discovery,
-//	                             param_discovery, url_consolidation, dir_fuzzing
+//	                             param_discovery, url_consolidation, js_secret_scan, dir_fuzzing
 //	Phase 4 (Vuln Scanning):     vuln_scanning, vuln_scanning_urls, takeover_detection, xss_scanning
 var WildcardSteps = []Step{
 	// Phase 1 — Asset Discovery
@@ -68,6 +68,7 @@ var WildcardSteps = []Step{
 	{Name: "js_subdomain_discovery", Description: "JavaScript Subdomain Extraction", Required: false, Tool: "subdomainizer"},
 	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
 	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
+	{Name: "js_secret_scan", Description: "JS File Secret Scan (gf)", Required: false, Tool: "httpx,gf"},
 	{Name: "dir_fuzzing", Description: "Directory Fuzzing", Required: false, Tool: "ffuf"},
 	// Phase 4 — Vulnerability Scanning
 	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},

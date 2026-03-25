@@ -9,12 +9,41 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
+
+var tier1GFPatterns = map[string]bool{
+	"xss":         true,
+	"sqli":        true,
+	"sqli-error":  true,
+	"lfi":         true,
+	"ssrf":        true,
+	"redirect":    true,
+	"rce":         true,
+	"rce-2":       true,
+	"idor":        true,
+	"debug_logic": true,
+	"ssti":        true,
+}
+
+var jsGFPatterns = map[string]bool{
+	"domxss":   true,
+	"execs":    true,
+	"js-sinks": true,
+}
+
+var secretGFPatterns = map[string]bool{
+	"api-keys": true,
+	"aws-keys": true,
+	"firebase": true,
+	"github":   true,
+	"jwt":      true,
+}
 
 // ─────────────────────────────────────────────────────────────
 // Skip-tool support
@@ -234,61 +263,72 @@ func collectROIMetadataTargetsFromFile(inputFile, outputFile string, perHostLimi
 	return count
 }
 
-// collectHighValueURLsFromFile writes deduplicated high-value URLs from
-// inputFile to outputFile.
-func collectHighValueURLsFromFile(inputFile, outputFile string) int {
-	file, err := os.Open(inputFile)
-	if err != nil {
-		return 0
-	}
-	defer file.Close()
-
-	f, err := os.Create(outputFile)
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-
-	seen := make(map[string]bool)
-	count := 0
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || seen[line] || !isHighValueURL(line) {
-			continue
-		}
-		seen[line] = true
-		fmt.Fprintln(f, line)
-		count++
-	}
-	return count
-}
-
-// collectGFTargetURLs runs gf for each known pattern against inputFile,
+// collectGFTargetURLs runs installed Tier 1 gf patterns against inputFile,
 // merges the matches and writes them to outputFile.
 func collectGFTargetURLs(c *Ctx, tb *tools.ToolBox, inputFile, outputFile string) int {
-	patterns := []string{"ssrf", "redirect", "lfi", "sqli", "xss", "rce", "idor", "debug_logic"}
+	return collectGFMatches(c.GoCtx, tb, inputFile, outputFile, tier1GFPatterns)
+}
+
+// collectGFMatches runs the installed gf patterns present in allowlist against
+// inputFile, merges the matches and writes them to outputFile.
+func collectGFMatches(ctx context.Context, tb *tools.ToolBox, inputFile, outputFile string, allowlist map[string]bool) int {
+	patterns := installedGFPatterns(allowlist)
 	tmpFiles := make([]string, 0, len(patterns))
 
 	for _, pattern := range patterns {
 		tmpFile := outputFile + "." + pattern
-		if err := tb.RunGFPattern(c.GoCtx, pattern, inputFile, tmpFile); err != nil {
+		if err := tb.RunGFPattern(ctx, pattern, inputFile, tmpFile); err != nil {
+			_ = os.Remove(tmpFile)
 			continue
 		}
 		if utils.FileExists(tmpFile) {
 			tmpFiles = append(tmpFiles, tmpFile)
+			defer os.Remove(tmpFile)
 		}
 	}
 
 	if len(tmpFiles) == 0 {
+		writeEmptyFile(outputFile)
 		return 0
 	}
 	if err := utils.MergeAndDeduplicate(tmpFiles, outputFile); err != nil {
+		writeEmptyFile(outputFile)
 		return 0
 	}
 	count, _ := utils.CountFileLines(outputFile)
 	return count
+}
+
+// installedGFPatterns returns the subset of allowlist currently installed in ~/.gf/.
+func installedGFPatterns(allowlist map[string]bool) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	gfDir := filepath.Join(home, ".gf")
+	entries, err := os.ReadDir(gfDir)
+	if err != nil {
+		return nil
+	}
+
+	patterns := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".json")
+		if allowlist == nil || allowlist[name] {
+			patterns = append(patterns, name)
+		}
+	}
+	sort.Strings(patterns)
+	return patterns
+}
+
+// writeEmptyFile truncates or creates a file so retry paths do not reuse stale output.
+func writeEmptyFile(path string) {
+	_ = os.WriteFile(path, nil, 0644)
 }
 
 // ─────────────────────────────────────────────────────────────

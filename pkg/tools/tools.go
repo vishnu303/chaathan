@@ -440,6 +440,34 @@ func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputF
 	return err
 }
 
+// RunHttpxFetchJS downloads JS responses into downloadDir using conservative
+// concurrency so the workflow can scan local copies for secrets with low noise.
+func (t *ToolBox) RunHttpxFetchJS(ctx context.Context, urlsFile string, downloadDir string) error {
+	threads := 10
+	timeout := 5
+	if t.Config != nil && t.Config.Httpx.Threads > 0 {
+		threads = t.Config.Httpx.Threads / 5
+		if threads < 5 {
+			threads = 5
+		}
+		if threads > 15 {
+			threads = 15
+		}
+	}
+
+	args := []string{
+		"-l", urlsFile,
+		"-sr",
+		"-srd", downloadDir,
+		"-threads", strconv.Itoa(threads),
+		"-timeout", strconv.Itoa(timeout),
+		"-silent",
+		"-no-fallback",
+	}
+	_, err := t.Runner.Run(ctx, "httpx", args)
+	return err
+}
+
 // RunNucleiURLs runs nuclei on specific URLs with stricter rate limits.
 // Used for path-specific vulnerability scanning (separate from infra scanning).
 func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile string) error {

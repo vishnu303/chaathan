@@ -1,4 +1,4 @@
-// Phase 3 — Content Discovery (Steps 10–16)
+// Phase 3 — Content Discovery (Steps 10–17)
 //
 // Discovers URLs, endpoints, and directories from live hosts.
 // Wayback/GAU run here (not in Phase 1) so URLs are collected
@@ -11,7 +11,8 @@
 //      └─ Mini re-probe: new subs get httpx-probed and merged into httpx_live.json
 //  14. HTTP Parameter Discovery (Arjun) [Optional]
 //  15. URL Consolidation & Live Check (httpx) + ROI metadata
-//  16. Directory Fuzzing (ffuf) [Optional — requires --wordlist]
+//  16. JS Secret Scan (gf JS + Secrets)
+//  17. Directory Fuzzing (ffuf) [Optional — requires --wordlist]
 package wildcard_flow
 
 import (
@@ -19,8 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -28,6 +32,8 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/metadata"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
+
+const maxJSDownloads = 200
 
 // ─────────────────────────────────────────────────────────────
 // Step 10 — Historical URL Discovery (Waybackurls + GAU)
@@ -323,19 +329,103 @@ func stepURLConsolidation(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 16 — Directory Fuzzing (ffuf)
+// Step 16 — JS Secret Scan (gf JS + Secrets)
+// ─────────────────────────────────────────────────────────────
+
+// stepJSSecretScan downloads a capped set of JS files, scans their content
+// with installed gf JS/secret patterns, and writes merged findings.
+func stepJSSecretScan(c *Ctx) bool {
+	if c.State.IsStepCompleted("js_secret_scan") {
+		logger.Section("Step 16: JS Secret Scan (gf JS + Secrets) [RESUMED — skipping]")
+		return c.cancelled()
+	}
+
+	logger.Section("Step 16: JS Secret Scan (gf JS + Secrets)")
+	writeEmptyFile(c.F.JSCombinedFile)
+	writeEmptyFile(c.F.GFJSMatches)
+	writeEmptyFile(c.F.GFSecretsMatches)
+	writeEmptyFile(c.F.GFSecretsFinal)
+
+	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, maxJSDownloads)
+	if jsCount == 0 {
+		logger.Info("  No JavaScript URLs found in live URL set")
+		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
+		return c.cancelled()
+	}
+	logger.Info("  Selected %d JavaScript URL(s) for conservative fetching", jsCount)
+
+	if err := os.RemoveAll(c.F.JSDownloadsDir); err != nil {
+		logger.Warning("Failed to reset JS download directory: %v", err)
+	}
+	if err := os.MkdirAll(c.F.JSDownloadsDir, 0755); err != nil {
+		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
+		logger.Warning("Could not create JS download directory: %v", err)
+		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
+		return c.cancelled()
+	}
+
+	logger.SubStep("Fetching JavaScript files with httpx...")
+	if err := runWithSkip(c, "httpx (JS fetch)", func(sCtx context.Context) error {
+		return c.Tb.RunHttpxFetchJS(sCtx, c.F.JSURLsFile, c.F.JSDownloadsDir)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			logger.Info("  JS fetching skipped; continuing with any downloaded content")
+		} else {
+			logger.Warning("JS fetching encountered an error: %v", err)
+		}
+	}
+
+	downloadedFiles, combinedBytes, err := concatenateDownloadedFiles(c.F.JSDownloadsDir, c.F.JSCombinedFile)
+	if err != nil {
+		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
+		logger.Warning("Failed to combine downloaded JS content: %v", err)
+		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
+		return c.cancelled()
+	}
+	if combinedBytes == 0 {
+		logger.Info("  No JS content retrieved")
+		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
+		return c.cancelled()
+	}
+	logger.Info("  Combined %d downloaded JS response file(s)", downloadedFiles)
+
+	logger.SubStep("Running gf JavaScript patterns on downloaded content...")
+	jsMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFJSMatches, jsGFPatterns)
+
+	logger.SubStep("Running gf secret patterns on downloaded content...")
+	secretMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFSecretsMatches, secretGFPatterns)
+
+	if err := utils.MergeAndDeduplicate(existingFiles(c.F.GFJSMatches, c.F.GFSecretsMatches), c.F.GFSecretsFinal); err != nil {
+		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
+		logger.Warning("Failed to merge JS secret findings: %v", err)
+		writeEmptyFile(c.F.GFSecretsFinal)
+	}
+
+	totalFindings, _ := utils.CountFileLines(c.F.GFSecretsFinal)
+	if totalFindings > 0 {
+		logger.Info("  Found %d JS/secret findings (%d JS matches, %d secret matches)", totalFindings, jsMatchCount, secretMatchCount)
+	} else {
+		logger.Info("  No JS or secret findings matched installed gf patterns")
+	}
+
+	c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
+	return c.cancelled()
+}
+
+// ─────────────────────────────────────────────────────────────
+// Step 17 — Directory Fuzzing (ffuf)
 // ─────────────────────────────────────────────────────────────
 
 // stepDirFuzzing runs ffuf when a wordlist is provided via --wordlist.
 // Returns true if the scan should be cancelled.
 func stepDirFuzzing(c *Ctx) bool {
 	if c.State.IsStepCompleted("dir_fuzzing") {
-		logger.Section("Step 16: Directory Fuzzing (ffuf) [RESUMED — skipping]")
+		logger.Section("Step 17: Directory Fuzzing (ffuf) [RESUMED — skipping]")
 		return c.cancelled()
 	}
 
 	if c.WordlistPath != "" {
-		logger.Section("Step 16: Directory Fuzzing (ffuf)")
+		logger.Section("Step 17: Directory Fuzzing (ffuf)")
 		targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
 		logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
 
@@ -354,12 +444,113 @@ func stepDirFuzzing(c *Ctx) bool {
 			}
 		}
 	} else {
-		logger.Section("Step 16: Skipping ffuf (no --wordlist provided)")
+		logger.Section("Step 17: Skipping ffuf (no --wordlist provided)")
 		logger.Info("Provide --wordlist to enable ffuf")
 	}
 
 	c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
 	return c.cancelled()
+}
+
+// collectJSURLsFromFile filters live URLs for JavaScript files, deduplicates
+// them, and writes up to limit entries into outputFile.
+func collectJSURLsFromFile(inputFile, outputFile string, limit int) int {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		writeEmptyFile(outputFile)
+		return 0
+	}
+	defer file.Close()
+
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	seen := make(map[string]bool)
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := extractPrimaryURL(scanner.Text())
+		if line == "" || seen[line] || !isJavaScriptURL(line) {
+			continue
+		}
+		seen[line] = true
+		fmt.Fprintln(f, line)
+		count++
+		if limit > 0 && count >= limit {
+			break
+		}
+	}
+	return count
+}
+
+// extractPrimaryURL strips auxiliary tokens (like httpx status codes) and
+// returns the leading URL field from a scanner line.
+func extractPrimaryURL(raw string) string {
+	fields := strings.Fields(strings.TrimSpace(raw))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// isJavaScriptURL returns true when the URL path ends in .js, ignoring query
+// strings and fragments.
+func isJavaScriptURL(raw string) bool {
+	raw = extractPrimaryURL(raw)
+	if raw == "" {
+		return false
+	}
+	if idx := strings.IndexAny(raw, "?#"); idx >= 0 {
+		raw = raw[:idx]
+	}
+	return strings.HasSuffix(strings.ToLower(raw), ".js")
+}
+
+// concatenateDownloadedFiles merges all files under downloadDir into outputFile.
+func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, error) {
+	var files []string
+	err := filepath.Walk(downloadDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info == nil || info.IsDir() {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	sort.Strings(files)
+	out, err := os.Create(outputFile)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer out.Close()
+
+	var totalBytes int64
+	writtenFiles := 0
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		n, err := out.Write(data)
+		if err != nil {
+			return writtenFiles, totalBytes, err
+		}
+		totalBytes += int64(n)
+		if _, err := io.WriteString(out, "\n"); err != nil {
+			return writtenFiles, totalBytes, err
+		}
+		writtenFiles++
+	}
+	return writtenFiles, totalBytes, nil
 }
 
 // ─────────────────────────────────────────────────────────────

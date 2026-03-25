@@ -96,13 +96,18 @@ type Files struct {
 	ArjunURLsOut       string
 	AllURLsRaw         string
 	AllURLsLive        string
+	JSURLsFile         string
+	JSDownloadsDir     string
+	JSCombinedFile     string
+	GFJSMatches        string
+	GFSecretsMatches   string
+	GFSecretsFinal     string
 	ROIMetadataTargets string
 	FfufOut            string
 	NucleiOut          string
 	NucleiURLOut       string
 	NucleiURLTargets   string
 	NucleiGFMatches    string
-	NucleiFallback     string
 	SubjackOut         string
 	ParamURLsFile      string
 	DalfoxOut          string
@@ -143,6 +148,12 @@ func newFiles(dir string) Files {
 		ArjunURLsOut:       j("arjun_urls.txt"),
 		AllURLsRaw:         j("all_urls_raw.txt"),
 		AllURLsLive:        j("all_urls_live.txt"),
+		JSURLsFile:         j("js_urls.txt"),
+		JSDownloadsDir:     j("js_downloads"),
+		JSCombinedFile:     j("js_combined.txt"),
+		GFJSMatches:        j("gf_js_matches.txt"),
+		GFSecretsMatches:   j("gf_secrets_matches.txt"),
+		GFSecretsFinal:     jf("gf_secrets_findings.txt"),
 		ROIMetadataTargets: j("roi_metadata_targets.txt"),
 		FfufOut:            j("ffuf_results.json"),
 		// Nuclei JSON outputs go to final_files/ — they are product files
@@ -152,7 +163,6 @@ func newFiles(dir string) Files {
 		// Nuclei working files (URL target lists) stay in intermediate_files/
 		NucleiURLTargets: j("nuclei_url_targets.txt"),
 		NucleiGFMatches:  j("nuclei_url_targets_gf.txt"),
-		NucleiFallback:   j("nuclei_url_targets_fallback.txt"),
 		SubjackOut:       j("subjack_takeovers.txt"),
 		ParamURLsFile:    j("param_urls_live.txt"),
 	}
@@ -430,7 +440,7 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── Phase 3: Content Discovery (Steps 10–16) ─────────────────
+	// ── Phase 3: Content Discovery (Steps 10–17) ─────────────────
 	// Step 10: Historical URL Discovery (Wayback/GAU) — runs here so URLs
 	// are collected only for validated live hosts, not dead subdomains.
 	if stepURLDiscovery(c) {
@@ -458,13 +468,19 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── Phase 3 (cont.) Step 16: Directory Fuzzing ──────────────
+	// ── Phase 3 (cont.) Step 16: JS Secret Scan ─────────────────
+	if stepJSSecretScan(c) {
+		finalizeScan(c, "cancelled")
+		return nil
+	}
+
+	// ── Phase 3 (cont.) Step 17: Directory Fuzzing ──────────────
 	if stepDirFuzzing(c) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
-	// ── Phase 4: Vulnerability Scanning (Steps 17–20) ──────────
+	// ── Phase 4: Vulnerability Scanning (Steps 18–21) ──────────
 	if stepVulnScanningInfra(c) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -474,13 +490,13 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── Phase 4 (cont.) Steps 19–20 ───────────────────────────
+	// ── Phase 4 (cont.) Steps 20–21 ───────────────────────────
 	if stepTakeoverDetection(c) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
-	// ── Phase 4 Step 20: XSS Scanning ──────────────────────────
+	// ── Phase 4 Step 21: XSS Scanning ──────────────────────────
 	stepXSSScanning(c)
 
 	finalizeScan(c, "completed")
