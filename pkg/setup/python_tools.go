@@ -136,6 +136,13 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 				return
 			}
 
+			// Install requirements if they exist (e.g. termcolor for SubDomainizer)
+			reqFile := filepath.Join(tempDir, "requirements.txt")
+			if _, err := os.Stat(reqFile); err == nil {
+				reqCmd := exec.Command(pip, "install", "--break-system-packages", "-r", reqFile)
+				_ = captureCommandOutput(reqCmd, tool.name+" (reqs)")
+			}
+
 			src := filepath.Join(tempDir, tool.script)
 			dst := filepath.Join(binDir, tool.name)
 			input, err := os.ReadFile(src)

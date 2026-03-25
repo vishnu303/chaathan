@@ -210,6 +210,7 @@ type Ctx struct {
 	GitHubToken       string
 	Verbose           bool
 	GenerateReport    bool
+	NotifyStepComplete bool
 }
 
 // cancelled returns true when the parent context has been cancelled.
@@ -393,6 +394,7 @@ func Run(cfg RunConfig) error {
 		GitHubToken:       cfg.GitHubToken,
 		Verbose:           cfg.Verbose,
 		GenerateReport:    cfg.GenerateReport,
+		NotifyStepComplete: cfg.Cfg != nil && cfg.Cfg.Notifications.StepComplete,
 	}
 
 	logger.Info("💡 Press 's' at any time to skip the current tool")
@@ -401,41 +403,41 @@ func Run(cfg RunConfig) error {
 	// ── Execute all steps ────────────────────────────────────
 
 	// ── Phase 1: Asset Discovery (Steps 1–4) ──────────────────────
-	if stepPassiveEnum(c) {
+	if executeStep(c, "passive_enum", stepPassiveEnum) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepActiveEnum(c) {
+	if executeStep(c, "active_enum", stepActiveEnum) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepGitHubRecon(c) {
+	if executeStep(c, "github_recon", stepGitHubRecon) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepSearchEngineRecon(c) {
+	if executeStep(c, "search_engine_recon", stepSearchEngineRecon) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
 	// ── Phase 2: Validation & Probing (Steps 5–9) ──────────────────
-	if stepDNSConsolidation(c) {
+	if executeStep(c, "dns_resolution", stepDNSConsolidation) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepDNSBruteforce(c) {
+	if executeStep(c, "dns_bruteforce", stepDNSBruteforce) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepHTTPProbing(c) {
+	if executeStep(c, "http_probing", stepHTTPProbing) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepTLSAnalysis(c) {
+	if executeStep(c, "tls_analysis", stepTLSAnalysis) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepPortScanning(c) {
+	if executeStep(c, "port_scanning", stepPortScanning) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
@@ -443,64 +445,103 @@ func Run(cfg RunConfig) error {
 	// ── Phase 3: Content Discovery (Steps 10–17) ─────────────────
 	// Step 10: Historical URL Discovery (Wayback/GAU) — runs here so URLs
 	// are collected only for validated live hosts, not dead subdomains.
-	if stepURLDiscovery(c) {
+	if executeStep(c, "url_discovery", stepURLDiscovery) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepWebCrawling(c) {
+	if executeStep(c, "web_crawling", stepWebCrawling) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepJSAnalysis(c) {
+	if executeStep(c, "js_analysis", stepJSAnalysis) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepJSSubdomains(c) {
+	if executeStep(c, "js_subdomain_discovery", stepJSSubdomains) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepParamDiscovery(c) {
+	if executeStep(c, "param_discovery", stepParamDiscovery) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepURLConsolidation(c) {
+	if executeStep(c, "url_consolidation", stepURLConsolidation) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
 	// ── Phase 3 (cont.) Step 16: JS Secret Scan ─────────────────
-	if stepJSSecretScan(c) {
+	if executeStep(c, "js_secret_scan", stepJSSecretScan) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
 	// ── Phase 3 (cont.) Step 17: Directory Fuzzing ──────────────
-	if stepDirFuzzing(c) {
+	if executeStep(c, "dir_fuzzing", stepDirFuzzing) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
 	// ── Phase 4: Vulnerability Scanning (Steps 18–21) ──────────
-	if stepVulnScanningInfra(c) {
+	if executeStep(c, "vuln_scanning", stepVulnScanningInfra) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepVulnScanningURLs(c) {
+	if executeStep(c, "vuln_scanning_urls", stepVulnScanningURLs) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
 	// ── Phase 4 (cont.) Steps 20–21 ───────────────────────────
-	if stepTakeoverDetection(c) {
+	if executeStep(c, "takeover_detection", stepTakeoverDetection) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
 	// ── Phase 4 Step 21: XSS Scanning ──────────────────────────
-	stepXSSScanning(c)
+	executeStep(c, "xss_scanning", stepXSSScanning)
 
 	finalizeScan(c, "completed")
 	return nil
+}
+
+func executeStep(c *Ctx, stepName string, fn func(*Ctx) bool) bool {
+	alreadyCompleted := c.State != nil && c.State.IsStepCompleted(stepName)
+	cancelled := fn(c)
+	if !alreadyCompleted && c.State != nil && c.State.IsStepCompleted(stepName) {
+		notifyStepCompletion(c, stepName)
+	}
+	return cancelled
+}
+
+func notifyStepCompletion(c *Ctx, stepName string) {
+	if c.Notifier == nil || !c.NotifyStepComplete {
+		return
+	}
+
+	stepNumber := 0
+	stepDescription := stepName
+	for i, step := range scan.WildcardSteps {
+		if step.Name == stepName {
+			stepNumber = i + 1
+			stepDescription = step.Description
+			break
+		}
+	}
+
+	if err := c.Notifier.SendStepComplete(notify.StepComplete{
+		Target:          c.Domain,
+		ScanID:          c.ScanID,
+		ScanType:        "wildcard",
+		StepName:        stepName,
+		StepDescription: stepDescription,
+		StepNumber:      stepNumber,
+		TotalSteps:      len(scan.WildcardSteps),
+		Duration:        time.Since(c.StartTime),
+		Timestamp:       time.Now(),
+	}); err != nil {
+		logger.Warning("Failed to send step completion notification: %v", err)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
@@ -114,6 +115,7 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 	if len(options.Env) > 0 {
 		cmd.Env = append(os.Environ(), options.Env...)
 	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if r.Verbose {
 		logger.Command(fmt.Sprintf("%s %s", command, strings.Join(args, " ")))
@@ -123,7 +125,7 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := startAndWait(ctx, cmd)
 	if err != nil {
 		if r.Verbose {
 			logger.Debug("CMD Error: %v | Stderr: %s", err, stderr.String())
@@ -221,11 +223,12 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := startAndWait(ctx, cmd)
 	if err != nil {
 		if stderr.Len() > 0 {
 			return stdout.String(), fmt.Errorf("%v: %s", err, stderr.String())
@@ -234,6 +237,49 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 	}
 
 	return stdout.String(), nil
+}
+
+// startAndWait ensures context cancellation terminates the entire process group,
+// not just the top-level command. Many recon tools spawn child processes, and
+// skip/cancel must tear those down so the workflow can advance immediately.
+func startAndWait(ctx context.Context, cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		killProcessGroup(cmd)
+		
+		// Wait at most 2 seconds for process and its I/O to cleanly exit.
+		// If child processes inherited stdout/stderr and didn't die from the group kill,
+		// Wait() would block indefinitely. This prevents the hang.
+		select {
+		case err := <-done:
+			if err == nil {
+				return ctx.Err()
+			}
+			return err
+		case <-time.After(2 * time.Second):
+			return ctx.Err()
+		}
+	}
+}
+
+func killProcessGroup(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+
+	// Negative PID targets the entire process group created via Setpgid.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
 func getDockerImage(tool string) string {

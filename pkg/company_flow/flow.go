@@ -20,6 +20,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/config"
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/notify"
 	"github.com/vishnu303/chaathan-flow/pkg/runner"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
@@ -58,6 +59,10 @@ type Ctx struct {
 	// Tool runner (steps may use r.Run directly for custom args)
 	R  runner.Runner
 	Tb *tools.ToolBox
+
+	// Notifications
+	Notifier           *notify.Notifier
+	NotifyStepComplete bool
 
 	// Step counters (updated by each step)
 	Total     int
@@ -142,6 +147,11 @@ func Run(cfg RunConfig) error {
 	}
 	tb := tools.New(r, toolsCfg)
 
+	var notifier *notify.Notifier
+	if cfg.Cfg != nil && cfg.Cfg.Notifications.Enabled {
+		notifier = notify.New(&cfg.Cfg.Notifications)
+	}
+
 	// ── Build shared Ctx ─────────────────────────────────────
 	c := &Ctx{
 		GoCtx:          goCtx,
@@ -152,6 +162,8 @@ func Run(cfg RunConfig) error {
 		StartTime:      startTime,
 		R:              r,
 		Tb:             tb,
+		Notifier:       notifier,
+		NotifyStepComplete: cfg.Cfg != nil && cfg.Cfg.Notifications.StepComplete,
 		SkipMetabigor:  cfg.SkipMetabigor,
 		SkipAmassIntel: cfg.SkipAmassIntel,
 		SkipCloudEnum:  cfg.SkipCloudEnum,
@@ -160,21 +172,50 @@ func Run(cfg RunConfig) error {
 
 	// ── Execute steps ────────────────────────────────────────
 
-	if stepMetabigor(c) {
+	if executeStep(c, 1, "metabigor", "ASN & Network Range Discovery (Metabigor)", stepMetabigor) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepAmassIntel(c) {
+	if executeStep(c, 2, "amass_intel", "Root Domain Discovery (Amass Intel)", stepAmassIntel) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if stepCloudEnum(c) {
+	if executeStep(c, 3, "cloud_enum", "Cloud Enumeration (Cloud Enum)", stepCloudEnum) {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
 
 	finalizeScan(c, "completed")
 	return nil
+}
+
+func executeStep(c *Ctx, stepNumber int, stepName, stepDescription string, fn func(*Ctx) bool) bool {
+	completedBefore := c.Completed
+	cancelled := fn(c)
+	if c.Completed > completedBefore {
+		notifyStepCompletion(c, stepNumber, stepName, stepDescription)
+	}
+	return cancelled
+}
+
+func notifyStepCompletion(c *Ctx, stepNumber int, stepName, stepDescription string) {
+	if c.Notifier == nil || !c.NotifyStepComplete {
+		return
+	}
+
+	if err := c.Notifier.SendStepComplete(notify.StepComplete{
+		Target:          c.Company,
+		ScanID:          c.ScanID,
+		ScanType:        "company",
+		StepName:        stepName,
+		StepDescription: stepDescription,
+		StepNumber:      stepNumber,
+		TotalSteps:      3,
+		Duration:        time.Since(c.StartTime),
+		Timestamp:       time.Now(),
+	}); err != nil {
+		logger.Warning("Failed to send step completion notification: %v", err)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -235,4 +276,3 @@ func finalizeScan(c *Ctx, status string) {
 }
 
 // ─────────────────────────────────────────────────────────────
-

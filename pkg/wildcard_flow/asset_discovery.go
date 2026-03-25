@@ -11,6 +11,7 @@
 package wildcard_flow
 
 import (
+	"context"
 	"sync"
 
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
@@ -30,54 +31,66 @@ func stepPassiveEnum(c *Ctx) bool {
 	}
 	logger.Section("Step 1: Passive Subdomain Enumeration")
 
-	var wg sync.WaitGroup
-	wg.Add(3)
+	err := runWithSkip(c, "passive enum", func(sCtx context.Context) error {
+		var wg sync.WaitGroup
+		wg.Add(3)
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] Subfinder")
-		if err := c.Tb.RunSubfinder(c.GoCtx, c.Domain, c.F.SubfinderOut); err != nil {
-			logger.Error("Subfinder failed: %v", err)
-		} else {
-			logger.SubStep("[Done] Subfinder")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.SubfinderOut, "subfinder")
-				logger.Info("  Found %d subdomains", count)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] Subfinder")
+			if err := c.Tb.RunSubfinder(sCtx, c.Domain, c.F.SubfinderOut); err != nil {
+				if sCtx.Err() == nil {
+					logger.Error("Subfinder failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] Subfinder")
+				if c.ScanID > 0 {
+					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.SubfinderOut, "subfinder")
+					logger.Info("  Found %d subdomains", count)
+				}
 			}
-		}
-	}()
+		}()
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] Assetfinder")
-		if err := c.Tb.RunAssetfinder(c.GoCtx, c.Domain, c.F.AssetfinderOut); err != nil {
-			logger.Error("Assetfinder failed: %v", err)
-		} else {
-			logger.SubStep("[Done] Assetfinder")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AssetfinderOut, "assetfinder")
-				logger.Info("  Found %d subdomains", count)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] Assetfinder")
+			if err := c.Tb.RunAssetfinder(sCtx, c.Domain, c.F.AssetfinderOut); err != nil {
+				if sCtx.Err() == nil {
+					logger.Error("Assetfinder failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] Assetfinder")
+				if c.ScanID > 0 {
+					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AssetfinderOut, "assetfinder")
+					logger.Info("  Found %d subdomains", count)
+				}
 			}
-		}
-	}()
+		}()
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] Sublist3r")
-		if err := c.Tb.RunSublist3r(c.GoCtx, c.Domain, c.F.Sublist3rOut); err != nil {
-			if c.Verbose {
-				logger.Warning("Sublist3r failed: %v", err)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] Sublist3r")
+			if err := c.Tb.RunSublist3r(sCtx, c.Domain, c.F.Sublist3rOut); err != nil {
+				if c.Verbose && sCtx.Err() == nil {
+					logger.Warning("Sublist3r failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] Sublist3r")
+				if c.ScanID > 0 {
+					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.Sublist3rOut, "sublist3r")
+					logger.Info("  Found %d subdomains", count)
+				}
 			}
-		} else {
-			logger.SubStep("[Done] Sublist3r")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.Sublist3rOut, "sublist3r")
-				logger.Info("  Found %d subdomains", count)
-			}
-		}
-	}()
+		}()
 
-	wg.Wait()
+		wg.Wait()
+		return nil
+	})
+
+	if err == ErrToolSkipped {
+		// Logged internally by runWithSkip
+	}
+
 	c.StateMgr.MarkStepComplete(c.State, "passive_enum")
 	return c.cancelled()
 }
@@ -94,9 +107,16 @@ func stepActiveEnum(c *Ctx) bool {
 	} else if !c.SkipAmass {
 		logger.Section("Step 2: Active Subdomain Enumeration (Amass)")
 		logger.SubStep("Running Amass (this may take a while)...")
-		if err := c.Tb.RunAmass(c.GoCtx, c.Domain, c.F.AmassOut); err != nil {
-			logger.Error("Amass failed: %v", err)
-			c.StateMgr.MarkStepFailed(c.State, "active_enum", err)
+		if err := runWithSkip(c, "amass", func(sCtx context.Context) error {
+			return c.Tb.RunAmass(sCtx, c.Domain, c.F.AmassOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				// Logged internally by runWithSkip
+				c.StateMgr.MarkStepComplete(c.State, "active_enum")
+			} else {
+				logger.Error("Amass failed: %v", err)
+				c.StateMgr.MarkStepFailed(c.State, "active_enum", err)
+			}
 		} else {
 			if c.ScanID > 0 {
 				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AmassOut, "amass")
@@ -123,9 +143,15 @@ func stepGitHubRecon(c *Ctx) bool {
 	} else if c.GitHubToken != "" {
 		logger.Section("Step 3: GitHub Subdomain Discovery")
 		logger.SubStep("Running github-subdomains...")
-		if err := c.Tb.RunGithubSubdomains(c.GoCtx, c.Domain, c.GitHubToken, c.F.GithubSubsOut); err != nil {
-			c.StateMgr.MarkStepFailed(c.State, "github_recon", err)
-			logger.Warning("GitHub subdomains failed: %v", err)
+		if err := runWithSkip(c, "github-subdomains", func(sCtx context.Context) error {
+			return c.Tb.RunGithubSubdomains(sCtx, c.Domain, c.GitHubToken, c.F.GithubSubsOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				// Logged internally by runWithSkip
+			} else {
+				c.StateMgr.MarkStepFailed(c.State, "github_recon", err)
+				logger.Warning("GitHub subdomains failed: %v", err)
+			}
 		} else {
 			if c.ScanID > 0 {
 				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.GithubSubsOut, "github")
@@ -153,9 +179,15 @@ func stepSearchEngineRecon(c *Ctx) bool {
 	} else if !c.SkipUncover {
 		logger.Section("Step 4: Passive Search Engine Recon (Uncover)")
 		logger.SubStep("Running Uncover (Shodan/Censys/Fofa)...")
-		if err := c.Tb.RunUncover(c.GoCtx, c.Domain, c.F.UncoverOut); err != nil {
-			c.StateMgr.MarkStepFailed(c.State, "search_engine_recon", err)
-			logger.Warning("Uncover failed: %v (check API keys in config)", err)
+		if err := runWithSkip(c, "uncover", func(sCtx context.Context) error {
+			return c.Tb.RunUncover(sCtx, c.Domain, c.F.UncoverOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				// Logged internally by runWithSkip
+			} else {
+				c.StateMgr.MarkStepFailed(c.State, "search_engine_recon", err)
+				logger.Warning("Uncover failed: %v (check API keys in config)", err)
+			}
 		} else {
 			if c.ScanID > 0 {
 				subs, ports, _ := utils.ParseUncoverOutput(c.ScanID, c.F.UncoverOut)

@@ -48,42 +48,49 @@ func stepURLDiscovery(c *Ctx) bool {
 	}
 	logger.Section("Step 10: Historical URL Discovery")
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	err := runWithSkip(c, "url discovery", func(sCtx context.Context) error {
+		var wg sync.WaitGroup
+		wg.Add(2)
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] Waybackurls")
-		if err := c.Tb.RunWaybackurls(c.GoCtx, c.Domain, c.F.WaybackOut); err != nil {
-			if c.Verbose {
-				logger.Warning("Waybackurls failed: %v", err)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] Waybackurls")
+			if err := c.Tb.RunWaybackurls(sCtx, c.Domain, c.F.WaybackOut); err != nil {
+				if c.Verbose && sCtx.Err() == nil {
+					logger.Warning("Waybackurls failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] Waybackurls")
+				if c.ScanID > 0 {
+					count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls")
+					logger.Info("  Found %d URLs", count)
+				}
 			}
-		} else {
-			logger.SubStep("[Done] Waybackurls")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls")
-				logger.Info("  Found %d URLs", count)
-			}
-		}
-	}()
+		}()
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] GAU")
-		if err := c.Tb.RunGau(c.GoCtx, c.Domain, c.F.GauOut); err != nil {
-			if c.Verbose {
-				logger.Warning("GAU failed: %v", err)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] GAU")
+			if err := c.Tb.RunGau(sCtx, c.Domain, c.F.GauOut); err != nil {
+				if c.Verbose && sCtx.Err() == nil {
+					logger.Warning("GAU failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] GAU")
+				if c.ScanID > 0 {
+					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau")
+					logger.Info("  Found %d URLs", count)
+				}
 			}
-		} else {
-			logger.SubStep("[Done] GAU")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau")
-				logger.Info("  Found %d URLs", count)
-			}
-		}
-	}()
+		}()
 
-	wg.Wait()
+		wg.Wait()
+		return nil
+	})
+
+	if err == ErrToolSkipped {
+		// Logged internally by runWithSkip
+	}
 	c.StateMgr.MarkStepComplete(c.State, "url_discovery")
 	return c.cancelled()
 }
@@ -108,46 +115,59 @@ func stepWebCrawling(c *Ctx) bool {
 	crawlFailed := false
 	var crawlFailMu sync.Mutex
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	err := runWithSkip(c, "web crawling", func(sCtx context.Context) error {
+		var wg sync.WaitGroup
+		wg.Add(2)
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] Katana")
-		if err := c.Tb.RunKatana(c.GoCtx, "https://"+c.Domain, c.F.KatanaOut); err != nil {
-			crawlFailMu.Lock()
-			crawlFailed = true
-			crawlFailMu.Unlock()
-			logger.Warning("Katana failed: %v", err)
-		} else {
-			logger.SubStep("[Done] Katana")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseURLsFile(c.ScanID, c.F.KatanaOut, "katana")
-				logger.Info("  Katana found %d URLs", count)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] Katana")
+			if err := c.Tb.RunKatana(sCtx, "https://"+c.Domain, c.F.KatanaOut); err != nil {
+				if sCtx.Err() == nil {
+					crawlFailMu.Lock()
+					crawlFailed = true
+					crawlFailMu.Unlock()
+					logger.Warning("Katana failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] Katana")
+				if c.ScanID > 0 {
+					count, _ := utils.ParseURLsFile(c.ScanID, c.F.KatanaOut, "katana")
+					logger.Info("  Katana found %d URLs", count)
+				}
 			}
-		}
-	}()
+		}()
 
-	go func() {
-		defer wg.Done()
-		logger.SubStep("[Start] GoSpider")
-		if err := c.Tb.RunGoSpider(c.GoCtx, "https://"+c.Domain, c.F.GospiderOut); err != nil {
-			crawlFailMu.Lock()
-			crawlFailed = true
-			crawlFailMu.Unlock()
-			logger.Warning("GoSpider failed: %v", err)
-		} else {
-			logger.SubStep("[Done] GoSpider")
-			if c.ScanID > 0 {
-				count, _ := utils.ParseURLsFile(c.ScanID, c.F.GospiderOut, "gospider")
-				logger.Info("  GoSpider found %d URLs", count)
+		go func() {
+			defer wg.Done()
+			logger.SubStep("[Start] GoSpider")
+			if err := c.Tb.RunGoSpider(sCtx, "https://"+c.Domain, c.F.GospiderOut); err != nil {
+				if sCtx.Err() == nil {
+					crawlFailMu.Lock()
+					crawlFailed = true
+					crawlFailMu.Unlock()
+					logger.Warning("GoSpider failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] GoSpider")
+				if c.ScanID > 0 {
+					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GospiderOut, "gospider")
+					logger.Info("  GoSpider found %d URLs", count)
+				}
 			}
-		}
-	}()
+		}()
 
-	wg.Wait()
-	if crawlFailed {
-		c.StateMgr.MarkStepFailed(c.State, "web_crawling", fmt.Errorf("one or more crawlers failed"))
+		wg.Wait()
+		if crawlFailed {
+			return fmt.Errorf("one or more crawlers failed")
+		}
+		return nil
+	})
+
+	if err != nil && err != ErrToolSkipped {
+		c.StateMgr.MarkStepFailed(c.State, "web_crawling", err)
+	} else if err == ErrToolSkipped {
+		// Logged internally by runWithSkip
 	}
 	c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 	return c.cancelled()
@@ -167,9 +187,15 @@ func stepJSAnalysis(c *Ctx) bool {
 	logger.Section("Step 12: JavaScript Analysis")
 	logger.SubStep("Running Linkfinder...")
 
-	if err := c.Tb.RunLinkfinder(c.GoCtx, "https://"+c.Domain, c.F.LinkfinderOut); err != nil {
-		c.StateMgr.MarkStepFailed(c.State, "js_analysis", err)
-		logger.Warning("Linkfinder failed: %v", err)
+	if err := runWithSkip(c, "linkfinder", func(sCtx context.Context) error {
+		return c.Tb.RunLinkfinder(sCtx, "https://"+c.Domain, c.F.LinkfinderOut)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			// Logged internally by runWithSkip
+		} else {
+			c.StateMgr.MarkStepFailed(c.State, "js_analysis", err)
+			logger.Warning("Linkfinder failed: %v", err)
+		}
 	} else {
 		if c.ScanID > 0 {
 			count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.LinkfinderOut, "linkfinder")
@@ -200,7 +226,7 @@ func stepJSSubdomains(c *Ctx) bool {
 			return c.Tb.RunSubdomainizer(sCtx, "https://"+c.Domain, c.F.SubdomainizerOut)
 		}); err != nil {
 			if err == ErrToolSkipped {
-				logger.Info("  SubDomainizer skipped")
+				// Logged internally by runWithSkip
 			} else {
 				c.StateMgr.MarkStepFailed(c.State, "js_subdomain_discovery", err)
 				logger.Warning("SubDomainizer failed: %v", err)
@@ -429,9 +455,15 @@ func stepDirFuzzing(c *Ctx) bool {
 		targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
 		logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
 
-		if err := c.Tb.RunFfufWithFUZZ(c.GoCtx, targetURL, c.WordlistPath, c.F.FfufOut); err != nil {
-			c.StateMgr.MarkStepFailed(c.State, "dir_fuzzing", err)
-			logger.Warning("ffuf failed: %v", err)
+		if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
+			return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				// Logged internally by runWithSkip
+			} else {
+				c.StateMgr.MarkStepFailed(c.State, "dir_fuzzing", err)
+				logger.Warning("ffuf failed: %v", err)
+			}
 		} else {
 			logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
 			if c.ScanID > 0 {
@@ -659,8 +691,14 @@ func miniReprobeNewSubdomains(c *Ctx) {
 	}
 
 	// Run httpx on the novel subs only.
-	if err := c.Tb.RunHttpx(c.GoCtx, tmpInput, tmpOutput); err != nil {
-		logger.Warning("Mini re-probe httpx failed: %v", err)
+	if err := runWithSkip(c, "httpx (mini re-probe)", func(sCtx context.Context) error {
+		return c.Tb.RunHttpx(sCtx, tmpInput, tmpOutput)
+	}); err != nil {
+		if err != ErrToolSkipped {
+			logger.Warning("Mini re-probe httpx failed: %v", err)
+		} else {
+			// Logged internally by runWithSkip
+		}
 		return
 	}
 

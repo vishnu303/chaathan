@@ -198,6 +198,8 @@ func runConfigSet(cmd *cobra.Command, args []string) {
 		cfg.Notifications.TelegramChatID = value
 	case "notifications.enabled":
 		cfg.Notifications.Enabled = value == "true"
+	case "notifications.step_complete":
+		cfg.Notifications.StepComplete = value == "true"
 	case "notifications.min_severity":
 		cfg.Notifications.MinSeverity = value
 	default:
@@ -208,7 +210,7 @@ func runConfigSet(cmd *cobra.Command, args []string) {
 		logger.Info("  general.verbose, general.mode, general.output_dir")
 		logger.Info("  notifications.discord_webhook, notifications.slack_webhook")
 		logger.Info("  notifications.telegram_bot_token, notifications.telegram_chat_id")
-		logger.Info("  notifications.enabled, notifications.min_severity")
+		logger.Info("  notifications.enabled, notifications.step_complete, notifications.min_severity")
 		return
 	}
 

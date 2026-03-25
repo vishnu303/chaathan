@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
@@ -72,11 +73,18 @@ func runWithSkip(c *Ctx, toolName string, fn func(ctx context.Context) error) er
 	case <-c.SkipChan:
 		toolCancel()
 		logger.Warning("⏭ Skipped: %s", toolName)
-		<-done
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			// Tool ignored cancellation or hung on I/O, proceed anyway
+		}
 		return ErrToolSkipped
 	case <-c.GoCtx.Done():
 		toolCancel()
-		<-done
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
 		return c.GoCtx.Err()
 	}
 }

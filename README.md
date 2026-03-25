@@ -213,6 +213,7 @@ tools:
 
 notifications:
   enabled: false
+  step_complete: false
   min_severity: high
   discord_webhook: ""
   slack_webhook: ""
@@ -226,9 +227,12 @@ Get alerts on Discord/Slack/Telegram when critical findings are discovered:
 
 ```bash
 chaathan config set notifications.enabled true
+chaathan config set notifications.step_complete true
 chaathan config set notifications.discord_webhook https://discord.com/api/webhooks/xxx/yyy
 chaathan config set notifications.min_severity high
 ```
+
+Set `notifications.step_complete` to `true` if you also want a notification after each completed workflow step.
 
 Subdomain takeover findings trigger immediate notifications.
 
