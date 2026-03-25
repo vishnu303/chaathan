@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -246,7 +247,15 @@ func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) 
 	}
 	// Use explicit port list if configured, otherwise use -top-ports
 	if ports := t.naabuPorts(); ports != "" {
-		args = append(args, "-p", ports)
+		if strings.ToLower(ports) == "top" || strings.ToLower(ports) == "top-100" {
+			args = append(args, "-top-ports", "100")
+		} else if strings.ToLower(ports) == "top-1000" {
+			args = append(args, "-top-ports", "1000")
+		} else if strings.ToLower(ports) == "full" || strings.ToLower(ports) == "-" {
+			args = append(args, "-p", "-")
+		} else {
+			args = append(args, "-p", ports)
+		}
 	} else {
 		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
@@ -264,7 +273,15 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 	}
 	// Use explicit port list if configured, otherwise use -top-ports
 	if ports := t.naabuPorts(); ports != "" {
-		args = append(args, "-p", ports)
+		if strings.ToLower(ports) == "top" || strings.ToLower(ports) == "top-100" {
+			args = append(args, "-top-ports", "100")
+		} else if strings.ToLower(ports) == "top-1000" {
+			args = append(args, "-top-ports", "1000")
+		} else if strings.ToLower(ports) == "full" || strings.ToLower(ports) == "-" {
+			args = append(args, "-p", "-")
+		} else {
+			args = append(args, "-p", ports)
+		}
 	} else {
 		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
@@ -323,17 +340,6 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
 	_, err := t.Runner.Run(ctx, "ffuf", args)
-	return err
-}
-
-func (t *ToolBox) RunCewl(ctx context.Context, url string, outputFile string) error {
-	args := []string{
-		url,
-		"-w", outputFile,
-		"--lowercase",
-		"--with-numbers",
-	}
-	_, err := t.Runner.Run(ctx, "cewl", args)
 	return err
 }
 
@@ -446,6 +452,34 @@ func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputF
 	}
 	if t.Config != nil && t.Config.Httpx.FollowRedirects {
 		args = append(args, "-follow-redirects")
+	}
+	_, err := t.Runner.Run(ctx, "httpx", args)
+	return err
+}
+
+// RunHttpxFetchJS downloads JS responses into downloadDir using conservative
+// concurrency so the workflow can scan local copies for secrets with low noise.
+func (t *ToolBox) RunHttpxFetchJS(ctx context.Context, urlsFile string, downloadDir string) error {
+	threads := 10
+	timeout := 5
+	if t.Config != nil && t.Config.Httpx.Threads > 0 {
+		threads = t.Config.Httpx.Threads / 5
+		if threads < 5 {
+			threads = 5
+		}
+		if threads > 15 {
+			threads = 15
+		}
+	}
+
+	args := []string{
+		"-l", urlsFile,
+		"-sr",
+		"-srd", downloadDir,
+		"-threads", strconv.Itoa(threads),
+		"-timeout", strconv.Itoa(timeout),
+		"-silent",
+		"-no-fallback",
 	}
 	_, err := t.Runner.Run(ctx, "httpx", args)
 	return err
@@ -577,16 +611,43 @@ func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, re
 // RunSubjack checks discovered subdomains for potential subdomain takeover vulnerabilities
 // by looking for dangling CNAME records pointing to claimable services.
 func (t *ToolBox) RunSubjack(ctx context.Context, inputFile string, outputFile string) error {
+	fpPath, err := ensureSubjackFingerprints(ctx)
+	if err != nil {
+		return fmt.Errorf("fingerprints error: %v", err)
+	}
 	args := []string{
 		"-w", inputFile,
+		"-c", fpPath,
 		"-o", outputFile,
 		"-ssl",
 		"-t", "50",
 		"-timeout", "30",
 		"-a",
 	}
-	_, err := t.Runner.Run(ctx, "subjack", args)
+	_, err = t.Runner.Run(ctx, "subjack", args)
 	return err
+}
+
+func ensureSubjackFingerprints(ctx context.Context) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	configDir := filepath.Join(home, ".chaathan", "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return "", err
+	}
+	fpPath := filepath.Join(configDir, "fingerprints.json")
+	if _, err := os.Stat(fpPath); err == nil {
+		return fpPath, nil
+	}
+
+	cmd := exec.CommandContext(ctx, "curl", "-sSL", "https://raw.githubusercontent.com/haccer/subjack/master/subjack/fingerprints.json", "-o", fpPath)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to download fingerprints: %v", err)
+	}
+
+	return fpPath, nil
 }
 
 // --- XSS Scanning ---
@@ -627,7 +688,7 @@ func (t *ToolBox) RunTlsx(ctx context.Context, inputFile string, outputFile stri
 		"-l", inputFile,
 		"-o", outputFile,
 		"-json",
-		"-san", "-cn", "-so", "-ex", // SANs, Common Name, Subject Org, Expiry
+		"-san", "-cn", // Request SANs and Common Name (do not mix with -so or -ex)
 		"-c", "50",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
@@ -640,7 +701,7 @@ func (t *ToolBox) RunTlsxHost(ctx context.Context, host string, outputFile strin
 		"-u", host,
 		"-o", outputFile,
 		"-json",
-		"-san", "-cn", "-so", "-ex",
+		"-san", "-cn",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err

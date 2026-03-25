@@ -180,6 +180,9 @@ type NotificationConfig struct {
 	// Enable notifications
 	Enabled bool `yaml:"enabled"`
 
+	// Send a notification when each scan step completes
+	StepComplete bool `yaml:"step_complete"`
+
 	// Minimum severity to notify: info, low, medium, high, critical
 	MinSeverity string `yaml:"min_severity"`
 
@@ -371,8 +374,9 @@ func DefaultConfig() *Config {
 			},
 		},
 		Notifications: NotificationConfig{
-			Enabled:     false,
-			MinSeverity: "high",
+			Enabled:      false,
+			StepComplete: false,
+			MinSeverity:  "high",
 		},
 		Scope: ScopeConfig{
 			InScope:    []string{},

@@ -1,6 +1,6 @@
 # Chaathan
 
-A modular CLI pentesting framework for bug bounty reconnaissance and vulnerability scanning. Single binary, persistent database, 28+ integrated tools.
+A modular CLI pentesting framework for bug bounty reconnaissance and vulnerability scanning. Single binary, persistent database, 27+ integrated tools.
 
 ```
    _____ _                 _   _                 
@@ -13,7 +13,7 @@ A modular CLI pentesting framework for bug bounty reconnaissance and vulnerabili
 
 ## What It Does
 
-Chaathan runs a **21-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
+Chaathan runs a **20-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
 
 ## Install
 
@@ -38,7 +38,7 @@ make setup          # Install all external tools
 # Install tools (first time)
 chaathan setup
 
-# Run full 21-step domain recon
+# Run full 20-step domain recon
 chaathan wildcard -d target.com
 
 # Run company/org discovery
@@ -58,7 +58,7 @@ chaathan report generate 1 --format html
 
 ## Workflows
 
-### Wildcard Scan (21 Steps)
+### Wildcard Scan (20 Steps)
 
 ```bash
 chaathan wildcard -d target.com
@@ -81,12 +81,11 @@ chaathan wildcard -d target.com
 | 13 | SubDomainizer | JS-based subdomain extraction | `--skip-subdomainizer` |
 | 14 | Arjun | HTTP parameter discovery | `--skip-arjun` |
 | 15 | Httpx | URL consolidation + live check | — |
-| 16 | CeWL | Custom wordlist generation | — |
-| 17 | ffuf | Directory fuzzing | needs `--wordlist` |
-| 18 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
-| 19 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
-| 20 | Subjack | Subdomain takeover detection | `--skip-subjack` |
-| 21 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
+| 16 | ffuf | Directory fuzzing | needs `--wordlist` |
+| 17 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
+| 18 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
+| 19 | Subjack | Subdomain takeover detection | `--skip-subjack` |
+| 20 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
 
 **Fast scan** (skip heavy tools):
 ```bash
@@ -116,10 +115,10 @@ chaathan company -n "Company Inc"
 
 | Command | What It Does |
 |---------|-------------|
-| `chaathan wildcard -d <domain>` | Run the 21-step domain recon workflow |
+| `chaathan wildcard -d <domain>` | Run the 20-step domain recon workflow |
 | `chaathan company -n <name>` | Run the 3-step company discovery workflow |
 | `chaathan status` | Dashboard — recent scans, progress, stats |
-| `chaathan tools list` | List all 28+ tools with categories |
+| `chaathan tools list` | List all 27+ tools with categories |
 | `chaathan tools check` | Check which tools are installed |
 | `chaathan diff <id1> <id2>` | Compare two scans — find new assets/vulns |
 | `chaathan scans list` | List all past scans |
@@ -130,6 +129,7 @@ chaathan company -n "Company Inc"
 | `chaathan query ports <id>` | Query open ports |
 | `chaathan query urls <id>` | Query discovered URLs |
 | `chaathan query endpoints <id>` | Query API endpoints |
+| `chaathan query roi <id>` | Rank URLs by likely testing ROI |
 | `chaathan report generate <id>` | Generate report (md/html/json/text) |
 | `chaathan export <id>` | Export results to text files |
 | `chaathan delete target <domain>` | Delete all data for a target |
@@ -138,7 +138,7 @@ chaathan company -n "Company Inc"
 | `chaathan config show` | Show current configuration |
 | `chaathan config edit` | Edit config in your editor |
 | `chaathan config set <key> <val>` | Set a config value |
-| `chaathan setup` | Install all 28+ external tools |
+| `chaathan setup` | Install all 27+ external tools |
 | `chaathan version` | Show version info |
 
 ## Query Examples
@@ -151,6 +151,15 @@ chaathan query subdomains 1 --json         # JSON output
 
 # Vulnerabilities
 chaathan query vulns 1 --severity critical # filter by severity
+
+# ROI-ranked targets
+chaathan query roi 1 --limit 10
+chaathan query roi 1 --json
+chaathan query roi 1 --json -o roi.json
+
+# ROI uses live-host metadata too
+# signals include status, tech, endpoints, vulnerabilities, SSL flags,
+# and lightweight metadata like CSP, cache headers, and auth/login surface
 
 # Pipe to other tools
 chaathan query subdomains 1 --live > live.txt
@@ -204,6 +213,7 @@ tools:
 
 notifications:
   enabled: false
+  step_complete: false
   min_severity: high
   discord_webhook: ""
   slack_webhook: ""
@@ -217,13 +227,16 @@ Get alerts on Discord/Slack/Telegram when critical findings are discovered:
 
 ```bash
 chaathan config set notifications.enabled true
+chaathan config set notifications.step_complete true
 chaathan config set notifications.discord_webhook https://discord.com/api/webhooks/xxx/yyy
 chaathan config set notifications.min_severity high
 ```
 
+Set `notifications.step_complete` to `true` if you also want a notification after each completed workflow step.
+
 Subdomain takeover findings trigger immediate notifications.
 
-## Integrated Tools (28+)
+## Integrated Tools (27+)
 
 | Category | Tools |
 |----------|-------|
@@ -236,7 +249,6 @@ Subdomain takeover findings trigger immediate notifications.
 | **JS Analysis** | linkfinder, subdomainizer |
 | **Parameter Discovery** | arjun |
 | **Fuzzing** | ffuf |
-| **Wordlists** | cewl |
 | **Vuln Scanning** | nuclei, subjack, dalfox |
 | **Passive Recon** | uncover, metabigor, github-subdomains |
 | **Cloud** | cloud_enum |
@@ -310,7 +322,7 @@ chaathan-flow/
 ├── Makefile
 ├── cli/
 │   ├── root.go              # CLI setup, global flags
-│   ├── wildcard.go          # 21-step recon workflow
+│   ├── wildcard.go          # 20-step recon workflow
 │   ├── company.go           # 3-step company/org workflow
 │   ├── setup.go             # Tool installation + logging
 │   ├── scans.go             # Scan management
@@ -332,7 +344,7 @@ chaathan-flow/
 │   ├── runner/runner.go     # Tool execution + retry + docker
 │   ├── scan/scan.go         # Scan state + resume
 │   ├── scope/scope.go       # Scope filtering
-│   ├── tools/tools.go       # Tool wrappers (28+ tools)
+│   ├── tools/tools.go       # Tool wrappers (27+ tools)
 │   └── utils/
 │       ├── file.go          # File utilities
 │       ├── parser.go        # Output parsers

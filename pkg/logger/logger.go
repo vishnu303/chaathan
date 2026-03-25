@@ -145,10 +145,11 @@ func ScanSummary(status string, target string, scanID int64, duration time.Durat
 
 	statusIcon := "✓"
 	statusColor := BrightGreen
-	if status == "cancelled" {
+	switch status {
+	case "cancelled":
 		statusIcon = "⚠"
 		statusColor = BrightYellow
-	} else if status == "failed" {
+	case "failed":
 		statusIcon = "✗"
 		statusColor = BrightRed
 	}

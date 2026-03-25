@@ -41,6 +41,19 @@ type ScanComplete struct {
 	ReportPath string         `json:"report_path,omitempty"`
 }
 
+// StepComplete represents a completed workflow step notification
+type StepComplete struct {
+	Target          string        `json:"target"`
+	ScanID          int64         `json:"scan_id"`
+	ScanType        string        `json:"scan_type,omitempty"`
+	StepName        string        `json:"step_name"`
+	StepDescription string        `json:"step_description,omitempty"`
+	StepNumber      int           `json:"step_number"`
+	TotalSteps      int           `json:"total_steps"`
+	Duration        time.Duration `json:"duration"`
+	Timestamp       time.Time     `json:"timestamp"`
+}
+
 // Notifier handles sending notifications
 type Notifier struct {
 	cfg    *config.NotificationConfig
@@ -152,6 +165,45 @@ func (n *Notifier) SendScanComplete(scan ScanComplete) error {
 	return nil
 }
 
+// SendStepComplete sends a notification when a workflow step completes
+func (n *Notifier) SendStepComplete(step StepComplete) error {
+	if !n.cfg.Enabled || !n.cfg.StepComplete {
+		return nil
+	}
+
+	var errors []string
+
+	if n.cfg.DiscordWebhook != "" {
+		if err := n.sendDiscordStepComplete(step); err != nil {
+			errors = append(errors, fmt.Sprintf("discord: %v", err))
+		}
+	}
+
+	if n.cfg.SlackWebhook != "" {
+		if err := n.sendSlackStepComplete(step); err != nil {
+			errors = append(errors, fmt.Sprintf("slack: %v", err))
+		}
+	}
+
+	if n.cfg.TelegramBotToken != "" && n.cfg.TelegramChatID != "" {
+		if err := n.sendTelegramStepComplete(step); err != nil {
+			errors = append(errors, fmt.Sprintf("telegram: %v", err))
+		}
+	}
+
+	if n.cfg.WebhookURL != "" {
+		if err := n.sendWebhookStepComplete(step); err != nil {
+			errors = append(errors, fmt.Sprintf("webhook: %v", err))
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("notification errors: %s", strings.Join(errors, "; "))
+	}
+
+	return nil
+}
+
 // Discord notification
 func (n *Notifier) sendDiscord(finding Finding) error {
 	color := getDiscordColor(finding.Severity)
@@ -205,6 +257,37 @@ func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
 		"description": fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target),
 		"color":       0x00FF00, // Green
 		"fields":      fields,
+		"footer": map[string]string{
+			"text": "Chaathan Security Scanner",
+		},
+	}
+
+	payload := map[string]interface{}{
+		"embeds": []map[string]interface{}{embed},
+	}
+
+	return n.postJSON(n.cfg.DiscordWebhook, payload)
+}
+
+func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
+	fields := []map[string]interface{}{
+		{"name": "Target", "value": step.Target, "inline": true},
+		{"name": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "inline": true},
+		{"name": "Duration", "value": step.Duration.String(), "inline": true},
+	}
+
+	if step.ScanType != "" {
+		fields = append(fields, map[string]interface{}{
+			"name": "Scan Type", "value": step.ScanType, "inline": true,
+		})
+	}
+
+	embed := map[string]interface{}{
+		"title":       "Step Completed",
+		"description": formatStepLabel(step),
+		"color":       0x0099FF,
+		"fields":      fields,
+		"timestamp":   step.Timestamp.Format(time.RFC3339),
 		"footer": map[string]string{
 			"text": "Chaathan Security Scanner",
 		},
@@ -271,6 +354,35 @@ func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
 	return n.postJSON(n.cfg.SlackWebhook, payload)
 }
 
+func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
+	fields := []map[string]interface{}{
+		{"title": "Target", "value": step.Target, "short": true},
+		{"title": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "short": true},
+		{"title": "Duration", "value": step.Duration.String(), "short": true},
+	}
+
+	if step.ScanType != "" {
+		fields = append(fields, map[string]interface{}{
+			"title": "Scan Type", "value": step.ScanType, "short": true,
+		})
+	}
+
+	attachment := map[string]interface{}{
+		"color":  "#0099FF",
+		"title":  "Step Completed",
+		"text":   formatStepLabel(step),
+		"fields": fields,
+		"footer": "Chaathan Security Scanner",
+		"ts":     step.Timestamp.Unix(),
+	}
+
+	payload := map[string]interface{}{
+		"attachments": []map[string]interface{}{attachment},
+	}
+
+	return n.postJSON(n.cfg.SlackWebhook, payload)
+}
+
 // Telegram notification
 func (n *Notifier) sendTelegram(finding Finding) error {
 	emoji := getSeverityEmoji(finding.Severity)
@@ -315,6 +427,27 @@ func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
 	return n.sendTelegramMessage(text)
 }
 
+func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
+	text := fmt.Sprintf(`✅ *Step Completed*
+
+*Target:* %s
+*Step:* %d/%d
+*Name:* %s
+*Duration:* %s`,
+		escapeMarkdown(step.Target),
+		step.StepNumber,
+		step.TotalSteps,
+		escapeMarkdown(formatStepLabel(step)),
+		step.Duration.String(),
+	)
+
+	if step.ScanType != "" {
+		text += fmt.Sprintf("\n*Scan Type:* %s", escapeMarkdown(step.ScanType))
+	}
+
+	return n.sendTelegramMessage(text)
+}
+
 func (n *Notifier) sendTelegramMessage(text string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.cfg.TelegramBotToken)
 
@@ -332,6 +465,15 @@ func (n *Notifier) sendWebhook(finding Finding) error {
 	payload := map[string]interface{}{
 		"event":   "finding",
 		"finding": finding,
+	}
+
+	return n.postJSON(n.cfg.WebhookURL, payload)
+}
+
+func (n *Notifier) sendWebhookStepComplete(step StepComplete) error {
+	payload := map[string]interface{}{
+		"event": "step_complete",
+		"step":  step,
 	}
 
 	return n.postJSON(n.cfg.WebhookURL, payload)
@@ -414,6 +556,13 @@ func getSeverityEmoji(severity string) string {
 	default:
 		return "⚪"
 	}
+}
+
+func formatStepLabel(step StepComplete) string {
+	if step.StepDescription != "" {
+		return step.StepDescription
+	}
+	return step.StepName
 }
 
 func escapeMarkdown(s string) string {
