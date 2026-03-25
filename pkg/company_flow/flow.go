@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -212,9 +213,33 @@ func notifyStepCompletion(c *Ctx, stepNumber int, stepName, stepDescription stri
 		StepNumber:      stepNumber,
 		TotalSteps:      3,
 		Duration:        time.Since(c.StartTime),
+		FindingsCount:   countFindingsForStep(c, stepName),
 		Timestamp:       time.Now(),
 	}); err != nil {
 		logger.Warning("Failed to send step completion notification: %v", err)
+	}
+}
+
+func countFindingsForStep(c *Ctx, stepName string) int {
+	countLines := func(files ...string) int {
+		total := 0
+		for _, file := range files {
+			if count, err := utils.CountFileLines(file); err == nil {
+				total += count
+			}
+		}
+		return total
+	}
+
+	switch stepName {
+	case "metabigor":
+		return countLines(filepath.Join(c.ResultDir, "asn_ranges.txt"))
+	case "amass_intel":
+		return countLines(filepath.Join(c.ResultDir, "root_domains.txt"))
+	case "cloud_enum":
+		return countLines(filepath.Join(c.ResultDir, "cloud_enum.json"))
+	default:
+		return 0
 	}
 }
 

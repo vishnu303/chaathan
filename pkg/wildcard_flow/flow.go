@@ -419,6 +419,10 @@ func Run(cfg RunConfig) error {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
+	if executeStep(c, "js_subdomain_discovery", stepJSSubdomains) {
+		finalizeScan(c, "cancelled")
+		return nil
+	}
 
 	// ── Phase 2: Validation & Probing (Steps 5–9) ──────────────────
 	if executeStep(c, "dns_resolution", stepDNSConsolidation) {
@@ -457,10 +461,7 @@ func Run(cfg RunConfig) error {
 		finalizeScan(c, "cancelled")
 		return nil
 	}
-	if executeStep(c, "js_subdomain_discovery", stepJSSubdomains) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
+
 	if executeStep(c, "param_discovery", stepParamDiscovery) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -538,9 +539,71 @@ func notifyStepCompletion(c *Ctx, stepName string) {
 		StepNumber:      stepNumber,
 		TotalSteps:      len(scan.WildcardSteps),
 		Duration:        time.Since(c.StartTime),
+		FindingsCount:   countFindingsForStep(c, stepName),
 		Timestamp:       time.Now(),
 	}); err != nil {
 		logger.Warning("Failed to send step completion notification: %v", err)
+	}
+}
+
+func countFindingsForStep(c *Ctx, stepName string) int {
+	countLines := func(files ...string) int {
+		total := 0
+		for _, file := range files {
+			if c, err := utils.CountFileLines(file); err == nil {
+				total += c
+			}
+		}
+		return total
+	}
+
+	switch stepName {
+	case "passive_enum":
+		// Rather than raw lists, the best representation of this step is often the raw results concatenated.
+		// Subdomains are consolidated later, but we can count the underlying outputs.
+		return countLines(c.F.SubfinderOut, c.F.AssetfinderOut, c.F.Sublist3rOut)
+	case "active_enum":
+		return countLines(c.F.AmassOut)
+	case "github_recon":
+		return countLines(c.F.GithubSubsOut)
+	case "search_engine_recon":
+		return countLines(c.F.UncoverOut)
+	case "dns_resolution":
+		return countLines(c.F.DnsxOut)
+	case "dns_bruteforce":
+		return countLines(c.F.ShufflednsOut)
+	case "http_probing":
+		return countLines(c.F.HttpxLiveHosts)
+	case "tls_analysis":
+		return countLines(c.F.TlsxOut)
+	case "port_scanning":
+		return countLines(c.F.NaabuOut)
+	case "url_discovery":
+		return countLines(c.F.WaybackOut, c.F.GauOut)
+	case "web_crawling":
+		return countLines(c.F.KatanaOut, c.F.GospiderOut)
+	case "js_analysis":
+		return countLines(c.F.LinkfinderOut)
+	case "js_subdomain_discovery":
+		return countLines(c.F.SubdomainizerOut)
+	case "param_discovery":
+		return countLines(c.F.ArjunOut)
+	case "url_consolidation":
+		return countLines(c.F.AllURLsLive)
+	case "js_secret_scan":
+		return countLines(c.F.GFSecretsFinal)
+	case "dir_fuzzing":
+		return countLines(c.F.FfufOut)
+	case "vuln_scanning":
+		return countLines(c.F.NucleiOut)
+	case "vuln_scanning_urls":
+		return countLines(c.F.NucleiURLOut)
+	case "takeover_detection":
+		return countLines(c.F.SubjackOut)
+	case "xss_scanning":
+		return countLines(c.F.DalfoxOut)
+	default:
+		return 0
 	}
 }
 

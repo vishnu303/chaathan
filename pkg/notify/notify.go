@@ -51,6 +51,7 @@ type StepComplete struct {
 	StepNumber      int           `json:"step_number"`
 	TotalSteps      int           `json:"total_steps"`
 	Duration        time.Duration `json:"duration"`
+	FindingsCount   int           `json:"findings_count,omitempty"`
 	Timestamp       time.Time     `json:"timestamp"`
 }
 
@@ -274,6 +275,7 @@ func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
 		{"name": "Target", "value": step.Target, "inline": true},
 		{"name": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "inline": true},
 		{"name": "Duration", "value": step.Duration.String(), "inline": true},
+		{"name": "Findings", "value": fmt.Sprintf("%d", step.FindingsCount), "inline": true},
 	}
 
 	if step.ScanType != "" {
@@ -359,6 +361,7 @@ func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
 		{"title": "Target", "value": step.Target, "short": true},
 		{"title": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "short": true},
 		{"title": "Duration", "value": step.Duration.String(), "short": true},
+		{"title": "Findings", "value": fmt.Sprintf("%d", step.FindingsCount), "short": true},
 	}
 
 	if step.ScanType != "" {
@@ -433,12 +436,14 @@ func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
 *Target:* %s
 *Step:* %d/%d
 *Name:* %s
-*Duration:* %s`,
+*Duration:* %s
+*Findings:* %d`,
 		escapeMarkdown(step.Target),
 		step.StepNumber,
 		step.TotalSteps,
 		escapeMarkdown(formatStepLabel(step)),
 		step.Duration.String(),
+		step.FindingsCount,
 	)
 
 	if step.ScanType != "" {
