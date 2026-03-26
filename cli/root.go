@@ -44,6 +44,7 @@ Capabilities:
   - JavaScript analysis and endpoint extraction (LinkFinder, SubDomainizer)
   - Live host detection, TLS analysis & port scanning
   - Web crawling, JS analysis & parameter discovery
+  - JS secret scanning (GF)
   - Vulnerability scanning (Nuclei) & XSS detection (Dalfox)
   - Subdomain takeover detection (Subjack)
   - Cloud infrastructure enumeration (Cloud Enum)
