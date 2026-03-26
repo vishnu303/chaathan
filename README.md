@@ -13,7 +13,7 @@ A modular CLI pentesting framework for bug bounty reconnaissance and vulnerabili
 
 ## What It Does
 
-Chaathan runs a **20-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
+Chaathan runs a **21-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, JS secret scanning, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
 
 ## Install
 
@@ -38,7 +38,7 @@ make setup          # Install all external tools
 # Install tools (first time)
 chaathan setup
 
-# Run full 20-step domain recon
+# Run full 21-step domain recon
 chaathan wildcard -d target.com
 
 # Run company/org discovery
@@ -58,7 +58,7 @@ chaathan report generate 1 --format html
 
 ## Workflows
 
-### Wildcard Scan (20 Steps)
+### Wildcard Scan (21 Steps)
 
 ```bash
 chaathan wildcard -d target.com
@@ -67,25 +67,26 @@ chaathan wildcard -d target.com
 | Step | Tool(s) | What It Does | Skip Flag |
 |------|---------|-------------|-----------|
 | 1 | Subfinder, Assetfinder, Sublist3r | Passive subdomain enumeration | — |
-| 2 | Waybackurls, GAU | Historical URL discovery | — |
-| 3 | Amass | Active DNS brute-force | `--skip-amass` |
-| 4 | github-subdomains | GitHub scraping for subdomains | needs `--github-token` |
-| 5 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
+| 2 | Amass | Active DNS brute-force | `--skip-amass` |
+| 3 | github-subdomains | GitHub scraping for subdomains | needs `--github-token` |
+| 4 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
+| 5 | SubDomainizer | JavaScript subdomain extraction | `--skip-subdomainizer` |
 | 6 | DNSx | Consolidation + DNS resolution | — |
 | 7 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
 | 8 | Httpx | HTTP probing + tech detection | — |
 | 9 | tlsx | TLS cert analysis + SAN extraction | `--skip-tlsx` |
 | 10 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
-| 11 | Katana, GoSpider | Web crawling | `--skip-crawl` |
-| 12 | LinkFinder | JavaScript endpoint extraction | — |
-| 13 | SubDomainizer | JS-based subdomain extraction | `--skip-subdomainizer` |
+| 11 | Waybackurls, GAU | Historical URL discovery | — |
+| 12 | Katana, GoSpider | Web crawling | `--skip-crawl` |
+| 13 | LinkFinder | JavaScript endpoint extraction | — |
 | 14 | Arjun | HTTP parameter discovery | `--skip-arjun` |
 | 15 | Httpx | URL consolidation + live check | — |
-| 16 | ffuf | Directory fuzzing | needs `--wordlist` |
-| 17 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
-| 18 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
-| 19 | Subjack | Subdomain takeover detection | `--skip-subjack` |
-| 20 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
+| 16 | Httpx, gf | JS File Secret Scan | — |
+| 17 | ffuf | Directory fuzzing | needs `--wordlist` |
+| 18 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
+| 19 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
+| 20 | Subjack | Subdomain takeover detection | `--skip-subjack` |
+| 21 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
 
 **Fast scan** (skip heavy tools):
 ```bash
@@ -115,30 +116,34 @@ chaathan company -n "Company Inc"
 
 | Command | What It Does |
 |---------|-------------|
-| `chaathan wildcard -d <domain>` | Run the 20-step domain recon workflow |
+| `chaathan wildcard -d <domain>` | Run the 21-step domain recon workflow |
 | `chaathan company -n <name>` | Run the 3-step company discovery workflow |
 | `chaathan status` | Dashboard — recent scans, progress, stats |
-| `chaathan tools list` | List all 27+ tools with categories |
+| `chaathan tools list` | List all 28+ tools with categories |
 | `chaathan tools check` | Check which tools are installed |
 | `chaathan diff <id1> <id2>` | Compare two scans — find new assets/vulns |
 | `chaathan scans list` | List all past scans |
 | `chaathan scans show <id>` | Show scan details and statistics |
 | `chaathan scans resume <id>` | Resume an interrupted scan |
-| `chaathan query subdomains <id>` | Query discovered subdomains |
+| `chaathan scans delete <id>` | Delete a specific scan |
+| `chaathan query subdomains <id>`| Query discovered subdomains |
 | `chaathan query vulns <id>` | Query vulnerabilities |
 | `chaathan query ports <id>` | Query open ports |
 | `chaathan query urls <id>` | Query discovered URLs |
 | `chaathan query endpoints <id>` | Query API endpoints |
 | `chaathan query roi <id>` | Rank URLs by likely testing ROI |
-| `chaathan report generate <id>` | Generate report (md/html/json/text) |
+| `chaathan report generate <id>` | Generate html/md report |
 | `chaathan export <id>` | Export results to text files |
 | `chaathan delete target <domain>` | Delete all data for a target |
 | `chaathan delete scan <id>` | Delete a specific scan |
 | `chaathan delete old <days>` | Delete scans older than N days |
+| `chaathan delete list` | List scans available for deletion |
 | `chaathan config show` | Show current configuration |
 | `chaathan config edit` | Edit config in your editor |
+| `chaathan config reset` | Reset config to default |
+| `chaathan config path` | Show config file path |
 | `chaathan config set <key> <val>` | Set a config value |
-| `chaathan setup` | Install all 27+ external tools |
+| `chaathan setup` | Install all external tools |
 | `chaathan version` | Show version info |
 
 ## Query Examples
@@ -192,6 +197,8 @@ Key settings:
 general:
   max_retries: 1          # auto-retry failed tools
   retry_delay_sec: 3      # seconds between retries
+  mode: native            # execute natively or in docker
+  concurrency: 5          # concurrent tasks
 
 tools:
   subfinder:
@@ -219,6 +226,28 @@ notifications:
   slack_webhook: ""
   telegram_bot_token: ""
   telegram_chat_id: ""
+  webhook_url: ""
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    from: ""
+    to: ""
+
+scope:
+  in_scope: []
+  out_of_scope: []
+  exclude_ips: []
+  allowed_ports: []
+
+rate_limits:
+  global_rps: 100
+  subfinder: 50
+  httpx: 100
+  nuclei: 150
+  naabu: 1000
 ```
 
 ## Notifications
@@ -229,6 +258,8 @@ Get alerts on Discord/Slack/Telegram when critical findings are discovered:
 chaathan config set notifications.enabled true
 chaathan config set notifications.step_complete true
 chaathan config set notifications.discord_webhook https://discord.com/api/webhooks/xxx/yyy
+chaathan config set notifications.telegram_bot_token 12345:ABCDE
+chaathan config set notifications.telegram_chat_id 987654321
 chaathan config set notifications.min_severity high
 ```
 
@@ -236,7 +267,7 @@ Set `notifications.step_complete` to `true` if you also want a notification afte
 
 Subdomain takeover findings trigger immediate notifications.
 
-## Integrated Tools (27+)
+## Integrated Tools (28+)
 
 | Category | Tools |
 |----------|-------|
@@ -252,6 +283,7 @@ Subdomain takeover findings trigger immediate notifications.
 | **Vuln Scanning** | nuclei, subjack, dalfox |
 | **Passive Recon** | uncover, metabigor, github-subdomains |
 | **Cloud** | cloud_enum |
+| **Utility** | anew, gf |
 
 ```bash
 chaathan tools check    # see what's installed
@@ -268,18 +300,16 @@ chaathan setup          # install everything
 │   └── setup_2024-01-15.log     # Setup install logs
 ├── scans/
 │   └── target.com/
-│       ├── subfinder.txt
-│       ├── all_subdomains.txt
-│       ├── shuffledns_bruteforce.txt
-│       ├── subdomainizer.txt
-│       ├── httpx_live.json
-│       ├── naabu_ports.txt
-│       ├── tlsx_certs.json
-│       ├── arjun_params.json
-│       ├── nuclei_vulns.json
-│       ├── subjack_takeovers.txt
-│       ├── dalfox_xss.json
-│       ├── uncover.json
+│       ├── intermediate_files/  # Raw outputs from individual tools
+│       │   ├── subfinder.txt
+│       │   ├── all_subdomains.txt
+│       │   ├── waybackurls.txt   
+│       │   ├── naabu_ports.txt
+│       │   └── ...
+│       ├── final_files/         # Consolidated final product files
+│       │   ├── nuclei_vulns.json
+│       │   ├── gf_secrets_findings.txt
+│       │   └── dalfox_xss.json
 │       ├── SUMMARY.txt
 │       └── REPORT.md
 ├── reports/
@@ -322,7 +352,7 @@ chaathan-flow/
 ├── Makefile
 ├── cli/
 │   ├── root.go              # CLI setup, global flags
-│   ├── wildcard.go          # 20-step recon workflow
+│   ├── wildcard.go          # 21-step recon workflow
 │   ├── company.go           # 3-step company/org workflow
 │   ├── setup.go             # Tool installation + logging
 │   ├── scans.go             # Scan management
@@ -344,7 +374,7 @@ chaathan-flow/
 │   ├── runner/runner.go     # Tool execution + retry + docker
 │   ├── scan/scan.go         # Scan state + resume
 │   ├── scope/scope.go       # Scope filtering
-│   ├── tools/tools.go       # Tool wrappers (27+ tools)
+│   ├── tools/tools.go       # Tool wrappers (28+ tools)
 │   └── utils/
 │       ├── file.go          # File utilities
 │       ├── parser.go        # Output parsers

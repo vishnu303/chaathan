@@ -50,25 +50,24 @@ Long: `
 Runs a comprehensive 21-step recon & vulnerability scanning workflow
 organised into 4 clean phases:
 
- PHASE 1 — ASSET DISCOVERY (Steps 1–4)
+  PHASE 1 — ASSET DISCOVERY (Steps 1–5)
   1. Passive Enumeration (Subfinder, Assetfinder, Sublist3r) [Parallel]
   2. Active Enumeration (Amass) [Optional, --skip-amass]
   3. GitHub Subdomain Discovery [Requires GITHUB_TOKEN]
   4. Search Engine Dorking (Uncover/Shodan/Censys) [Optional, --skip-uncover]
+  5. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
 
- PHASE 2 — VALIDATION (Steps 5–9)
-  5. Consolidation & DNS Resolution (DNSx)
-  6. DNS Brute-force (ShuffleDNS/MassDNS) [Optional, --skip-shuffledns]
-  7. Live Web Probing (Httpx)  [+ host metadata collection for ROI]
-  8. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
-  9. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
+ PHASE 2 — VALIDATION (Steps 6–10)
+  6. Consolidation & DNS Resolution (DNSx)
+  7. DNS Brute-force (ShuffleDNS/MassDNS) [Optional, --skip-shuffledns]
+  8. Live Web Probing (Httpx)  [+ host metadata collection for ROI]
+  9. TLS Certificate Analysis (tlsx) [Optional, --skip-tlsx]
+ 10. Port Scanning on ALL subdomains (Naabu) [Optional, --skip-naabu]
 
- PHASE 3 — CONTENT DISCOVERY (Steps 10–17)
- 10. Historical URL Discovery (Waybackurls, GAU) [Parallel]
- 11. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
- 12. JavaScript Analysis (LinkFinder)
- 13. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
-     └─ Mini re-probe: new subs are httpx-probed and merged into live hosts
+ PHASE 3 — CONTENT DISCOVERY (Steps 11–17)
+ 11. Historical URL Discovery (Waybackurls, GAU) [Parallel]
+ 12. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
+ 13. JavaScript Analysis (LinkFinder)
  14. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
  15. URL Consolidation & Live Check (httpx)
  16. JS Secret Scan (gf + httpx)
