@@ -182,6 +182,10 @@ func (t *ToolBox) RunAssetfinder(ctx context.Context, domain string, outputFile 
 	args := []string{"--subs-only", domain}
 	output, err := t.Runner.Run(ctx, "assetfinder", args)
 	if err != nil {
+		// On skip/cancel: save whatever partial output landed in the stdout buffer.
+		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
+			_ = writeToFile(outputFile, output)
+		}
 		return err
 	}
 	return writeToFile(outputFile, output)
@@ -400,6 +404,10 @@ func (t *ToolBox) RunWaybackurls(ctx context.Context, domain string, outputFile 
 	args := []string{domain}
 	output, err := t.Runner.Run(ctx, "waybackurls", args)
 	if err != nil {
+		// On skip/cancel: save whatever partial output landed in the stdout buffer.
+		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
+			_ = writeToFile(outputFile, output)
+		}
 		return err
 	}
 	return writeToFile(outputFile, output)
@@ -410,6 +418,10 @@ func (t *ToolBox) RunLinkfinder(ctx context.Context, url string, outputFile stri
 	args := []string{"-i", url, "-o", "cli"}
 	output, err := t.Runner.Run(ctx, "linkfinder", args)
 	if err != nil {
+		// On skip/cancel: save whatever partial output landed in the stdout buffer.
+		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
+			_ = writeToFile(outputFile, output)
+		}
 		return err
 	}
 	return writeToFile(outputFile, output)
@@ -420,6 +432,10 @@ func (t *ToolBox) RunLinkfinderOnFile(ctx context.Context, jsFile string, output
 	args := []string{"-i", jsFile, "-o", "cli"}
 	output, err := t.Runner.Run(ctx, "linkfinder", args)
 	if err != nil {
+		// On skip/cancel: save whatever partial output landed in the stdout buffer.
+		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
+			_ = writeToFile(outputFile, output)
+		}
 		return err
 	}
 	return writeToFile(outputFile, output)
