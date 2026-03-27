@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -610,44 +609,19 @@ func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, re
 
 // RunSubjack checks discovered subdomains for potential subdomain takeover vulnerabilities
 // by looking for dangling CNAME records pointing to claimable services.
+// Note: the -c (fingerprints) flag is not supported by the current version of subjack;
+// fingerprints are embedded in the binary.
 func (t *ToolBox) RunSubjack(ctx context.Context, inputFile string, outputFile string) error {
-	fpPath, err := ensureSubjackFingerprints(ctx)
-	if err != nil {
-		return fmt.Errorf("fingerprints error: %v", err)
-	}
 	args := []string{
 		"-w", inputFile,
-		"-c", fpPath,
 		"-o", outputFile,
 		"-ssl",
 		"-t", "50",
 		"-timeout", "30",
 		"-a",
 	}
-	_, err = t.Runner.Run(ctx, "subjack", args)
+	_, err := t.Runner.Run(ctx, "subjack", args)
 	return err
-}
-
-func ensureSubjackFingerprints(ctx context.Context) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	configDir := filepath.Join(home, ".chaathan", "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return "", err
-	}
-	fpPath := filepath.Join(configDir, "fingerprints.json")
-	if _, err := os.Stat(fpPath); err == nil {
-		return fpPath, nil
-	}
-
-	cmd := exec.CommandContext(ctx, "curl", "-sSL", "https://raw.githubusercontent.com/haccer/subjack/master/subjack/fingerprints.json", "-o", fpPath)
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to download fingerprints: %v", err)
-	}
-
-	return fpPath, nil
 }
 
 // --- XSS Scanning ---

@@ -81,6 +81,7 @@ type Files struct {
 	WaybackOut         string
 	GauOut             string
 	UncoverOut         string
+	UncoverHostsOut    string
 	ConsolidatedSubs   string
 	DnsxOut            string
 	ShufflednsOut      string
@@ -123,7 +124,6 @@ func newFiles(dir string) Files {
 	// final_files/ paths for outputs that are also consumed as pipeline inputs
 	fDir := filepath.Join(dir, "final_files")
 	jf := func(name string) string { return filepath.Join(fDir, name) }
-	_ = jf // suppress unused warning; used below for nuclei json outputs
 	return Files{
 		SubfinderOut:       j("subfinder.txt"),
 		AssetfinderOut:     j("assetfinder.txt"),
@@ -133,6 +133,7 @@ func newFiles(dir string) Files {
 		WaybackOut:         j("waybackurls.txt"),
 		GauOut:             j("gau.txt"),
 		UncoverOut:         j("uncover.json"),
+		UncoverHostsOut:    j("uncover_hosts.txt"),
 		ConsolidatedSubs:   j("all_subdomains.txt"),
 		DnsxOut:            j("dnsx_resolved.json"),
 		ShufflednsOut:      j("shuffledns_bruteforce.txt"),
@@ -325,7 +326,7 @@ func Run(cfg RunConfig) error {
 		logger.Info("Resuming scan #%d (%.1f%% complete, %d/%d steps done)",
 			scanID, scanState.Progress(), len(scanState.CompletedSteps), scanState.TotalSteps)
 	} else {
-		scanState, _ = stateMgr.CreateState(scanID, cfg.Domain, "wildcard", cfg.ResultDir, configJSON)
+		scanState, _ = stateMgr.CreateState(scanID, cfg.Domain, "wildcard", cfg.ResultDir, len(scan.WildcardSteps), configJSON)
 	}
 
 	// ── Runner & ToolBox ─────────────────────────────────────
@@ -402,7 +403,7 @@ func Run(cfg RunConfig) error {
 
 	// ── Execute all steps ────────────────────────────────────
 
-	// ── Phase 1: Asset Discovery (Steps 1–4) ──────────────────────
+	// ── Phase 1: Asset Discovery (Steps 1–5) ──────────────────────
 	if executeStep(c, "passive_enum", stepPassiveEnum) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -424,7 +425,7 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── Phase 2: Validation & Probing (Steps 5–9) ──────────────────
+	// ── Phase 2: Validation & Probing (Steps 6–10) ──────────────────
 	if executeStep(c, "dns_resolution", stepDNSConsolidation) {
 		finalizeScan(c, "cancelled")
 		return nil
@@ -446,7 +447,7 @@ func Run(cfg RunConfig) error {
 		return nil
 	}
 
-	// ── Phase 3: Content Discovery (Steps 10–17) ─────────────────
+	// ── Phase 3: Content Discovery (Steps 11–17) ─────────────────
 	// Step 10: Historical URL Discovery (Wayback/GAU) — runs here so URLs
 	// are collected only for validated live hosts, not dead subdomains.
 	if executeStep(c, "url_discovery", stepURLDiscovery) {
@@ -550,8 +551,8 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	countLines := func(files ...string) int {
 		total := 0
 		for _, file := range files {
-			if c, err := utils.CountFileLines(file); err == nil {
-				total += c
+			if cnt, err := utils.CountFileLines(file); err == nil {
+				total += cnt
 			}
 		}
 		return total
@@ -587,7 +588,7 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "js_subdomain_discovery":
 		return countLines(c.F.SubdomainizerOut)
 	case "param_discovery":
-		return countLines(c.F.ArjunOut)
+		return countLines(c.F.ArjunURLsOut)
 	case "url_consolidation":
 		return countLines(c.F.AllURLsLive)
 	case "js_secret_scan":

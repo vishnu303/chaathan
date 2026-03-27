@@ -136,11 +136,16 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 				return
 			}
 
-			// Install requirements if they exist (e.g. termcolor for SubDomainizer)
+			// Install requirements if they exist (e.g. termcolor for SubDomainizer).
+			// A missing dependency will cause the tool to fail at runtime, so treat
+			// a requirements install failure as a hard failure here.
 			reqFile := filepath.Join(tempDir, "requirements.txt")
 			if _, err := os.Stat(reqFile); err == nil {
 				reqCmd := exec.Command(pip, "install", "--break-system-packages", "-r", reqFile)
-				_ = captureCommandOutput(reqCmd, tool.name+" (reqs)")
+				if err := captureCommandOutput(reqCmd, tool.name+" (reqs)"); err != nil {
+					tracker.Fail(tool.name, "requirements install failed: "+err.Error())
+					return
+				}
 			}
 
 			src := filepath.Join(tempDir, tool.script)

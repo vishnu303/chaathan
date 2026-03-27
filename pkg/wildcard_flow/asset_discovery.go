@@ -1,4 +1,4 @@
-// Phase 1 — Asset Discovery (Steps 1–4)
+// Phase 1 — Asset Discovery (Steps 1–5)
 //
 // Collects all possible subdomains/assets before any validation.
 // Wayback/GAU are intentionally excluded — they run in Phase 3
@@ -8,6 +8,7 @@
 //  2. Active Subdomain Enumeration (Amass) [Optional]
 //  3. GitHub Subdomain Discovery [Requires token]
 //  4. Search-Engine Dorking (Uncover) [Optional]
+//  5. JavaScript Subdomain Extraction (SubDomainizer) [Optional]
 package wildcard_flow
 
 import (
@@ -193,11 +194,57 @@ func stepSearchEngineRecon(c *Ctx) bool {
 				subs, ports, _ := utils.ParseUncoverOutput(c.ScanID, c.F.UncoverOut)
 				logger.Info("  Found %d hosts and %d open ports from search engines", subs, ports)
 			}
+			// Extract hostnames into a plain-text file so Step 6 can merge them
+			// into all_subdomains.txt and feed them into the live-host pipeline.
+			if n := extractUncoverHosts(c.F.UncoverOut, c.F.UncoverHostsOut); n > 0 {
+				logger.SubStep("[Done] Extracted %d unique hosts from Uncover output", n)
+			}
 		}
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
 	} else {
 		logger.Section("Step 4: Skipping Uncover (--skip-uncover)")
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
+	}
+	return c.cancelled()
+}
+
+// ─────────────────────────────────────────────────────────────
+// Step 5 — JavaScript Subdomain Extraction (SubDomainizer)
+// ─────────────────────────────────────────────────────────────
+
+// stepJSSubdomains discovers subdomains embedded in JavaScript with SubDomainizer.
+// Returns true if the scan should be cancelled.
+func stepJSSubdomains(c *Ctx) bool {
+	if c.State.IsStepCompleted("js_subdomain_discovery") {
+		logger.Section("Step 5: JavaScript Subdomain Extraction (SubDomainizer) [RESUMED — skipping]")
+	} else if !c.SkipSubdomainizer {
+		logger.Section("Step 5: JavaScript Subdomain Extraction (SubDomainizer)")
+		logger.SubStep("Running SubDomainizer on https://%s...", c.Domain)
+
+		if err := runWithSkip(c, "subdomainizer", func(sCtx context.Context) error {
+			return c.Tb.RunSubdomainizer(sCtx, "https://"+c.Domain, c.F.SubdomainizerOut)
+		}); err != nil {
+			if err == ErrToolSkipped {
+				// Logged internally by runWithSkip
+			} else {
+				c.StateMgr.MarkStepFailed(c.State, "js_subdomain_discovery", err)
+				logger.Warning("SubDomainizer failed: %v", err)
+			}
+		} else {
+			if c.ScanID > 0 {
+				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.SubdomainizerOut, "subdomainizer")
+				if count > 0 {
+					logger.Info("  Found %d subdomains from JavaScript analysis", count)
+
+				} else {
+					logger.Info("  No new subdomains found in JavaScript")
+				}
+			}
+		}
+		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
+	} else {
+		logger.Section("Step 5: Skipping SubDomainizer (--skip-subdomainizer)")
+		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 	}
 	return c.cancelled()
 }

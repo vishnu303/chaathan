@@ -44,9 +44,9 @@ type Step struct {
 // WildcardSteps defines the steps in the wildcard workflow.
 // Order matches the 4-phase execution sequence in pkg/wildcard_flow/flow.go:
 //
-//	Phase 1 (Asset Discovery):   passive_enum, active_enum, github_recon, search_engine_recon
+//	Phase 1 (Asset Discovery):   passive_enum, active_enum, github_recon, search_engine_recon, js_subdomain_discovery
 //	Phase 2 (Validation):        dns_resolution, dns_bruteforce, http_probing, tls_analysis, port_scanning
-//	Phase 3 (Content Discovery): url_discovery, web_crawling, js_analysis, js_subdomain_discovery,
+//	Phase 3 (Content Discovery): url_discovery, web_crawling, js_analysis,
 //	                             param_discovery, url_consolidation, js_secret_scan, dir_fuzzing
 //	Phase 4 (Vuln Scanning):     vuln_scanning, vuln_scanning_urls, takeover_detection, xss_scanning
 var WildcardSteps = []Step{
@@ -56,6 +56,7 @@ var WildcardSteps = []Step{
 	{Name: "github_recon", Description: "GitHub Subdomain Discovery", Required: false, Tool: "github-subdomains"},
 	{Name: "search_engine_recon", Description: "Search Engine Dorking", Required: false, Tool: "uncover"},
 	{Name: "js_subdomain_discovery", Description: "JavaScript Subdomain Extraction", Required: false, Tool: "subdomainizer"},
+
 	// Phase 2 — Validation & Fingerprint
 	{Name: "dns_resolution", Description: "Consolidation & DNS Resolution", Required: true, Tool: "dnsx"},
 	{Name: "dns_bruteforce", Description: "DNS Brute-force (ShuffleDNS)", Required: false, Tool: "shuffledns,massdns"},
@@ -88,7 +89,7 @@ func NewManager(stateDir string) *Manager {
 }
 
 // CreateState creates a new scan state
-func (m *Manager) CreateState(scanID int64, target, scanType, resultDir string, cfg interface{}) (*State, error) {
+func (m *Manager) CreateState(scanID int64, target, scanType, resultDir string, totalSteps int, cfg interface{}) (*State, error) {
 	configData, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
@@ -99,7 +100,7 @@ func (m *Manager) CreateState(scanID int64, target, scanType, resultDir string, 
 		Target:         target,
 		Type:           scanType,
 		CurrentStep:    0,
-		TotalSteps:     len(WildcardSteps),
+		TotalSteps:     totalSteps,
 		CompletedSteps: []string{},
 		FailedSteps:    []FailedStep{},
 		StartedAt:      time.Now(),
