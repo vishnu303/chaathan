@@ -57,7 +57,7 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 	var toInstall []pyTool
 	skippedCount := 0
 	for _, t := range pyTools {
-		if pythonToolInstalled(t.name, t.cmdName, t.module) {
+		if !forceUpdate && pythonToolInstalled(t.name, t.cmdName, t.module) {
 			_ = ensurePythonToolShim(t.name, t.module)
 			skippedCount++
 			continue
@@ -68,9 +68,11 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 	type pyScript struct{ name, repo, script string }
 	var scriptsToInstall []pyScript
 	for _, t := range pyScripts {
-		if _, err := exec.LookPath(t.name); err == nil {
-			skippedCount++
-			continue
+		if !forceUpdate {
+			if _, err := exec.LookPath(t.name); err == nil {
+				skippedCount++
+				continue
+			}
 		}
 		scriptsToInstall = append(scriptsToInstall, pyScript{t.name, t.repo, t.script})
 	}

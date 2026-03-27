@@ -55,9 +55,11 @@ func installGoToolsSection() (installed, skipped, failed int) {
 	var toInstall []goTool
 	skippedCount := 0
 	for _, t := range goTools {
-		if _, err := exec.LookPath(t.name); err == nil {
-			skippedCount++
-			continue
+		if !forceUpdate {
+			if _, err := exec.LookPath(t.name); err == nil {
+				skippedCount++
+				continue
+			}
 		}
 		toInstall = append(toInstall, goTool{t.name, t.url})
 	}

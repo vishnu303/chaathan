@@ -25,11 +25,14 @@ import (
 
 // RunConfig holds the options passed from the CLI layer.
 type RunConfig struct {
-	Verbose bool
+	Verbose     bool
+	ForceUpdate bool // reinstall all tools even if already present
 }
 
-// verbose is set once at the top of Run() and used by captureCommandOutput.
+// verbose and forceUpdate are set once at the top of Run() and used by
+// each section installer.
 var verbose bool
+var forceUpdate bool
 
 // ─────────────────────────────────────────────────────────────
 // Run — main entry point (called by cli/setup.go)
@@ -38,9 +41,14 @@ var verbose bool
 // Run executes the complete chaathan setup workflow.
 func Run(cfg RunConfig) {
 	verbose = cfg.Verbose
+	forceUpdate = cfg.ForceUpdate
 	start := time.Now()
 
-	progress.Header("🔧 Chaathan Setup")
+	title := "🔧 Chaathan Setup"
+	if forceUpdate {
+		title = "🔄 Chaathan Setup (update mode — reinstalling all tools)"
+	}
+	progress.Header(title)
 
 	initSetupLog()
 	if setupLogFile != nil {
