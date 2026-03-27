@@ -44,7 +44,10 @@ This repository is orchestration-heavy. Small-looking changes often break behavi
 - report field added in one format but missing from others
 - ROI score changed without updating `Reasons`
 - setup logic installs a tool but `tools check` or runtime invocation still disagrees
-- user-facing step counts/help text drift from actual workflow implementation
+- user-facing step counts/help text drift from actual workflow implementation (21 steps across 4 phases)
+- step function returns hard-coded `false` instead of `c.cancelled()`, breaking Ctrl+C propagation
+- `MarkStepComplete` called after `MarkStepFailed` in the same error path, silently clearing the failure record
+- resume path (`IsStepCompleted` early return) returns `false` instead of `c.cancelled()`
 
 ## Review output style
 

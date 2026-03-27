@@ -20,16 +20,16 @@ Company flow mirrors the same pattern in `pkg/company_flow/flow.go`, but is simp
 
 ## 4-Phase wildcard workflow structure
 
-The 20-step wildcard workflow is organised into 4 explicit phases. Each phase has a clean input and a clean output.
+The 21-step wildcard workflow is organised into 4 explicit phases. Each phase has a clean input and a clean output.
 
 ```
-PHASE 1 — ASSET DISCOVERY (Steps 1–4)     input: domain         output: all_subdomains.txt
-PHASE 2 — VALIDATION (Steps 5–9)          input: subs           output: live_hosts.txt
-PHASE 3 — CONTENT DISCOVERY (Steps 10–16) input: live hosts      output: all_urls_live.txt
-PHASE 4 — VULNERABILITY SCANNING (17–20)  input: live hosts+URLs output: DB findings
+PHASE 1 — ASSET DISCOVERY (Steps 1–5)      input: domain         output: all_subdomains.txt
+PHASE 2 — VALIDATION (Steps 6–10)          input: subs           output: live_hosts.txt
+PHASE 3 — CONTENT DISCOVERY (Steps 11–17)  input: live hosts      output: all_urls_live.txt
+PHASE 4 — VULNERABILITY SCANNING (18–21)   input: live hosts+URLs output: DB findings
 ```
 
-### Phase 1 — Asset Discovery (Steps 1–4)
+### Phase 1 — Asset Discovery (Steps 1–5)
 File: `asset_discovery.go`
 
 | Step | Tool |
@@ -38,54 +38,45 @@ File: `asset_discovery.go`
 | 2 | Amass (optional) |
 | 3 | GitHub subdomain discovery (token required) |
 | 4 | Uncover / Shodan / Censys (optional) |
+| 5 | SubDomainizer JS subdomain extraction (optional) |
 
 > **Wayback/GAU do NOT run here.** They run in Phase 3 after live hosts are known.
 
-### Phase 2 — Validation (Steps 5–9)
+### Phase 2 — Validation (Steps 6–10)
 Files: `validation.go`
 
 | Step | Tool | Notes |
 |------|------|-------|
-| 5 | DNSx | consolidation |
-| 6 | ShuffleDNS | optional |
-| 7 | Httpx | **calls `metadata.CollectHostMetadata` after success** |
-| 8 | tlsx | optional |
-| 9 | Naabu | optional |
+| 6 | DNSx | consolidation; early-returns on merge failure |
+| 7 | ShuffleDNS | optional |
+| 8 | Httpx | live host probing |
+| 9 | tlsx | optional; **calls `metadata.CollectHostMetadata` after success** |
+| 10 | Naabu | optional |
 
 `CollectHostMetadata` is called in `stepTLSAnalysis` (which runs right after httpx). It is not dead code. The call is in `validation.go` after `stepHTTPProbing` completes.
 
-### Phase 3 — Content Discovery (Steps 10–16)
+### Phase 3 — Content Discovery (Steps 11–17)
 Files: `content_discovery.go`
 
 | Step | Tool | Notes |
 |------|------|-------|
-| 10 | Waybackurls + GAU (parallel) | **moved from Phase 1** |
-| 11 | Katana + GoSpider (parallel) | optional |
-| 12 | LinkFinder | |
-| 13 | SubDomainizer | optional; **triggers mini re-probe** |
+| 11 | Waybackurls + GAU (parallel) | **runs here, not Phase 1** |
+| 12 | Katana + GoSpider (parallel) | optional |
+| 13 | LinkFinder | |
 | 14 | Arjun | optional |
-| 15 | URL consolidation + live check | |
-| 16 | ffuf | requires --wordlist |
+| 15 | URL consolidation + live check | + ROI metadata enrichment |
+| 16 | gf JS + Secrets scan | downloads JS files, runs gf patterns |
+| 17 | ffuf | requires --wordlist |
 
-#### SubDomainizer mini re-probe (Step 13)
-After SubDomainizer finds new subs, `miniReprobeNewSubdomains` in `content_discovery.go`:
-1. Builds a set of hostnames already confirmed live from `httpx_live.json`
-2. Filters SubDomainizer output to only novel (not-yet-probed) hosts
-3. Writes them to a temp file and runs httpx on the novel subs only
-4. Appends the JSONL output to `httpx_live.json` (so Steps 14+ see the new hosts)
-5. Stores new live hosts in the DB via `ParseHttpxOutput`
-
-`stepURLDiscovery` is defined in `content_discovery.go` alongside the other Phase 3 steps.
-
-### Phase 4 — Vulnerability Scanning (Steps 17–20)
+### Phase 4 — Vulnerability Scanning (Steps 18–21)
 File: `vulnerability_scanning.go`
 
 | Step | Tool |
 |------|------|
-| 17 | Nuclei (infra) |
-| 18 | Nuclei (URLs + gf) |
-| 19 | Subjack |
-| 20 | Dalfox |
+| 18 | Nuclei (infra) |
+| 19 | Nuclei (URLs + gf) |
+| 20 | Subjack |
+| 21 | Dalfox |
 
 ## When editing steps
 
@@ -93,6 +84,16 @@ File: `vulnerability_scanning.go`
 2. Check which later steps depend on those files.
 3. Check whether the database, report generation, exports, or notifications consume the new data.
 4. Preserve cancellation, skip, and resume behavior.
+
+## Cancellation contract
+
+Every step function must return `c.cancelled()` — never hard-code `return false`. This ensures Ctrl+C propagates through the `executeStep` wrapper in `flow.go` and triggers `finalizeScan("cancelled")`. The resume path (`IsStepCompleted` early returns) must also return `c.cancelled()`, not `false`.
+
+## Error vs completion semantics
+
+When a step calls `MarkStepFailed`, it should **not** unconditionally call `MarkStepComplete` afterward — `MarkStepComplete` clears prior failures from the state (scan.go `MarkStepComplete` filters `FailedSteps`). Either:
+- Return early after `MarkStepFailed` (used for fatal sub-step failures like consolidation), or
+- Call `MarkStepComplete` only in the success branch.
 
 ## Invariants to preserve
 
@@ -105,6 +106,7 @@ File: `vulnerability_scanning.go`
 - Scan summaries should still reflect completed/failed/skipped behavior correctly.
 - Long-running tools should respect context cancellation and existing runner patterns.
 - The `WildcardSteps` slice in `pkg/scan/scan.go` must match the execution order in `flow.go`.
+- `scan.CreateState` accepts a `totalSteps int` parameter — pass `len(scan.WildcardSteps)` for wildcard scans.
 
 ## Files commonly involved together
 
@@ -155,6 +157,7 @@ Then inspect the affected flow for:
 - stale step counts or help text
 - artifact filename mismatches
 - downstream readers assuming non-empty files
+- cancellation propagation (every step must return `c.cancelled()`)
 
 ## Avoid
 
@@ -162,3 +165,5 @@ Then inspect the affected flow for:
 - Do not add new scan-state coupling across unrelated steps unless necessary.
 - Do not let a convenience refactor obscure the sequence of security tools in the workflow.
 - Do not move `stepURLDiscovery` back to Phase 1 — Wayback/GAU must run after live hosts are known.
+- Do not hard-return `false` from step functions — always use `c.cancelled()`.
+- Do not call `MarkStepComplete` after `MarkStepFailed` in the same error path.

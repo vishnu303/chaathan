@@ -1,13 +1,13 @@
-// Phase 2 — Validation & Fingerprint (Steps 5–9)
+// Phase 2 — Validation & Fingerprint (Steps 6–10)
 //
 // Validates discovered assets through DNS resolution, HTTP probing,
 // TLS analysis, and port scanning.
 //
-//  5. Consolidation & DNS Resolution (DNSx)
-//  6. DNS Brute-force (ShuffleDNS) [Optional]
-//  7. Live Web Server Probing (Httpx)
-//  8. TLS Certificate Analysis (tlsx) + host metadata enrichment [Optional]
-//  9. Port Scanning (Naabu) [Optional]
+//  6. Consolidation & DNS Resolution (DNSx)
+//  7. DNS Brute-force (ShuffleDNS) [Optional]
+//  8. Live Web Server Probing (Httpx)
+//  9. TLS Certificate Analysis (tlsx) + host metadata enrichment [Optional]
+//  10. Port Scanning (Naabu) [Optional]
 package wildcard_flow
 
 import (
@@ -19,17 +19,17 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// Step 5 — Consolidation & DNS Resolution
+// Step 6 — Consolidation & DNS Resolution
 // ─────────────────────────────────────────────────────────────
 
 // stepDNSConsolidation merges all passive sources and resolves them with DNSx.
 // Returns true if the scan should be cancelled.
 func stepDNSConsolidation(c *Ctx) bool {
 	if c.State.IsStepCompleted("dns_resolution") {
-		logger.Section("Step 5: Consolidation & DNS Resolution [RESUMED — skipping]")
+		logger.Section("Step 6: Consolidation & DNS Resolution [RESUMED — skipping]")
 		return c.cancelled()
 	}
-	logger.Section("Step 5: Consolidating Subdomains")
+	logger.Section("Step 6: Consolidating Subdomains")
 
 	passiveSources := existingFiles(
 		c.F.SubfinderOut,
@@ -38,10 +38,12 @@ func stepDNSConsolidation(c *Ctx) bool {
 		c.F.AmassOut,
 		c.F.GithubSubsOut,
 		c.F.SubdomainizerOut,
+		c.F.UncoverHostsOut, // hostnames extracted from uncover.json in Step 4
 	)
 	if err := utils.MergeAndDeduplicate(passiveSources, c.F.ConsolidatedSubs); err != nil {
 		c.StateMgr.MarkStepFailed(c.State, "dns_resolution", err)
 		logger.Error("Failed to consolidate: %v", err)
+		return c.cancelled()
 	}
 	logger.Success("Consolidated list saved to %s", c.F.ConsolidatedSubs)
 
@@ -61,16 +63,16 @@ func stepDNSConsolidation(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 5 — DNS Brute-force (ShuffleDNS)
+// Step 7 — DNS Brute-force (ShuffleDNS)
 // ─────────────────────────────────────────────────────────────
 
 // stepDNSBruteforce runs ShuffleDNS when a dns-wordlist is provided.
 // Returns true if the scan should be cancelled.
 func stepDNSBruteforce(c *Ctx) bool {
 	if c.State.IsStepCompleted("dns_bruteforce") {
-		logger.Section("Step 6: DNS Brute-force (ShuffleDNS) [RESUMED — skipping]")
+		logger.Section("Step 7: DNS Brute-force (ShuffleDNS) [RESUMED — skipping]")
 	} else if !c.SkipShuffleDNS && c.DNSWordlistPath != "" {
-		logger.Section("Step 6: DNS Brute-force (ShuffleDNS)")
+		logger.Section("Step 7: DNS Brute-force (ShuffleDNS)")
 		logger.SubStep("Running ShuffleDNS with wordlist: %s", c.DNSWordlistPath)
 
 		if err := runWithSkip(c, "shuffledns", func(sCtx context.Context) error {
@@ -95,10 +97,10 @@ func stepDNSBruteforce(c *Ctx) bool {
 		}
 		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 	} else if c.SkipShuffleDNS {
-		logger.Section("Step 6: Skipping ShuffleDNS (--skip-shuffledns)")
+		logger.Section("Step 7: Skipping ShuffleDNS (--skip-shuffledns)")
 		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 	} else {
-		logger.Section("Step 6: Skipping ShuffleDNS (no --dns-wordlist provided)")
+		logger.Section("Step 7: Skipping ShuffleDNS (no --dns-wordlist provided)")
 		logger.Info("Use --dns-wordlist to enable DNS brute-force")
 		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 	}
@@ -106,17 +108,17 @@ func stepDNSBruteforce(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 6 — Live Web Server Probing (Httpx)
+// Step 8 — Live Web Server Probing (Httpx)
 // ─────────────────────────────────────────────────────────────
 
 // stepHTTPProbing probes all consolidated subdomains with Httpx.
 // Returns true if the scan should be cancelled.
 func stepHTTPProbing(c *Ctx) bool {
 	if c.State.IsStepCompleted("http_probing") {
-		logger.Section("Step 7: Live Web Server Probing [RESUMED — skipping]")
+		logger.Section("Step 8: Live Web Server Probing [RESUMED — skipping]")
 		return c.cancelled()
 	}
-	logger.Section("Step 7: Live Web Server Probing")
+	logger.Section("Step 8: Live Web Server Probing")
 	logger.SubStep("Running Httpx...")
 
 	if err := runWithSkip(c, "httpx", func(sCtx context.Context) error {
@@ -139,16 +141,16 @@ func stepHTTPProbing(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 7 — TLS Certificate Analysis (tlsx) + host metadata
+// Step 9 — TLS Certificate Analysis (tlsx) + host metadata
 // ─────────────────────────────────────────────────────────────
 
 // stepTLSAnalysis examines TLS certificates and enriches host metadata.
 // Returns true if the scan should be cancelled.
 func stepTLSAnalysis(c *Ctx) bool {
 	if c.State.IsStepCompleted("tls_analysis") {
-		logger.Section("Step 8: TLS Certificate Analysis (tlsx) [RESUMED — skipping]")
+		logger.Section("Step 9: TLS Certificate Analysis (tlsx) [RESUMED — skipping]")
 	} else if !c.SkipTlsx {
-		logger.Section("Step 8: TLS Certificate Analysis (tlsx)")
+		logger.Section("Step 9: TLS Certificate Analysis (tlsx)")
 		logger.SubStep("Running tlsx — extracting SANs and checking cert issues...")
 
 		if err := runWithSkip(c, "tlsx", func(sCtx context.Context) error {
@@ -173,7 +175,7 @@ func stepTLSAnalysis(c *Ctx) bool {
 		}
 		c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
 	} else {
-		logger.Section("Step 8: Skipping tlsx (--skip-tlsx)")
+		logger.Section("Step 9: Skipping tlsx (--skip-tlsx)")
 		c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
 	}
 
@@ -195,16 +197,16 @@ func stepTLSAnalysis(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 8 — Port Scanning (Naabu)
+// Step 10 — Port Scanning (Naabu)
 // ─────────────────────────────────────────────────────────────
 
 // stepPortScanning runs Naabu against all discovered subdomains.
 // Returns true if the scan should be cancelled.
 func stepPortScanning(c *Ctx) bool {
 	if c.State.IsStepCompleted("port_scanning") {
-		logger.Section("Step 9: Port Scanning [RESUMED — skipping]")
+		logger.Section("Step 10: Port Scanning [RESUMED — skipping]")
 	} else if !c.SkipNaabu {
-		logger.Section("Step 9: Port Scanning")
+		logger.Section("Step 10: Port Scanning")
 		logger.SubStep("Running Naabu on all discovered subdomains...")
 
 		if err := runWithSkip(c, "naabu", func(sCtx context.Context) error {
@@ -224,7 +226,7 @@ func stepPortScanning(c *Ctx) bool {
 		}
 		c.StateMgr.MarkStepComplete(c.State, "port_scanning")
 	} else {
-		logger.Section("Step 9: Skipping Naabu (--skip-naabu)")
+		logger.Section("Step 10: Skipping Naabu (--skip-naabu)")
 		c.StateMgr.MarkStepComplete(c.State, "port_scanning")
 	}
 	return c.cancelled()

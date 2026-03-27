@@ -1,14 +1,12 @@
-// Phase 3 — Content Discovery (Steps 10–17)
+// Phase 3 — Content Discovery (Steps 11–17)
 //
 // Discovers URLs, endpoints, and directories from live hosts.
 // Wayback/GAU run here (not in Phase 1) so URLs are collected
 // only for validated live hosts.
 //
-//  10. Historical URL Discovery (Waybackurls + GAU) [Parallel]
-//  11. Web Crawling (Katana + GoSpider) [Parallel, Optional]
-//  12. JavaScript Analysis — Endpoint Discovery (LinkFinder)
-//  13. JavaScript Subdomain Extraction (SubDomainizer) [Optional]
-//      └─ Mini re-probe: new subs get httpx-probed and merged into httpx_live.json
+//  11. Historical URL Discovery (Waybackurls + GAU) [Parallel]
+//  12. Web Crawling (Katana + GoSpider) [Parallel, Optional]
+//  13. JavaScript Analysis — Endpoint Discovery (LinkFinder)
 //  14. HTTP Parameter Discovery (Arjun) [Optional]
 //  15. URL Consolidation & Live Check (httpx) + ROI metadata
 //  16. JS Secret Scan (gf JS + Secrets)
@@ -43,10 +41,10 @@ const maxJSDownloads = 200
 // Returns true if the scan should be cancelled.
 func stepURLDiscovery(c *Ctx) bool {
 	if c.State.IsStepCompleted("url_discovery") {
-		logger.Section("Step 10: Historical URL Discovery [RESUMED — skipping]")
-		return false
+		logger.Section("Step 11: Historical URL Discovery [RESUMED — skipping]")
+		return c.cancelled()
 	}
-	logger.Section("Step 10: Historical URL Discovery")
+	logger.Section("Step 11: Historical URL Discovery")
 
 	err := runWithSkip(c, "url discovery", func(sCtx context.Context) error {
 		var wg sync.WaitGroup
@@ -103,15 +101,15 @@ func stepURLDiscovery(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepWebCrawling(c *Ctx) bool {
 	if c.State.IsStepCompleted("web_crawling") {
-		logger.Section("Step 11: Web Crawling [RESUMED — skipping]")
+		logger.Section("Step 12: Web Crawling [RESUMED — skipping]")
 		return c.cancelled()
 	} else if c.SkipCrawl {
-		logger.Section("Step 11: Skipping Web Crawling (--skip-crawl)")
+		logger.Section("Step 12: Skipping Web Crawling (--skip-crawl)")
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 		return c.cancelled()
 	}
 
-	logger.Section("Step 11: Web Crawling")
+	logger.Section("Step 12: Web Crawling")
 	crawlFailed := false
 	var crawlFailMu sync.Mutex
 
@@ -181,10 +179,10 @@ func stepWebCrawling(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_analysis") {
-		logger.Section("Step 12: JavaScript Analysis [RESUMED — skipping]")
-		return false
+		logger.Section("Step 13: JavaScript Analysis [RESUMED — skipping]")
+		return c.cancelled()
 	}
-	logger.Section("Step 12: JavaScript Analysis")
+	logger.Section("Step 13: JavaScript Analysis")
 	logger.SubStep("Running Linkfinder...")
 
 	if err := runWithSkip(c, "linkfinder", func(sCtx context.Context) error {
@@ -203,58 +201,14 @@ func stepJSAnalysis(c *Ctx) bool {
 		}
 	}
 	c.StateMgr.MarkStepComplete(c.State, "js_analysis")
-	return false
-}
-
-// ─────────────────────────────────────────────────────────────
-// Step 13 — JavaScript Subdomain Extraction (SubDomainizer)
-// ─────────────────────────────────────────────────────────────
-
-// stepJSSubdomains discovers subdomains embedded in JavaScript with SubDomainizer.
-// After a successful run it performs a mini re-probe: new subdomains not already
-// in httpx_live.json are probed with httpx and their results are appended to the
-// main httpx_live.json so that Steps 14+ see the full live host set.
-// Returns true if the scan should be cancelled.
-func stepJSSubdomains(c *Ctx) bool {
-	if c.State.IsStepCompleted("js_subdomain_discovery") {
-		logger.Section("Step 13: JavaScript Subdomain Extraction (SubDomainizer) [RESUMED — skipping]")
-	} else if !c.SkipSubdomainizer {
-		logger.Section("Step 13: JavaScript Subdomain Extraction (SubDomainizer)")
-		logger.SubStep("Running SubDomainizer on https://%s...", c.Domain)
-
-		if err := runWithSkip(c, "subdomainizer", func(sCtx context.Context) error {
-			return c.Tb.RunSubdomainizer(sCtx, "https://"+c.Domain, c.F.SubdomainizerOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				// Logged internally by runWithSkip
-			} else {
-				c.StateMgr.MarkStepFailed(c.State, "js_subdomain_discovery", err)
-				logger.Warning("SubDomainizer failed: %v", err)
-			}
-		} else {
-			if c.ScanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.SubdomainizerOut, "subdomainizer")
-				if count > 0 {
-					logger.Info("  Found %d subdomains from JavaScript analysis", count)
-
-				} else {
-					logger.Info("  No new subdomains found in JavaScript")
-				}
-			}
-		}
-		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
-	} else {
-		logger.Section("Step 13: Skipping SubDomainizer (--skip-subdomainizer)")
-		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
-	}
 	return c.cancelled()
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 14 — HTTP Parameter Discovery (Arjun)
+// Step 13 — HTTP Parameter Discovery (Arjun)
 // ─────────────────────────────────────────────────────────────
 
-// stepParamDiscovery discovers HTTP parameters with Arjun.
+// stepParamDiscovery discovers HTTP parameters with Arjun (Step 13).
 // After a successful run it converts discovered params into parameterized URLs
 // (written to ArjunURLsOut) so they flow into Step 15 consolidation and
 // downstream scanners (Nuclei/Dalfox).
@@ -288,7 +242,7 @@ func stepParamDiscovery(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 15 — URL Consolidation & Live Check
+// Step 14 — URL Consolidation & Live Check
 // ─────────────────────────────────────────────────────────────
 
 // stepURLConsolidation merges all URL sources, live-checks them with Httpx,
@@ -349,7 +303,7 @@ func stepURLConsolidation(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 16 — JS Secret Scan (gf JS + Secrets)
+// Step 15 — JS Secret Scan (gf JS + Secrets)
 // ─────────────────────────────────────────────────────────────
 
 // stepJSSecretScan downloads a capped set of JS files, scans their content
@@ -433,7 +387,7 @@ func stepJSSecretScan(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 17 — Directory Fuzzing (ffuf)
+// Step 16 — Directory Fuzzing (ffuf)
 // ─────────────────────────────────────────────────────────────
 
 // stepDirFuzzing runs ffuf when a wordlist is provided via --wordlist.

@@ -11,7 +11,7 @@ Use this skill for normal development work in this repository.
 
 - `main.go` starts the Cobra CLI.
 - `cli/` contains command definitions and argument parsing.
-- `pkg/wildcard_flow/` contains the 20-step domain recon workflow (4 phase files: `asset_discovery.go`, `validation.go`, `content_discovery.go`, `vulnerability_scanning.go`).
+- `pkg/wildcard_flow/` contains the 21-step domain recon workflow (4 phase files: `asset_discovery.go`, `validation.go`, `content_discovery.go`, `vulnerability_scanning.go`).
 - `pkg/company_flow/` contains the 3-step company recon workflow.
 - `pkg/database/` stores scan metadata and query/report support data.
 - `pkg/report/` formats reports.
@@ -35,8 +35,9 @@ Keep CLI flag parsing in `cli/`. Put scan logic in `pkg/..._flow/` packages, not
   - workflow orchestration in `pkg/wildcard_flow/` or `pkg/company_flow/`
   - storage/reporting in `pkg/database/` and `pkg/report/`
 - Treat external security tools as host dependencies. Do not replace them with in-process implementations unless explicitly asked.
-- Be careful with user-visible counts and labels. The README and CLI help currently mention both 20-step and 21-step wildcard wording in different places; avoid making that inconsistency worse unless you are fixing it deliberately.
-- Database updates and generated files are part of the product behavior. If a scan step changes outputs, check downstream query/report/export code.
+- Be careful with user-visible counts and labels. The workflow is 21 steps across 4 phases; ensure CLI help, logger labels, code comments, and `WildcardSteps` all agree.
+- Every step function must return `c.cancelled()`, never hard-code `return false`. This ensures Ctrl+C propagates correctly.
+- Do not call `MarkStepComplete` after `MarkStepFailed` in the same error path — it silently clears the failure.
 
 ## Validation
 

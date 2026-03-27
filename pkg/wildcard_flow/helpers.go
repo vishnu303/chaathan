@@ -393,3 +393,52 @@ func hostFromRawURL(raw string) string {
 	}
 	return strings.ToLower(parsed.Hostname())
 }
+
+// extractUncoverHosts reads an uncover JSONL output file and writes unique
+// hostnames (one per line) to outputFile. Returns the number written.
+// This converts Uncover's JSON format into a plain-text list that can be
+// merged into all_subdomains.txt by stepDNSConsolidation (Step 6).
+func extractUncoverHosts(uncoverJSON, outputFile string) int {
+	type uncoverLine struct {
+		Host string `json:"host"`
+		IP   string `json:"ip"`
+	}
+
+	f, err := os.Open(uncoverJSON)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	out, err := os.Create(outputFile)
+	if err != nil {
+		return 0
+	}
+	defer out.Close()
+
+	seen := make(map[string]bool)
+	count := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec uncoverLine
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		host := rec.Host
+		if host == "" {
+			host = rec.IP
+		}
+		host = strings.ToLower(strings.TrimSpace(host))
+		if host == "" || seen[host] {
+			continue
+		}
+		seen[host] = true
+		fmt.Fprintln(out, host)
+		count++
+	}
+	return count
+}
