@@ -12,6 +12,12 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
+// CLI flags
+// ─────────────────────────────────────────────────────────────
+
+var setupUpdate bool
+
+// ─────────────────────────────────────────────────────────────
 // Cobra command
 // ─────────────────────────────────────────────────────────────
 
@@ -26,15 +32,19 @@ Categories:
   - From source:  massdns (high-performance DNS resolver)
 
 Already-installed tools are skipped automatically.
+Use --update to force reinstallation of every tool (useful after a version
+mismatch or broken install).
 All output is logged to ~/.chaathan/logs/setup_<timestamp>.log for debugging.
 
 Usage:
-  chaathan setup              # Install tools (parallel)
+  chaathan setup              # Install missing tools (parallel)
+  chaathan setup --update     # Reinstall ALL tools (force update)
   chaathan setup --verbose    # Show live install output`,
 	Run: runSetup,
 }
 
 func init() {
+	setupCmd.Flags().BoolVar(&setupUpdate, "update", false, "Reinstall all tools even if already installed")
 	rootCmd.AddCommand(setupCmd)
 }
 
@@ -44,6 +54,7 @@ func init() {
 
 func runSetup(cmd *cobra.Command, args []string) {
 	s.Run(s.RunConfig{
-		Verbose: Verbose,
+		Verbose:     Verbose,
+		ForceUpdate: setupUpdate,
 	})
 }

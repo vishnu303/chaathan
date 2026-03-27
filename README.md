@@ -38,6 +38,9 @@ make setup          # Install all external tools
 # Install tools (first time)
 chaathan setup
 
+# Reinstall / update all tools to latest versions
+chaathan setup --update
+
 # Run full 21-step domain recon
 chaathan wildcard -d target.com
 
@@ -143,7 +146,8 @@ chaathan company -n "Company Inc"
 | `chaathan config reset` | Reset config to default |
 | `chaathan config path` | Show config file path |
 | `chaathan config set <key> <val>` | Set a config value |
-| `chaathan setup` | Install all external tools |
+| `chaathan setup` | Install missing external tools (skips already-installed) |
+| `chaathan setup --update` | Force-reinstall **all** tools to latest versions |
 | `chaathan version` | Show version info |
 
 ## Query Examples
@@ -286,8 +290,9 @@ Subdomain takeover findings trigger immediate notifications.
 | **Utility** | anew, gf |
 
 ```bash
-chaathan tools check    # see what's installed
-chaathan setup          # install everything
+chaathan tools check          # see what's installed
+chaathan setup                # install missing tools
+chaathan setup --update       # reinstall all tools (force update to latest)
 ```
 
 ## Output Structure

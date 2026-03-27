@@ -76,9 +76,11 @@ func installGFPatternsSection() (installed, skipped, failed int) {
 
 		srcPath := filepath.Join(tempDir, entry.Name())
 		dstPath := filepath.Join(gfDir, entry.Name())
-		if _, err := os.Stat(dstPath); err == nil {
-			skippedCount++
-			continue
+		if !forceUpdate {
+			if _, err := os.Stat(dstPath); err == nil {
+				skippedCount++
+				continue
+			}
 		}
 
 		data, err := os.ReadFile(srcPath)
