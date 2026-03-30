@@ -37,8 +37,9 @@ var pyScripts = []struct {
 	name   string
 	repo   string
 	script string
+	module string // A core module to check to verify dependencies are satisfied
 }{
-	{"subdomainizer", "https://github.com/nsonaniya2010/SubDomainizer.git", "SubDomainizer.py"},
+	{"subdomainizer", "https://github.com/nsonaniya2010/SubDomainizer.git", "SubDomainizer.py", "bs4"},
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -65,16 +66,19 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 		toInstall = append(toInstall, pyTool{t.name, t.package_, t.cmdName, t.module})
 	}
 
-	type pyScript struct{ name, repo, script string }
+	type pyScript struct{ name, repo, script, module string }
 	var scriptsToInstall []pyScript
 	for _, t := range pyScripts {
 		if !forceUpdate {
 			if _, err := exec.LookPath(t.name); err == nil {
-				skippedCount++
-				continue
+				// Also verify the core dependency is installed, if one is specified
+				if t.module == "" || pythonModuleInstalled(t.module) {
+					skippedCount++
+					continue
+				}
 			}
 		}
-		scriptsToInstall = append(scriptsToInstall, pyScript{t.name, t.repo, t.script})
+		scriptsToInstall = append(scriptsToInstall, pyScript{t.name, t.repo, t.script, t.module})
 	}
 
 	totalToInstall := len(toInstall) + len(scriptsToInstall)
