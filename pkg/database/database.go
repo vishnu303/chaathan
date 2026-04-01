@@ -178,6 +178,11 @@ func createTables() error {
 		ssl_self_signed BOOLEAN DEFAULT FALSE,
 		ssl_mismatch BOOLEAN DEFAULT FALSE,
 		weak_tls BOOLEAN DEFAULT FALSE,
+		has_js_secrets BOOLEAN DEFAULT FALSE,
+		cors_wildcard BOOLEAN DEFAULT FALSE,
+		has_insecure_cookies BOOLEAN DEFAULT FALSE,
+		has_session_cookie BOOLEAN DEFAULT FALSE,
+		has_dangerous_methods BOOLEAN DEFAULT FALSE,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (scan_id, host),
@@ -193,6 +198,10 @@ func createTables() error {
 		has_cache_headers BOOLEAN DEFAULT FALSE,
 		login_surface BOOLEAN DEFAULT FALSE,
 		response_bytes INTEGER DEFAULT 0,
+		form_count INTEGER DEFAULT 0,
+		has_file_upload BOOLEAN DEFAULT FALSE,
+		hidden_input_count INTEGER DEFAULT 0,
+		arjun_param_count INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (scan_id, url),
@@ -225,6 +234,16 @@ func createTables() error {
 		UNIQUE(scan_id, url, method)
 	);
 
+	CREATE TABLE IF NOT EXISTS gf_matches (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		scan_id INTEGER NOT NULL,
+		url TEXT NOT NULL,
+		pattern TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (scan_id) REFERENCES scans(id),
+		UNIQUE(scan_id, url, pattern)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_subdomains_scan ON subdomains(scan_id);
 	CREATE INDEX IF NOT EXISTS idx_subdomains_domain ON subdomains(domain);
 	CREATE INDEX IF NOT EXISTS idx_ports_scan ON ports(scan_id);
@@ -234,6 +253,7 @@ func createTables() error {
 	CREATE INDEX IF NOT EXISTS idx_vulns_scan ON vulnerabilities(scan_id);
 	CREATE INDEX IF NOT EXISTS idx_vulns_severity ON vulnerabilities(severity);
 	CREATE INDEX IF NOT EXISTS idx_endpoints_scan ON endpoints(scan_id);
+	CREATE INDEX IF NOT EXISTS idx_gf_matches_scan ON gf_matches(scan_id);
 	CREATE INDEX IF NOT EXISTS idx_scans_target   ON scans(target);
 	`
 
@@ -251,6 +271,19 @@ func runMigrations() {
 	// IFNULL() normalises NULL → '' so empty strings and NULLs compare equal.
 	_, _ = DB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vulns_unique
 		ON vulnerabilities(scan_id, host, IFNULL(template_id, ''), IFNULL(url, ''))`)
+
+	// Game-changer columns — safe to fail on fresh installs where columns already exist.
+	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN has_js_secrets BOOLEAN DEFAULT FALSE`)
+	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN form_count INTEGER DEFAULT 0`)
+	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN has_file_upload BOOLEAN DEFAULT FALSE`)
+	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN hidden_input_count INTEGER DEFAULT 0`)
+
+	// Phase 4 columns — CORS, cookie security, dangerous methods, Arjun params.
+	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN cors_wildcard BOOLEAN DEFAULT FALSE`)
+	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN has_insecure_cookies BOOLEAN DEFAULT FALSE`)
+	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN has_session_cookie BOOLEAN DEFAULT FALSE`)
+	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN has_dangerous_methods BOOLEAN DEFAULT FALSE`)
+	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN arjun_param_count INTEGER DEFAULT 0`)
 }
 
 // Close closes the database connection
@@ -532,8 +565,22 @@ func GetPorts(scanID int64) ([]Port, error) {
 
 func AddURL(scanID int64, url string, statusCode int, contentType, title, tech, source string) error {
 	_, err := DB.Exec(
-		`INSERT OR IGNORE INTO urls (scan_id, url, status_code, content_type, title, tech, source) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO urls (scan_id, url, status_code, content_type, title, tech, source) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(scan_id, url) DO UPDATE SET
+			source = CASE
+				WHEN (',' || urls.source || ',') LIKE ('%,' || ? || ',%') THEN urls.source
+				ELSE urls.source || ',' || ?
+			END,
+			status_code = CASE WHEN ? > 0 AND urls.status_code = 0 THEN ? ELSE urls.status_code END,
+			content_type = CASE WHEN ? != '' AND urls.content_type = '' THEN ? ELSE urls.content_type END,
+			title = CASE WHEN ? != '' AND urls.title = '' THEN ? ELSE urls.title END,
+			tech = CASE WHEN ? != '' AND urls.tech = '' THEN ? ELSE urls.tech END`,
 		scanID, url, statusCode, contentType, title, tech, source,
+		source, source,
+		statusCode, statusCode,
+		contentType, contentType,
+		title, title,
+		tech, tech,
 	)
 	return err
 }
@@ -799,6 +846,7 @@ func DeleteScan(scanID int64) error {
 
 	// Delete from all related tables (order matters: child rows before parent)
 	tables := []string{
+		"gf_matches",
 		"host_metadata",
 		"url_metadata",
 		"endpoints",
@@ -1022,4 +1070,84 @@ func GetTotalVulnerabilitiesCount() (int, error) {
 // GetTotalPortsCount returns the total number of open ports across all scans
 func GetTotalPortsCount() (int, error) {
 	return getCount("SELECT COUNT(*) FROM ports")
+}
+
+// ─────────────────────────────────────────────────────────────
+// GF Match persistence — stores which URLs matched which gf patterns
+// ─────────────────────────────────────────────────────────────
+
+// AddGFMatches stores gf pattern matches for a batch of URLs. Duplicates are
+// silently ignored via INSERT OR IGNORE on the (scan_id, url, pattern) unique index.
+func AddGFMatches(scanID int64, urls []string, pattern string) error {
+	if len(urls) == 0 {
+		return nil
+	}
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO gf_matches (scan_id, url, pattern) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, u := range urls {
+		u = strings.TrimSpace(u)
+		if u != "" {
+			stmt.Exec(scanID, u, pattern)
+		}
+	}
+	return tx.Commit()
+}
+
+// GetGFMatchesByScan returns all gf pattern matches for a scan, grouped by URL.
+// The returned map keys are raw URLs; the values are slices of pattern names
+// (e.g. "sqli", "xss", "rce").
+func GetGFMatchesByScan(scanID int64) (map[string][]string, error) {
+	rows, err := DB.Query(`SELECT url, pattern FROM gf_matches WHERE scan_id = ?`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]string)
+	for rows.Next() {
+		var u, pattern string
+		if err := rows.Scan(&u, &pattern); err != nil {
+			continue
+		}
+		result[u] = append(result[u], pattern)
+	}
+	return result, rows.Err()
+}
+
+// ─────────────────────────────────────────────────────────────
+// JS Secret host flagging
+// ─────────────────────────────────────────────────────────────
+
+// MarkHostsJSSecrets flags the given hosts as having exposed secrets in their
+// JavaScript files. If a host_metadata row doesn't exist yet, one is created.
+func MarkHostsJSSecrets(scanID int64, hosts []string) error {
+	if len(hosts) == 0 {
+		return nil
+	}
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, host := range hosts {
+		host = strings.TrimSpace(strings.ToLower(host))
+		if host == "" {
+			continue
+		}
+		// Ensure a row exists, then update the flag
+		tx.Exec(`INSERT OR IGNORE INTO host_metadata (scan_id, host) VALUES (?, ?)`, scanID, host)
+		tx.Exec(`UPDATE host_metadata SET has_js_secrets = TRUE, updated_at = CURRENT_TIMESTAMP WHERE scan_id = ? AND host = ?`, scanID, host)
+	}
+	return tx.Commit()
 }

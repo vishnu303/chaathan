@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
@@ -273,13 +274,16 @@ func collectROIMetadataTargetsFromFile(inputFile, outputFile string, perHostLimi
 
 // collectGFTargetURLs runs installed Tier 1 gf patterns against inputFile,
 // merges the matches and writes them to outputFile.
+// When scanID > 0, persists each URL-pattern pair in the gf_matches table.
 func collectGFTargetURLs(c *Ctx, tb *tools.ToolBox, inputFile, outputFile string) int {
-	return collectGFMatches(c.GoCtx, tb, inputFile, outputFile, tier1GFPatterns)
+	return collectGFMatches(c.GoCtx, tb, inputFile, outputFile, tier1GFPatterns, c.ScanID)
 }
 
 // collectGFMatches runs the installed gf patterns present in allowlist against
 // inputFile, merges the matches and writes them to outputFile.
-func collectGFMatches(ctx context.Context, tb *tools.ToolBox, inputFile, outputFile string, allowlist map[string]bool) int {
+// When scanID > 0, persists each URL-pattern pair in the gf_matches table
+// so that ROI scoring can boost URLs that matched vulnerability patterns.
+func collectGFMatches(ctx context.Context, tb *tools.ToolBox, inputFile, outputFile string, allowlist map[string]bool, scanID int64) int {
 	patterns := installedGFPatterns(allowlist)
 	tmpFiles := make([]string, 0, len(patterns))
 
@@ -290,6 +294,12 @@ func collectGFMatches(ctx context.Context, tb *tools.ToolBox, inputFile, outputF
 			continue
 		}
 		if utils.FileExists(tmpFile) {
+			// Persist matches to DB for ROI scoring
+			if scanID > 0 {
+				if matchedURLs := loadLineSlice(tmpFile, 0); len(matchedURLs) > 0 {
+					database.AddGFMatches(scanID, matchedURLs, pattern)
+				}
+			}
 			tmpFiles = append(tmpFiles, tmpFile)
 			defer os.Remove(tmpFile)
 		}
