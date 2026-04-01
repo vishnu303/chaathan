@@ -7,34 +7,43 @@ import (
 
 // HostMetadata stores lightweight per-host signals used by ROI ranking.
 type HostMetadata struct {
-	ScanID          int64     `json:"scan_id"`
-	Host            string    `json:"host"`
-	BaseURL         string    `json:"base_url,omitempty"`
-	HeadersJSON     string    `json:"headers_json,omitempty"`
-	HasCSP          bool      `json:"has_csp"`
-	HasCacheHeaders bool      `json:"has_cache_headers"`
-	LoginSurface    bool      `json:"login_surface"`
-	ResponseBytes   int       `json:"response_bytes"`
-	SSLExpired      bool      `json:"ssl_expired"`
-	SSLSelfSigned   bool      `json:"ssl_self_signed"`
-	SSLMismatch     bool      `json:"ssl_mismatch"`
-	WeakTLS         bool      `json:"weak_tls"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ScanID              int64     `json:"scan_id"`
+	Host                string    `json:"host"`
+	BaseURL             string    `json:"base_url,omitempty"`
+	HeadersJSON         string    `json:"headers_json,omitempty"`
+	HasCSP              bool      `json:"has_csp"`
+	HasCacheHeaders     bool      `json:"has_cache_headers"`
+	LoginSurface        bool      `json:"login_surface"`
+	ResponseBytes       int       `json:"response_bytes"`
+	SSLExpired          bool      `json:"ssl_expired"`
+	SSLSelfSigned       bool      `json:"ssl_self_signed"`
+	SSLMismatch         bool      `json:"ssl_mismatch"`
+	WeakTLS             bool      `json:"weak_tls"`
+	HasJSSecrets        bool      `json:"has_js_secrets"`
+	CORSWildcard        bool      `json:"cors_wildcard"`
+	HasInsecureCookies  bool      `json:"has_insecure_cookies"`
+	HasSessionCookie    bool      `json:"has_session_cookie"`
+	HasDangerousMethods bool      `json:"has_dangerous_methods"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // URLMetadata stores selected path-level signals used by ROI ranking.
 type URLMetadata struct {
-	ScanID          int64     `json:"scan_id"`
-	URL             string    `json:"url"`
-	Host            string    `json:"host"`
-	HeadersJSON     string    `json:"headers_json,omitempty"`
-	HasCSP          bool      `json:"has_csp"`
-	HasCacheHeaders bool      `json:"has_cache_headers"`
-	LoginSurface    bool      `json:"login_surface"`
-	ResponseBytes   int       `json:"response_bytes"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ScanID           int64     `json:"scan_id"`
+	URL              string    `json:"url"`
+	Host             string    `json:"host"`
+	HeadersJSON      string    `json:"headers_json,omitempty"`
+	HasCSP           bool      `json:"has_csp"`
+	HasCacheHeaders  bool      `json:"has_cache_headers"`
+	LoginSurface     bool      `json:"login_surface"`
+	ResponseBytes    int       `json:"response_bytes"`
+	FormCount        int       `json:"form_count"`
+	HasFileUpload    bool      `json:"has_file_upload"`
+	HiddenInputCount int       `json:"hidden_input_count"`
+	ArjunParamCount  int       `json:"arjun_param_count"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func UpsertHostMetadata(scanID int64, meta HostMetadata) error {
@@ -43,8 +52,9 @@ func UpsertHostMetadata(scanID int64, meta HostMetadata) error {
 		`INSERT INTO host_metadata (
 			scan_id, host, base_url, headers_json, has_csp, has_cache_headers,
 			login_surface, response_bytes, ssl_expired, ssl_self_signed,
-			ssl_mismatch, weak_tls
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ssl_mismatch, weak_tls, has_js_secrets,
+			cors_wildcard, has_insecure_cookies, has_session_cookie, has_dangerous_methods
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(scan_id, host) DO UPDATE SET
 			base_url = CASE
 				WHEN excluded.base_url != '' THEN excluded.base_url
@@ -65,6 +75,11 @@ func UpsertHostMetadata(scanID int64, meta HostMetadata) error {
 			ssl_self_signed = host_metadata.ssl_self_signed OR excluded.ssl_self_signed,
 			ssl_mismatch = host_metadata.ssl_mismatch OR excluded.ssl_mismatch,
 			weak_tls = host_metadata.weak_tls OR excluded.weak_tls,
+			has_js_secrets = host_metadata.has_js_secrets OR excluded.has_js_secrets,
+			cors_wildcard = host_metadata.cors_wildcard OR excluded.cors_wildcard,
+			has_insecure_cookies = host_metadata.has_insecure_cookies OR excluded.has_insecure_cookies,
+			has_session_cookie = host_metadata.has_session_cookie OR excluded.has_session_cookie,
+			has_dangerous_methods = host_metadata.has_dangerous_methods OR excluded.has_dangerous_methods,
 			updated_at = CURRENT_TIMESTAMP`,
 		scanID,
 		meta.Host,
@@ -78,6 +93,11 @@ func UpsertHostMetadata(scanID int64, meta HostMetadata) error {
 		meta.SSLSelfSigned,
 		meta.SSLMismatch,
 		meta.WeakTLS,
+		meta.HasJSSecrets,
+		meta.CORSWildcard,
+		meta.HasInsecureCookies,
+		meta.HasSessionCookie,
+		meta.HasDangerousMethods,
 	)
 	return err
 }
@@ -88,8 +108,9 @@ func UpsertURLMetadata(scanID int64, meta URLMetadata) error {
 	_, err := DB.Exec(
 		`INSERT INTO url_metadata (
 			scan_id, url, host, headers_json, has_csp, has_cache_headers,
-			login_surface, response_bytes
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			login_surface, response_bytes, form_count, has_file_upload,
+			hidden_input_count, arjun_param_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(scan_id, url) DO UPDATE SET
 			host = CASE
 				WHEN excluded.host != '' THEN excluded.host
@@ -106,6 +127,19 @@ func UpsertURLMetadata(scanID int64, meta URLMetadata) error {
 				WHEN excluded.response_bytes > url_metadata.response_bytes THEN excluded.response_bytes
 				ELSE url_metadata.response_bytes
 			END,
+			form_count = CASE
+				WHEN excluded.form_count > url_metadata.form_count THEN excluded.form_count
+				ELSE url_metadata.form_count
+			END,
+			has_file_upload = url_metadata.has_file_upload OR excluded.has_file_upload,
+			hidden_input_count = CASE
+				WHEN excluded.hidden_input_count > url_metadata.hidden_input_count THEN excluded.hidden_input_count
+				ELSE url_metadata.hidden_input_count
+			END,
+			arjun_param_count = CASE
+				WHEN excluded.arjun_param_count > url_metadata.arjun_param_count THEN excluded.arjun_param_count
+				ELSE url_metadata.arjun_param_count
+			END,
 			updated_at = CURRENT_TIMESTAMP`,
 		scanID,
 		meta.URL,
@@ -115,6 +149,10 @@ func UpsertURLMetadata(scanID int64, meta URLMetadata) error {
 		meta.HasCacheHeaders,
 		meta.LoginSurface,
 		meta.ResponseBytes,
+		meta.FormCount,
+		meta.HasFileUpload,
+		meta.HiddenInputCount,
+		meta.ArjunParamCount,
 	)
 	return err
 }
@@ -123,7 +161,9 @@ func GetHostMetadata(scanID int64) ([]HostMetadata, error) {
 	rows, err := DB.Query(
 		`SELECT scan_id, host, base_url, headers_json, has_csp, has_cache_headers,
 		        login_surface, response_bytes, ssl_expired, ssl_self_signed,
-		        ssl_mismatch, weak_tls, created_at, updated_at
+		        ssl_mismatch, weak_tls, has_js_secrets,
+		        cors_wildcard, has_insecure_cookies, has_session_cookie,
+		        has_dangerous_methods, created_at, updated_at
 		 FROM host_metadata WHERE scan_id = ?`,
 		scanID,
 	)
@@ -148,6 +188,11 @@ func GetHostMetadata(scanID int64) ([]HostMetadata, error) {
 			&meta.SSLSelfSigned,
 			&meta.SSLMismatch,
 			&meta.WeakTLS,
+			&meta.HasJSSecrets,
+			&meta.CORSWildcard,
+			&meta.HasInsecureCookies,
+			&meta.HasSessionCookie,
+			&meta.HasDangerousMethods,
 			&meta.CreatedAt,
 			&meta.UpdatedAt,
 		); err != nil {
@@ -162,7 +207,8 @@ func GetHostMetadata(scanID int64) ([]HostMetadata, error) {
 func GetURLMetadata(scanID int64) ([]URLMetadata, error) {
 	rows, err := DB.Query(
 		`SELECT scan_id, url, host, headers_json, has_csp, has_cache_headers,
-		        login_surface, response_bytes, created_at, updated_at
+		        login_surface, response_bytes, form_count, has_file_upload,
+		        hidden_input_count, arjun_param_count, created_at, updated_at
 		 FROM url_metadata WHERE scan_id = ?`,
 		scanID,
 	)
@@ -183,6 +229,10 @@ func GetURLMetadata(scanID int64) ([]URLMetadata, error) {
 			&meta.HasCacheHeaders,
 			&meta.LoginSurface,
 			&meta.ResponseBytes,
+			&meta.FormCount,
+			&meta.HasFileUpload,
+			&meta.HiddenInputCount,
+			&meta.ArjunParamCount,
 			&meta.CreatedAt,
 			&meta.UpdatedAt,
 		); err != nil {

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/metadata"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
@@ -233,6 +234,12 @@ func stepParamDiscovery(c *Ctx) bool {
 			if count := convertArjunToURLs(c.F.ArjunOut, c.F.ArjunURLsOut); count > 0 {
 				logger.Info("  Generated %d parameterized URLs from Arjun output", count)
 			}
+			// Store discovered parameter counts for ROI scoring
+			if c.ScanID > 0 {
+				if stored := storeArjunParamCounts(c.ScanID, c.F.ArjunOut); stored > 0 {
+					logger.Info("  Stored Arjun param counts for %d URLs", stored)
+				}
+			}
 		}
 	} else {
 		logger.Section("Step 14: Skipping Arjun (--skip-arjun)")
@@ -364,10 +371,10 @@ func stepJSSecretScan(c *Ctx) bool {
 	logger.Info("  Combined %d downloaded JS response file(s)", downloadedFiles)
 
 	logger.SubStep("Running gf JavaScript patterns on downloaded content...")
-	jsMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFJSMatches, jsGFPatterns)
+	jsMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFJSMatches, jsGFPatterns, 0)
 
 	logger.SubStep("Running gf secret patterns on downloaded content...")
-	secretMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFSecretsMatches, secretGFPatterns)
+	secretMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFSecretsMatches, secretGFPatterns, 0)
 
 	if err := utils.MergeAndDeduplicate(existingFiles(c.F.GFJSMatches, c.F.GFSecretsMatches), c.F.GFSecretsFinal); err != nil {
 		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
@@ -378,12 +385,53 @@ func stepJSSecretScan(c *Ctx) bool {
 	totalFindings, _ := utils.CountFileLines(c.F.GFSecretsFinal)
 	if totalFindings > 0 {
 		logger.Info("  Found %d JS/secret findings (%d JS matches, %d secret matches)", totalFindings, jsMatchCount, secretMatchCount)
+
+		// Flag hosts that served JS with secrets for ROI scoring
+		if c.ScanID > 0 && secretMatchCount > 0 {
+			hosts := extractHostsFromURLFile(c.F.JSURLsFile)
+			if len(hosts) > 0 {
+				if err := database.MarkHostsJSSecrets(c.ScanID, hosts); err != nil {
+					logger.Warning("Failed to flag JS-secret hosts: %v", err)
+				} else {
+					logger.Info("  Flagged %d hosts with JS secrets for ROI boost", len(hosts))
+				}
+			}
+		}
 	} else {
 		logger.Info("  No JS or secret findings matched installed gf patterns")
 	}
 
 	c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
 	return c.cancelled()
+}
+
+// extractHostsFromURLFile reads a URL file and returns unique hostnames.
+func extractHostsFromURLFile(filePath string) []string {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	seen := make(map[string]bool)
+	var hosts []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parsed, err := url.Parse(line)
+		if err != nil || parsed.Hostname() == "" {
+			continue
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if !seen[host] {
+			seen[host] = true
+			hosts = append(hosts, host)
+		}
+	}
+	return hosts
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -602,3 +650,44 @@ func convertArjunToURLs(arjunJSON, outputFile string) int {
 	return count
 }
 
+// storeArjunParamCounts parses Arjun's JSON output and stores the number of
+// discovered hidden parameters per URL in url_metadata for ROI scoring.
+func storeArjunParamCounts(scanID int64, arjunJSON string) int {
+	if !utils.FileExists(arjunJSON) {
+		return 0
+	}
+
+	data, err := os.ReadFile(arjunJSON)
+	if err != nil || len(data) == 0 {
+		return 0
+	}
+
+	var results []arjunResult
+	if err := json.Unmarshal(data, &results); err != nil {
+		var single arjunResult
+		if err2 := json.Unmarshal(data, &single); err2 != nil {
+			return 0
+		}
+		results = []arjunResult{single}
+	}
+
+	stored := 0
+	for _, r := range results {
+		if r.URL == "" || len(r.Params) == 0 {
+			continue
+		}
+		parsed, parseErr := url.Parse(strings.TrimSpace(r.URL))
+		if parseErr != nil || parsed.Hostname() == "" {
+			continue
+		}
+		err := database.UpsertURLMetadata(scanID, database.URLMetadata{
+			URL:             r.URL,
+			Host:            strings.ToLower(parsed.Hostname()),
+			ArjunParamCount: len(r.Params),
+		})
+		if err == nil {
+			stored++
+		}
+	}
+	return stored
+}

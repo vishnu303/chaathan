@@ -18,14 +18,29 @@ const (
 	maxBodyBytes       = 65536
 )
 
+// sessionCookiePrefixes are common cookie name patterns that indicate
+// session or authentication cookies.
+var sessionCookiePrefixes = []string{
+	"session", "sess", "sid", "jsessionid", "phpsessid",
+	"asp.net_sessionid", "connect.sid", "_session",
+	"auth", "token", "jwt", "access_token",
+}
+
 type httpSignal struct {
-	URL             string
-	Host            string
-	HeadersJSON     string
-	HasCSP          bool
-	HasCacheHeaders bool
-	LoginSurface    bool
-	ResponseBytes   int
+	URL                 string
+	Host                string
+	HeadersJSON         string
+	HasCSP              bool
+	HasCacheHeaders     bool
+	LoginSurface        bool
+	ResponseBytes       int
+	FormCount           int
+	HasFileUpload       bool
+	HiddenInputCount    int
+	CORSWildcard        bool
+	HasInsecureCookies  bool
+	HasSessionCookie    bool
+	HasDangerousMethods bool
 }
 
 // CollectHostMetadata fetches lightweight metadata for live host URLs and
@@ -40,13 +55,17 @@ func CollectHostMetadata(scanID int64, urls []string) (int, error) {
 	count := 0
 	for _, signal := range results {
 		err := database.UpsertHostMetadata(scanID, database.HostMetadata{
-			Host:            signal.Host,
-			BaseURL:         signal.URL,
-			HeadersJSON:     signal.HeadersJSON,
-			HasCSP:          signal.HasCSP,
-			HasCacheHeaders: signal.HasCacheHeaders,
-			LoginSurface:    signal.LoginSurface,
-			ResponseBytes:   signal.ResponseBytes,
+			Host:                signal.Host,
+			BaseURL:             signal.URL,
+			HeadersJSON:         signal.HeadersJSON,
+			HasCSP:              signal.HasCSP,
+			HasCacheHeaders:     signal.HasCacheHeaders,
+			LoginSurface:        signal.LoginSurface,
+			ResponseBytes:       signal.ResponseBytes,
+			CORSWildcard:        signal.CORSWildcard,
+			HasInsecureCookies:  signal.HasInsecureCookies,
+			HasSessionCookie:    signal.HasSessionCookie,
+			HasDangerousMethods: signal.HasDangerousMethods,
 		})
 		if err == nil {
 			count++
@@ -68,13 +87,16 @@ func CollectURLMetadata(scanID int64, urls []string) (int, error) {
 	count := 0
 	for _, signal := range results {
 		err := database.UpsertURLMetadata(scanID, database.URLMetadata{
-			URL:             signal.URL,
-			Host:            signal.Host,
-			HeadersJSON:     signal.HeadersJSON,
-			HasCSP:          signal.HasCSP,
-			HasCacheHeaders: signal.HasCacheHeaders,
-			LoginSurface:    signal.LoginSurface,
-			ResponseBytes:   signal.ResponseBytes,
+			URL:              signal.URL,
+			Host:             signal.Host,
+			HeadersJSON:      signal.HeadersJSON,
+			HasCSP:           signal.HasCSP,
+			HasCacheHeaders:  signal.HasCacheHeaders,
+			LoginSurface:     signal.LoginSurface,
+			ResponseBytes:    signal.ResponseBytes,
+			FormCount:        signal.FormCount,
+			HasFileUpload:    signal.HasFileUpload,
+			HiddenInputCount: signal.HiddenInputCount,
 		})
 		if err == nil {
 			count++
@@ -176,14 +198,39 @@ func fetchSignal(client *http.Client, rawURL string) (httpSignal, bool) {
 		resp.Header.Get("Expires") != "" ||
 		resp.Header.Get("Vary") != ""
 
+	// Form and file upload detection
+	formCount := strings.Count(lowerBody, "<form")
+	hasFileUpload := strings.Contains(lowerBody, `type="file"`) ||
+		strings.Contains(lowerBody, `type='file'`) ||
+		strings.Contains(lowerBody, "type=file")
+	hiddenInputCount := strings.Count(lowerBody, `type="hidden"`) +
+		strings.Count(lowerBody, `type='hidden'`)
+
+	// CORS wildcard detection
+	corsHeader := resp.Header.Get("Access-Control-Allow-Origin")
+	corsWildcard := corsHeader == "*"
+
+	// Cookie security analysis
+	hasInsecureCookies, hasSessionCookie := analyzeCookies(resp.Header["Set-Cookie"])
+
+	// OPTIONS method detection (follow-up request for dangerous methods)
+	hasDangerousMethods := checkDangerousMethods(client, rawURL)
+
 	return httpSignal{
-		URL:             rawURL,
-		Host:            strings.ToLower(parsed.Hostname()),
-		HeadersJSON:     string(headersJSON),
-		HasCSP:          hasCSP,
-		HasCacheHeaders: hasCacheHeaders,
-		LoginSurface:    loginSurface,
-		ResponseBytes:   len(body),
+		URL:                 rawURL,
+		Host:                strings.ToLower(parsed.Hostname()),
+		HeadersJSON:         string(headersJSON),
+		HasCSP:              hasCSP,
+		HasCacheHeaders:     hasCacheHeaders,
+		LoginSurface:        loginSurface,
+		ResponseBytes:       len(body),
+		FormCount:           formCount,
+		HasFileUpload:       hasFileUpload,
+		HiddenInputCount:    hiddenInputCount,
+		CORSWildcard:        corsWildcard,
+		HasInsecureCookies:  hasInsecureCookies,
+		HasSessionCookie:    hasSessionCookie,
+		HasDangerousMethods: hasDangerousMethods,
 	}, true
 }
 
@@ -216,4 +263,81 @@ func dedupeByURL(urls []string) []string {
 		out = append(out, raw)
 	}
 	return out
+}
+
+// analyzeCookies inspects Set-Cookie headers for missing security flags.
+// Returns (hasInsecureCookies, hasSessionCookie).
+func analyzeCookies(setCookies []string) (bool, bool) {
+	if len(setCookies) == 0 {
+		return false, false
+	}
+
+	var hasInsecure, hasSession bool
+
+	for _, cookie := range setCookies {
+		// Check if this looks like a session cookie by name
+		nameEnd := strings.Index(cookie, "=")
+		if nameEnd > 0 {
+			name := strings.ToLower(strings.TrimSpace(cookie[:nameEnd]))
+			for _, prefix := range sessionCookiePrefixes {
+				if strings.Contains(name, prefix) {
+					hasSession = true
+					break
+				}
+			}
+		}
+
+		// Parse attributes after the first ';' to check security flags.
+		// Only check the attribute portion, not the name=value part,
+		// to avoid false positives from values containing "secure".
+		parts := strings.Split(cookie, ";")
+		hasSecureFlag := false
+		hasHTTPOnlyFlag := false
+		for _, part := range parts[1:] { // skip name=value
+			attr := strings.ToLower(strings.TrimSpace(part))
+			if attr == "secure" {
+				hasSecureFlag = true
+			}
+			if attr == "httponly" {
+				hasHTTPOnlyFlag = true
+			}
+		}
+		if !hasSecureFlag || !hasHTTPOnlyFlag {
+			hasInsecure = true
+		}
+	}
+
+	return hasInsecure, hasSession
+}
+
+// checkDangerousMethods sends an OPTIONS request and checks if the server
+// advertises PUT or DELETE in the Allow header.
+func checkDangerousMethods(client *http.Client, rawURL string) bool {
+	req, err := http.NewRequest("OPTIONS", rawURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "Chaathan-ROI-Metadata/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	// Drain body to allow connection reuse
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+
+	allow := resp.Header.Get("Allow")
+	if allow == "" {
+		return false
+	}
+	// Split on comma and check exact method names to avoid substring
+	// false positives (e.g., "OUTPUT" matching "PUT").
+	for _, method := range strings.Split(allow, ",") {
+		method = strings.ToUpper(strings.TrimSpace(method))
+		if method == "PUT" || method == "DELETE" {
+			return true
+		}
+	}
+	return false
 }

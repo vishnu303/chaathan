@@ -69,6 +69,7 @@ var (
 	queryGrep       string
 	queryLimit      int
 	queryOutputFile string
+	queryScope      bool
 )
 
 func init() {
@@ -87,6 +88,7 @@ func init() {
 	queryROICmd.Flags().IntVar(&queryLimit, "limit", 20, "Maximum number of ranked URLs to show")
 	queryROICmd.Flags().StringVar(&queryGrep, "grep", "", "Filter ROI targets by pattern")
 	queryROICmd.Flags().StringVarP(&queryOutputFile, "output", "o", "", "Write ROI results to a file (best with --json)")
+	queryROICmd.Flags().BoolVar(&queryScope, "scope", false, "Output as plain URLs only (scope file for downstream tools)")
 
 	queryCmd.AddCommand(querySubdomainsCmd)
 	queryCmd.AddCommand(queryPortsCmd)
@@ -342,6 +344,30 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 		targets = targets[:queryLimit]
 	}
 
+	if len(targets) == 0 {
+		logger.Info("No ROI-ranked URLs found.")
+		return
+	}
+
+	if queryScope {
+		// Scope mode: output raw URLs only, one per line
+		var sb strings.Builder
+		for _, t := range targets {
+			sb.WriteString(t.URL)
+			sb.WriteByte('\n')
+		}
+		if queryOutputFile != "" {
+			if err := os.WriteFile(queryOutputFile, []byte(sb.String()), 0644); err != nil {
+				logger.Error("Failed to write scope file: %v", err)
+				return
+			}
+			logger.Success("Scope file saved: %s (%d URLs)", queryOutputFile, len(targets))
+			return
+		}
+		fmt.Print(sb.String())
+		return
+	}
+
 	if queryOutputJSON {
 		data, _ := json.MarshalIndent(targets, "", "  ")
 		if queryOutputFile != "" {
@@ -356,37 +382,38 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if len(targets) == 0 {
-		logger.Info("No ROI-ranked URLs found.")
-		return
-	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SCORE\tSTATUS\tURL\tENDPOINTS\tVULNS\tTECH")
+	fmt.Fprintln(w, "SCORE\tN-SCORE\tCONF\tSTATUS\tURL\tSURFACES")
 	for _, t := range targets {
-		vulnSummary := utils.SummarizeSeverityCounts(t.ExactVulnCounts, t.HostVulnCounts)
-		techSummary := "-"
-		if len(t.Tech) > 0 {
-			techSummary = strings.Join(t.Tech, ",")
-			if len(techSummary) > 30 {
-				techSummary = techSummary[:27] + "..."
+		surfaces := "-"
+		if len(t.AttackSurfaces) > 0 {
+			surfaces = strings.Join(t.AttackSurfaces, ",")
+			if len(surfaces) > 30 {
+				surfaces = surfaces[:27] + "..."
 			}
 		}
 		fmt.Fprintf(w, "%d\t%d\t%s\t%d\t%s\t%s\n",
 			t.Score,
+			t.NormalizedScore,
+			t.Confidence,
 			t.StatusCode,
-			utils.TruncateURL(t.URL, 70),
-			t.EndpointCount,
-			vulnSummary,
-			techSummary,
+			utils.TruncateURL(t.URL, 65),
+			surfaces,
 		)
 	}
 	w.Flush()
 
 	for _, t := range targets {
-		logger.Section(fmt.Sprintf("ROI %d - %s", t.Score, t.URL))
+		logger.Section(fmt.Sprintf("ROI %d (N:%d %s) - %s", t.Score, t.NormalizedScore, t.Confidence, t.URL))
 		if t.Title != "" {
 			fmt.Printf("Title: %s\n", t.Title)
+		}
+		if len(t.AttackSurfaces) > 0 {
+			fmt.Printf("Attack surfaces: %s\n", strings.Join(t.AttackSurfaces, ", "))
+		}
+		if len(t.Tech) > 0 {
+			fmt.Printf("Tech: %s\n", strings.Join(t.Tech, ", "))
 		}
 		if len(t.Reasons) > 0 {
 			fmt.Println("Why it ranked:")
@@ -397,7 +424,7 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 		fmt.Println()
 	}
 
-	logger.Info("Showing %d ranked targets", len(targets))
+	logger.Info("Showing %d ranked targets (max 3 per host)", len(targets))
 }
 
 // summarizeSeverityCounts, truncateURL, and colorSeverity have been moved to
