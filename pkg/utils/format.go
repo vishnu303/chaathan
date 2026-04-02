@@ -6,12 +6,15 @@ import (
 )
 
 // Truncate shortens s to at most max runes, appending "..." when truncated.
-// Works correctly with ASCII strings; for multi-byte text use TruncateRune.
 func Truncate(s string, max int) string {
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max-3] + "..."
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 // TruncateURL is an alias for Truncate, used to signal intent when the value

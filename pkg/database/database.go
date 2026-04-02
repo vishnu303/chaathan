@@ -3,13 +3,15 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 )
 
 // DB is the global database connection
@@ -650,29 +652,7 @@ func GetVulnerabilities(scanID int64) ([]Vulnerability, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var vulns []Vulnerability
-	for rows.Next() {
-		var v Vulnerability
-		var url, desc, matcher, evidence sql.NullString
-		if err := rows.Scan(&v.ID, &v.ScanID, &v.Host, &url, &v.TemplateID, &v.Name, &v.Severity, &desc, &matcher, &evidence, &v.CreatedAt); err != nil {
-			return nil, err
-		}
-		if url.Valid {
-			v.URL = url.String
-		}
-		if desc.Valid {
-			v.Description = desc.String
-		}
-		if matcher.Valid {
-			v.Matcher = matcher.String
-		}
-		if evidence.Valid {
-			v.Evidence = evidence.String
-		}
-		vulns = append(vulns, v)
-	}
-	return vulns, nil
+	return scanVulnRows(rows)
 }
 
 func GetVulnerabilitiesBySeverity(scanID int64, severity string) ([]Vulnerability, error) {
@@ -685,7 +665,12 @@ func GetVulnerabilitiesBySeverity(scanID int64, severity string) ([]Vulnerabilit
 		return nil, err
 	}
 	defer rows.Close()
+	return scanVulnRows(rows)
+}
 
+// scanVulnRows extracts Vulnerability structs from a *sql.Rows cursor.
+// Shared by GetVulnerabilities and GetVulnerabilitiesBySeverity.
+func scanVulnRows(rows *sql.Rows) ([]Vulnerability, error) {
 	var vulns []Vulnerability
 	for rows.Next() {
 		var v Vulnerability
@@ -833,8 +818,7 @@ func GetScanStats(scanID int64) (*ScanStats, error) {
 
 // GetDefaultDBPath returns the default database path
 func GetDefaultDBPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".chaathan", "chaathan.db")
+	return paths.DatabasePath()
 }
 
 // DeleteScan deletes a scan and all its related data
@@ -1100,8 +1084,7 @@ func AddGFMatches(scanID int64, urls []string, pattern string) error {
 		u = strings.TrimSpace(u)
 		if u != "" {
 			if _, err := stmt.Exec(scanID, u, pattern); err != nil {
-				// Log but continue — partial persistence is better than none
-				log.Printf("[WARN] gf_matches insert failed for %q pattern %q: %v", u, pattern, err)
+				logger.Warning("gf_matches insert failed for %q pattern %q: %v", u, pattern, err)
 			}
 		}
 	}

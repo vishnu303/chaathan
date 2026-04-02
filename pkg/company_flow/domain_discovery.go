@@ -21,7 +21,7 @@ func stepAmassIntel(c *Ctx) bool {
 	c.Total++
 
 	if !c.SkipAmassIntel {
-		logger.Section("Step 2: Root Domain Discovery (Amass Intel)")
+		logger.StepHeader("Step 2: Root Domain Discovery (Amass Intel)")
 		amassIntelOut := filepath.Join(c.ResultDir, "root_domains.txt")
 		logger.SubStep("Running Amass Intel reverse-whois for: %s", c.Company)
 
@@ -52,7 +52,7 @@ func stepAmassIntel(c *Ctx) bool {
 			}
 		}
 	} else {
-		logger.Section("Step 2: Skipping Amass Intel (--skip-amass-intel)")
+		logger.StepHeader("Step 2: Skipping Amass Intel (--skip-amass-intel)")
 		c.Completed++
 	}
 

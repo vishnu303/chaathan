@@ -27,10 +27,10 @@ import (
 // Returns true if the scan should be cancelled.
 func stepPassiveEnum(c *Ctx) bool {
 	if c.State.IsStepCompleted("passive_enum") {
-		logger.Section("Step 1: Passive Subdomain Enumeration [RESUMED — skipping]")
+		logger.StepHeader("Step 1: Passive Subdomain Enumeration [RESUMED — skipping]")
 		return false
 	}
-	logger.Section("Step 1: Passive Subdomain Enumeration")
+	logger.StepHeader("Step 1: Passive Subdomain Enumeration")
 
 	err := runWithSkip(c, "passive enum", func(sCtx context.Context) error {
 		var wg sync.WaitGroup
@@ -104,9 +104,9 @@ func stepPassiveEnum(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepActiveEnum(c *Ctx) bool {
 	if c.State.IsStepCompleted("active_enum") {
-		logger.Section("Step 2: Active Subdomain Enumeration (Amass) [RESUMED — skipping]")
+		logger.StepHeader("Step 2: Active Subdomain Enumeration (Amass) [RESUMED — skipping]")
 	} else if !c.SkipAmass {
-		logger.Section("Step 2: Active Subdomain Enumeration (Amass)")
+		logger.StepHeader("Step 2: Active Subdomain Enumeration (Amass)")
 		logger.SubStep("Running Amass (this may take a while)...")
 		if err := runWithSkip(c, "amass", func(sCtx context.Context) error {
 			return c.Tb.RunAmass(sCtx, c.Domain, c.F.AmassOut)
@@ -126,7 +126,7 @@ func stepActiveEnum(c *Ctx) bool {
 			c.StateMgr.MarkStepComplete(c.State, "active_enum")
 		}
 	} else {
-		logger.Section("Step 2: Skipping Amass (--skip-amass)")
+		logger.StepHeader("Step 2: Skipping Amass (--skip-amass)")
 		c.StateMgr.MarkStepComplete(c.State, "active_enum")
 	}
 	return c.cancelled()
@@ -140,9 +140,9 @@ func stepActiveEnum(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepGitHubRecon(c *Ctx) bool {
 	if c.State.IsStepCompleted("github_recon") {
-		logger.Section("Step 3: GitHub Subdomain Discovery [RESUMED — skipping]")
+		logger.StepHeader("Step 3: GitHub Subdomain Discovery [RESUMED — skipping]")
 	} else if c.GitHubToken != "" {
-		logger.Section("Step 3: GitHub Subdomain Discovery")
+		logger.StepHeader("Step 3: GitHub Subdomain Discovery")
 		logger.SubStep("Running github-subdomains...")
 		if err := runWithSkip(c, "github-subdomains", func(sCtx context.Context) error {
 			return c.Tb.RunGithubSubdomains(sCtx, c.Domain, c.GitHubToken, c.F.GithubSubsOut)
@@ -161,7 +161,7 @@ func stepGitHubRecon(c *Ctx) bool {
 			logger.SubStep("[Done] GitHub Subdomains")
 		}
 	} else {
-		logger.Section("Step 3: Skipping GitHub Recon (no token provided)")
+		logger.StepHeader("Step 3: Skipping GitHub Recon (no token provided)")
 		logger.Warning("Set GITHUB_TOKEN env var or use --github-token for GitHub recon")
 	}
 	c.StateMgr.MarkStepComplete(c.State, "github_recon")
@@ -176,9 +176,9 @@ func stepGitHubRecon(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepSearchEngineRecon(c *Ctx) bool {
 	if c.State.IsStepCompleted("search_engine_recon") {
-		logger.Section("Step 4: Passive Search Engine Recon (Uncover) [RESUMED — skipping]")
+		logger.StepHeader("Step 4: Passive Search Engine Recon (Uncover) [RESUMED — skipping]")
 	} else if !c.SkipUncover {
-		logger.Section("Step 4: Passive Search Engine Recon (Uncover)")
+		logger.StepHeader("Step 4: Passive Search Engine Recon (Uncover)")
 		logger.SubStep("Running Uncover (Shodan/Censys/Fofa)...")
 		if err := runWithSkip(c, "uncover", func(sCtx context.Context) error {
 			return c.Tb.RunUncover(sCtx, c.Domain, c.F.UncoverOut)
@@ -202,7 +202,7 @@ func stepSearchEngineRecon(c *Ctx) bool {
 		}
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
 	} else {
-		logger.Section("Step 4: Skipping Uncover (--skip-uncover)")
+		logger.StepHeader("Step 4: Skipping Uncover (--skip-uncover)")
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
 	}
 	return c.cancelled()
@@ -216,9 +216,9 @@ func stepSearchEngineRecon(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepJSSubdomains(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_subdomain_discovery") {
-		logger.Section("Step 5: JavaScript Subdomain Extraction (SubDomainizer) [RESUMED — skipping]")
+		logger.StepHeader("Step 5: JavaScript Subdomain Extraction (SubDomainizer) [RESUMED — skipping]")
 	} else if !c.SkipSubdomainizer {
-		logger.Section("Step 5: JavaScript Subdomain Extraction (SubDomainizer)")
+		logger.StepHeader("Step 5: JavaScript Subdomain Extraction (SubDomainizer)")
 		logger.SubStep("Running SubDomainizer on https://%s...", c.Domain)
 
 		if err := runWithSkip(c, "subdomainizer", func(sCtx context.Context) error {
@@ -243,7 +243,7 @@ func stepJSSubdomains(c *Ctx) bool {
 		}
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 	} else {
-		logger.Section("Step 5: Skipping SubDomainizer (--skip-subdomainizer)")
+		logger.StepHeader("Step 5: Skipping SubDomainizer (--skip-subdomainizer)")
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 	}
 	return c.cancelled()

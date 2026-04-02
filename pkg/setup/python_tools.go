@@ -124,7 +124,11 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 
 			goPath := os.Getenv("GOPATH")
 			if goPath == "" {
-				home, _ := os.UserHomeDir()
+				home, err := os.UserHomeDir()
+				if err != nil {
+					tracker.Fail(tool.name, "cannot determine home directory")
+					return
+				}
 				goPath = filepath.Join(home, "go")
 			}
 			binDir := filepath.Join(goPath, "bin")

@@ -23,6 +23,23 @@ const (
 	FormatText     ReportFormat = "text"
 )
 
+// ExtensionFor returns the file extension (including the dot) for a given
+// report format string. Defaults to ".md" for unrecognised formats.
+func ExtensionFor(format string) string {
+	switch ReportFormat(format) {
+	case FormatMarkdown:
+		return ".md"
+	case FormatJSON:
+		return ".json"
+	case FormatHTML:
+		return ".html"
+	case FormatText:
+		return ".txt"
+	default:
+		return ".md"
+	}
+}
+
 // Report represents a scan report
 type Report struct {
 	Scan            *database.Scan           `json:"scan"`

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 )
 
 // Config represents the main configuration structure
@@ -54,6 +56,13 @@ type GeneralConfig struct {
 	// Retry configuration
 	MaxRetries    int `yaml:"max_retries"`     // number of retries for failed tools (default: 1)
 	RetryDelaySec int `yaml:"retry_delay_sec"` // seconds between retries (default: 3)
+
+	// WAF evasion: User-Agent rotation
+	UARotation bool   `yaml:"ua_rotation"` // true = rotate real browser UAs on target-facing tools
+	UserAgent  string `yaml:"user_agent"`  // override: use this fixed UA instead of rotation
+
+	// WAF evasion: Proxy support
+	Proxy string `yaml:"proxy"` // e.g., "socks5://127.0.0.1:9050" or "http://proxy:8080"
 }
 
 type WordlistsConfig struct {
@@ -290,15 +299,14 @@ func Save(cfg *Config, path string) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Add header comment
 	header := `# Chaathan Configuration File
 # Generated automatically - customize as needed
-# Documentation: https://github.com/yourusername/chaathan
+# Documentation: https://github.com/vishnu303/chaathan-flow
 
 `
 	content := header + string(data)
 
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -307,8 +315,7 @@ func Save(cfg *Config, path string) error {
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
-	home, _ := os.UserHomeDir()
-	chaathanDir := filepath.Join(home, ".chaathan")
+	chaathanDir := paths.ChaathanHome()
 
 	return &Config{
 		General: GeneralConfig{
@@ -415,8 +422,7 @@ func applyDefaults(cfg *Config) {
 
 // GetDefaultConfigPath returns the default config file path
 func GetDefaultConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".chaathan", "config.yaml")
+	return paths.ConfigPath()
 }
 
 // GetAPIKey retrieves an API key from config or environment

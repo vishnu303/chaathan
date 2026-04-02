@@ -3,7 +3,9 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
@@ -17,9 +19,11 @@ import (
 // It reads per-tool settings (threads, timeouts, rate limits) from the config
 // so users can tune behavior via config.yaml instead of recompiling.
 type ToolBox struct {
-	Runner  runner.Runner
-	Config  *config.ToolsConfig
-	APIKeys *config.APIKeysConfig
+	Runner     runner.Runner
+	Config     *config.ToolsConfig
+	General    *config.GeneralConfig    // WAF evasion settings (UA rotation, proxy, etc.)
+	RateLimits *config.RateLimitConfig  // Global rate-limit override
+	APIKeys    *config.APIKeysConfig
 }
 
 // New creates a ToolBox. If cfg is nil, sensible defaults are used.
@@ -31,10 +35,134 @@ func New(r runner.Runner, cfg ...*config.ToolsConfig) *ToolBox {
 	return tb
 }
 
+// WithGeneral attaches general config to the ToolBox (WAF evasion, etc.).
+func (t *ToolBox) WithGeneral(gen *config.GeneralConfig) *ToolBox {
+	t.General = gen
+	return t
+}
+
+// WithRateLimits attaches rate-limit config to the ToolBox.
+func (t *ToolBox) WithRateLimits(rl *config.RateLimitConfig) *ToolBox {
+	t.RateLimits = rl
+	return t
+}
+
 // WithAPIKeys attaches API key config to the ToolBox (used by uncover, etc).
 func (t *ToolBox) WithAPIKeys(keys *config.APIKeysConfig) *ToolBox {
 	t.APIKeys = keys
 	return t
+}
+
+// --- User-Agent rotation pool ---
+
+// realUserAgents contains common, high-frequency browser User-Agent strings.
+// Rotating through these prevents WAF fingerprinting from static tool UAs
+// like "httpx - Open-source project" or "Nuclei - Open-source project".
+var realUserAgents = []string{
+	// Chrome 147 on Windows 10
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	// Chrome 147 on macOS
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	// Chrome 147 on Linux
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	// Firefox 149 on Windows
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0",
+	// Firefox 149 on macOS
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0",
+	// Edge 147 on Windows
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+	// Safari 18 on macOS
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
+}
+
+// randomUA returns a random User-Agent from the pool.
+func randomUA() string {
+	return realUserAgents[rand.Intn(len(realUserAgents))]
+}
+
+// uaEnabled returns true when UA rotation is active.
+func (t *ToolBox) uaEnabled() bool {
+	return t.General != nil && (t.General.UARotation || t.General.UserAgent != "")
+}
+
+// getUA returns the User-Agent to use: fixed override or random from pool.
+func (t *ToolBox) getUA() string {
+	if t.General != nil && t.General.UserAgent != "" {
+		return t.General.UserAgent
+	}
+	return randomUA()
+}
+
+// appendUAHeader appends a -H "User-Agent: ..." flag pair for tools that
+// accept the -H syntax (httpx, nuclei, katana, ffuf).
+func (t *ToolBox) appendUAHeader(args []string) []string {
+	if !t.uaEnabled() {
+		return args
+	}
+	return append(args, "-H", "User-Agent: "+t.getUA())
+}
+
+// appendDalfoxUA appends --header "User-Agent: ..." for dalfox.
+func (t *ToolBox) appendDalfoxUA(args []string) []string {
+	if !t.uaEnabled() {
+		return args
+	}
+	return append(args, "--header", "User-Agent: "+t.getUA())
+}
+
+// appendGoSpiderUA appends --user-agent "..." for gospider.
+func (t *ToolBox) appendGoSpiderUA(args []string) []string {
+	if !t.uaEnabled() {
+		return args
+	}
+	return append(args, "--user-agent", t.getUA())
+}
+
+// appendArjunUA appends --headers '{"User-Agent":"..."}' for arjun.
+func (t *ToolBox) appendArjunUA(args []string) []string {
+	if !t.uaEnabled() {
+		return args
+	}
+	headers := map[string]string{"User-Agent": t.getUA()}
+	headersJSON, _ := json.Marshal(headers)
+	return append(args, "--headers", string(headersJSON))
+}
+
+// --- Proxy helpers ---
+
+// proxy returns the configured proxy URL, or "" if none.
+func (t *ToolBox) proxy() string {
+	if t.General != nil && t.General.Proxy != "" {
+		return t.General.Proxy
+	}
+	return ""
+}
+
+// appendProxy appends the tool-specific proxy flag when a proxy is configured.
+func (t *ToolBox) appendProxy(args []string, flagName string) []string {
+	if p := t.proxy(); p != "" {
+		return append(args, flagName, p)
+	}
+	return args
+}
+
+// --- Rate-limit helpers ---
+
+// globalRPS returns the global rate limit override, or 0 if none.
+func (t *ToolBox) globalRPS() int {
+	if t.RateLimits != nil && t.RateLimits.GlobalRPS > 0 {
+		return t.RateLimits.GlobalRPS
+	}
+	return 0
+}
+
+// effectiveRate returns the lower of globalRPS and perToolRate (ceiling logic).
+// When globalRPS is 0 (unset), the per-tool rate is used as-is.
+func (t *ToolBox) effectiveRate(perToolRate int) int {
+	if grl := t.globalRPS(); grl > 0 && grl < perToolRate {
+		return grl
+	}
+	return perToolRate
 }
 
 // --- helpers to read config with fallback defaults ---
@@ -236,6 +364,11 @@ func (t *ToolBox) RunHttpx(ctx context.Context, domainsFile string, outputFile s
 	if t.Config != nil && t.Config.Httpx.FollowRedirects {
 		args = append(args, "-follow-redirects")
 	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-http-proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		args = append(args, "-rl", strconv.Itoa(rps))
+	}
 	_, err := t.Runner.Run(ctx, "httpx", args)
 	return err
 }
@@ -244,7 +377,7 @@ func (t *ToolBox) RunHttpx(ctx context.Context, domainsFile string, outputFile s
 func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) error {
 	args := []string{
 		"-host", host,
-		"-rate", strconv.Itoa(t.naabuRate()),
+		"-rate", strconv.Itoa(t.effectiveRate(t.naabuRate())),
 		"-c", strconv.Itoa(t.naabuThreads()),
 		"-o", outputFile,
 	}
@@ -262,6 +395,7 @@ func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) 
 	} else {
 		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
+	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "naabu", args)
 	return err
 }
@@ -270,7 +404,7 @@ func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) 
 func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"-l", inputFile,
-		"-rate", strconv.Itoa(t.naabuRate()),
+		"-rate", strconv.Itoa(t.effectiveRate(t.naabuRate())),
 		"-c", strconv.Itoa(t.naabuThreads()),
 		"-o", outputFile,
 	}
@@ -288,6 +422,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 	} else {
 		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
+	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "naabu", args)
 	return err
 }
@@ -296,12 +431,19 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 
 func (t *ToolBox) RunGoSpider(ctx context.Context, url string, outputFile string) error {
 	args := []string{"-s", url, "-o", outputFile, "-c", "10", "-d", "3"}
+	args = t.appendGoSpiderUA(args)
+	args = t.appendProxy(args, "--proxy")
 	_, err := t.Runner.Run(ctx, "gospider", args)
 	return err
 }
 
 func (t *ToolBox) RunKatana(ctx context.Context, url string, outputFile string) error {
 	args := []string{"-u", url, "-o", outputFile, "-jc"}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		args = append(args, "-rate-limit", strconv.Itoa(rps))
+	}
 	_, err := t.Runner.Run(ctx, "katana", args)
 	return err
 }
@@ -318,6 +460,11 @@ func (t *ToolBox) RunFfuf(ctx context.Context, url string, wordlist string, outp
 		"-of", "json",
 		"-t", strconv.Itoa(t.ffufThreads()),
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
+	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-x")
+	if rps := t.globalRPS(); rps > 0 {
+		args = append(args, "-rate", strconv.Itoa(rps))
 	}
 	_, err := t.Runner.Run(ctx, "ffuf", args)
 	return err
@@ -342,6 +489,11 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 		"-t", strconv.Itoa(t.ffufThreads()),
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-x")
+	if rps := t.globalRPS(); rps > 0 {
+		args = append(args, "-rate", strconv.Itoa(rps))
+	}
 	_, err := t.Runner.Run(ctx, "ffuf", args)
 	return err
 }
@@ -349,10 +501,11 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 // --- Vulnerability Scanning ---
 
 func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile string) error {
+	rateLimit := t.effectiveRate(t.nucleiRateLimit())
 	args := []string{
 		"-l", targetsFile,
 		"-c", strconv.Itoa(t.nucleiConcurrency()),
-		"-rl", strconv.Itoa(t.nucleiRateLimit()),
+		"-rl", strconv.Itoa(rateLimit),
 		"-tags", strings.Join(t.nucleiInfraTags(), ","),
 		"-jsonl",
 		"-o", outputFile,
@@ -370,6 +523,8 @@ func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile 
 		args = append(args, "-severity", strings.Join(severity, ","))
 	}
 
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "nuclei", args)
 	return err
 }
@@ -444,6 +599,7 @@ func (t *ToolBox) RunLinkfinderOnFile(ctx context.Context, jsFile string, output
 // RunArjun discovers hidden HTTP parameters on a URL
 func (t *ToolBox) RunArjun(ctx context.Context, url string, outputFile string) error {
 	args := []string{"-u", url, "-oJ", outputFile, "--stable"}
+	args = t.appendArjunUA(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -451,6 +607,7 @@ func (t *ToolBox) RunArjun(ctx context.Context, url string, outputFile string) e
 // RunArjunFromFile discovers hidden HTTP parameters from a file of URLs
 func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
+	args = t.appendArjunUA(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -467,6 +624,11 @@ func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputF
 	}
 	if t.Config != nil && t.Config.Httpx.FollowRedirects {
 		args = append(args, "-follow-redirects")
+	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-http-proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		args = append(args, "-rl", strconv.Itoa(rps))
 	}
 	_, err := t.Runner.Run(ctx, "httpx", args)
 	return err
@@ -496,6 +658,8 @@ func (t *ToolBox) RunHttpxFetchJS(ctx context.Context, urlsFile string, download
 		"-silent",
 		"-no-fallback",
 	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-http-proxy")
 	_, err := t.Runner.Run(ctx, "httpx", args)
 	return err
 }
@@ -508,6 +672,7 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 	if rateLimit < 25 {
 		rateLimit = 25
 	}
+	rateLimit = t.effectiveRate(rateLimit) // apply global ceiling
 	concurrency := t.nucleiConcurrency() / 2
 	if concurrency < 5 {
 		concurrency = 5
@@ -529,6 +694,8 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 		args = append(args, "-etags", strings.Join(excludeTags, ","))
 	}
 
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "nuclei", args)
 	return err
 }
@@ -662,6 +829,15 @@ func (t *ToolBox) RunDalfox(ctx context.Context, inputFile string, outputFile st
 		"--no-color",
 		"--output-all",
 	}
+	args = t.appendDalfoxUA(args)
+	args = t.appendProxy(args, "--proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		delayMs := 1000 / rps
+		if delayMs < 1 {
+			delayMs = 1
+		}
+		args = append(args, "--delay", strconv.Itoa(delayMs))
+	}
 	_, err := t.Runner.Run(ctx, "dalfox", args)
 	return err
 }
@@ -673,6 +849,15 @@ func (t *ToolBox) RunDalfoxURL(ctx context.Context, targetURL string, outputFile
 		"-o", outputFile,
 		"--silence",
 		"--no-color",
+	}
+	args = t.appendDalfoxUA(args)
+	args = t.appendProxy(args, "--proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		delayMs := 1000 / rps
+		if delayMs < 1 {
+			delayMs = 1
+		}
+		args = append(args, "--delay", strconv.Itoa(delayMs))
 	}
 	_, err := t.Runner.Run(ctx, "dalfox", args)
 	return err

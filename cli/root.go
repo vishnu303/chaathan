@@ -2,13 +2,15 @@ package cli
 
 import (
 	"fmt"
-	"github.com/vishnu303/chaathan-flow/pkg/config"
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/vishnu303/chaathan-flow/pkg/config"
+	"github.com/vishnu303/chaathan-flow/pkg/database"
+	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 )
 
 var (
@@ -19,9 +21,16 @@ var (
 	Cfg        *config.Config
 )
 
+// Version and BuildTime are injected at build time via ldflags.
+// See Makefile: -X github.com/vishnu303/chaathan-flow/cli.Version=...
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "chaathan",
-	Short: "Chaathan - Advanced Pentesting Framework CLI",
+	Short: "Chaathan — pentesting recon framework",
 	Long: `
    _____ _                 _   _                 
   / ____| |               | | | |                
@@ -29,43 +38,36 @@ var rootCmd = &cobra.Command{
  | |    | '_ \ / _' |/ _' | __| '_ \ / _' | '_ \ 
  | |____| | | | (_| | (_| | |_| | | | (_| | | | |
   \_____|_| |_|\__,_|\__,_|\__|_| |_|\__,_|_| |_|
-                                                  
-Chaathan is a powerful, modular CLI pentesting tool for comprehensive 
-bug bounty reconnaissance and vulnerability scanning.
+
+  Automated bug bounty recon — 28 tools, 2 workflows, 1 binary.
 
 Workflows:
-  - Wildcard Scan : 21-step domain recon & vuln assessment pipeline
-  - Company Scan  : 3-step organization-level discovery (ASN, domains, cloud)
+  wildcard  21-step domain recon & vulnerability assessment
+  company   3-step org discovery (ASN, root domains, cloud assets)
 
-Capabilities:
-  - 28+ integrated tools (subfinder, nuclei, httpx, katana, and more)
-  - Passive - Search Engine Dorking (Uncover, Shodan, Censys)
-  - DNS brute-force (ShuffleDNS)
-  - JavaScript analysis and endpoint extraction (LinkFinder, SubDomainizer)
-  - Live host detection, TLS analysis & port scanning
-  - Web crawling, JS analysis & parameter discovery
-  - JS secret scanning (GF)
-  - Vulnerability scanning (Nuclei) & XSS detection (Dalfox)
-  - Subdomain takeover detection (Subjack)
-  - Cloud infrastructure enumeration (Cloud Enum)
-  - Persistent SQLite database for all results
-  - Report generation (Markdown/JSON/HTML)
-  - Discord/Slack/Telegram notifications
-  - Resume interrupted scans
-  - Setup logging for install debugging
+Key capabilities:
+  • Subdomain enumeration (passive, active, DNS brute-force, JS extraction)
+  • Live host probing, TLS analysis, port scanning
+  • Web crawling, URL discovery, parameter fuzzing
+  • JS secret scanning, vulnerability scanning, XSS detection
+  • Subdomain takeover detection, cloud infrastructure enumeration
+  • Persistent SQLite database — query, diff, and export results
+  • Reports in Markdown, HTML, and JSON
+  • Discord, Slack, and Telegram notifications
+  • WAF evasion (UA rotation, proxy, rate limiting)
+  • Resume interrupted scans at any step
 
 Modes:
-  - native: Uses tools installed in your system $PATH (Recommended)
-  - docker: Uses Docker containers for tool isolation
+  native    Tools installed in $PATH (default)
+  docker    Tools run inside Docker containers
 
-Quick Start:
-  chaathan setup                     # Install all tools
-  chaathan wildcard -d target.com    # Run full 21-step recon
-  chaathan company -n "Company Inc"  # Run company discovery
-  chaathan scans list                # View past scans
-  chaathan report generate 1         # Generate report for scan #1
-  chaathan tools check               # Verify tool installations
-`,
+Getting started:
+  chaathan setup                     Install all tools
+  chaathan wildcard -d target.com    Run full 21-step recon
+  chaathan company -n "Company Inc"  Run company discovery
+  chaathan status                    View scan dashboard
+  chaathan query vulns 1             Query vulnerabilities
+  chaathan report generate 1         Generate report`,
 	PersistentPreRun: initializeApp,
 }
 
@@ -126,8 +128,7 @@ func initializeApp(cmd *cobra.Command, args []string) {
 func CreateOutputDir(target string) (string, error) {
 	baseDir := OutputDir
 	if baseDir == "" {
-		home, _ := os.UserHomeDir()
-		baseDir = filepath.Join(home, ".chaathan", "scans")
+		baseDir = paths.ScansDir()
 	}
 
 	path := filepath.Join(baseDir, target)
@@ -142,9 +143,10 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("%s%sChaathan%s v2.0.0\n", logger.BrightCyan, logger.Bold, logger.Reset)
-		fmt.Printf("%sAdvanced Pentesting Recon Framework%s\n", logger.Dim, logger.Reset)
-		fmt.Printf("%s28+ tools • 21-step wildcard scan • 3-step company scan%s\n", logger.Dim, logger.Reset)
+		fmt.Printf("%s%sChaathan%s %s\n", logger.BrightCyan, logger.Bold, logger.Reset, Version)
+		fmt.Printf("%sBuilt: %s%s\n", logger.Dim, BuildTime, logger.Reset)
+		fmt.Printf("%sPentesting Recon Framework%s\n", logger.Dim, logger.Reset)
+		fmt.Printf("%s28 tools • 21-step wildcard • 3-step company%s\n", logger.Dim, logger.Reset)
 		fmt.Printf("%shttps://github.com/vishnu303/chaathan-flow%s\n", logger.Dim, logger.Reset)
 	},
 }

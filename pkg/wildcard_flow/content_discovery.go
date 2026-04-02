@@ -42,10 +42,10 @@ const maxJSDownloads = 200
 // Returns true if the scan should be cancelled.
 func stepURLDiscovery(c *Ctx) bool {
 	if c.State.IsStepCompleted("url_discovery") {
-		logger.Section("Step 11: Historical URL Discovery [RESUMED — skipping]")
+		logger.StepHeader("Step 11: Historical URL Discovery [RESUMED — skipping]")
 		return c.cancelled()
 	}
-	logger.Section("Step 11: Historical URL Discovery")
+	logger.StepHeader("Step 11: Historical URL Discovery")
 
 	// Track individual tool results so we can detect total failure.
 	var waybackOK, gauOK bool
@@ -116,15 +116,15 @@ func stepURLDiscovery(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepWebCrawling(c *Ctx) bool {
 	if c.State.IsStepCompleted("web_crawling") {
-		logger.Section("Step 12: Web Crawling [RESUMED — skipping]")
+		logger.StepHeader("Step 12: Web Crawling [RESUMED — skipping]")
 		return c.cancelled()
 	} else if c.SkipCrawl {
-		logger.Section("Step 12: Skipping Web Crawling (--skip-crawl)")
+		logger.StepHeader("Step 12: Skipping Web Crawling (--skip-crawl)")
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 		return c.cancelled()
 	}
 
-	logger.Section("Step 12: Web Crawling")
+	logger.StepHeader("Step 12: Web Crawling")
 	crawlFailed := false
 	var crawlFailMu sync.Mutex
 
@@ -193,10 +193,10 @@ func stepWebCrawling(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_analysis") {
-		logger.Section("Step 13: JavaScript Analysis [RESUMED — skipping]")
+		logger.StepHeader("Step 13: JavaScript Analysis [RESUMED — skipping]")
 		return c.cancelled()
 	}
-	logger.Section("Step 13: JavaScript Analysis")
+	logger.StepHeader("Step 13: JavaScript Analysis")
 	logger.SubStep("Running Linkfinder...")
 
 	if err := runWithSkip(c, "linkfinder", func(sCtx context.Context) error {
@@ -230,9 +230,9 @@ func stepJSAnalysis(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepParamDiscovery(c *Ctx) bool {
 	if c.State.IsStepCompleted("param_discovery") {
-		logger.Section("Step 14: HTTP Parameter Discovery (Arjun) [RESUMED — skipping]")
+		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun) [RESUMED — skipping]")
 	} else if !c.SkipArjun {
-		logger.Section("Step 14: HTTP Parameter Discovery (Arjun)")
+		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
 		logger.SubStep("Running Arjun on https://%s...", c.Domain)
 
 		if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
@@ -256,7 +256,7 @@ func stepParamDiscovery(c *Ctx) bool {
 			}
 		}
 	} else {
-		logger.Section("Step 14: Skipping Arjun (--skip-arjun)")
+		logger.StepHeader("Step 14: Skipping Arjun (--skip-arjun)")
 	}
 	c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 	return c.cancelled()
@@ -271,10 +271,10 @@ func stepParamDiscovery(c *Ctx) bool {
 // Returns true if the scan should be cancelled.
 func stepURLConsolidation(c *Ctx) bool {
 	if c.State.IsStepCompleted("url_consolidation") {
-		logger.Section("Step 15: URL Consolidation & Live Check [RESUMED — skipping]")
+		logger.StepHeader("Step 15: URL Consolidation & Live Check [RESUMED — skipping]")
 		return c.cancelled()
 	}
-	logger.Section("Step 15: URL Consolidation & Live Check")
+	logger.StepHeader("Step 15: URL Consolidation & Live Check")
 
 	sources := c.urlSources()
 	logger.SubStep("Merging URLs from %d sources...", len(sources))
@@ -311,7 +311,7 @@ func stepURLConsolidation(c *Ctx) bool {
 		if metaTargetCount > 0 {
 			logger.SubStep("Collecting lightweight metadata for %d high-value URLs...", metaTargetCount)
 			metaTargets := loadLineSlice(c.F.ROIMetadataTargets, 150)
-			if count, err := metadata.CollectURLMetadata(c.ScanID, metaTargets); err != nil {
+			if count, err := metadata.CollectURLMetadata(c.ScanID, metaTargets, c.Proxy); err != nil {
 				logger.Warning("URL metadata enrichment failed: %v", err)
 			} else if count > 0 {
 				logger.Info("  Stored path metadata for %d ROI candidate URLs", count)
@@ -331,11 +331,11 @@ func stepURLConsolidation(c *Ctx) bool {
 // with installed gf JS/secret patterns, and writes merged findings.
 func stepJSSecretScan(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_secret_scan") {
-		logger.Section("Step 16: JS Secret Scan (gf JS + Secrets) [RESUMED — skipping]")
+		logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets) [RESUMED — skipping]")
 		return c.cancelled()
 	}
 
-	logger.Section("Step 16: JS Secret Scan (gf JS + Secrets)")
+	logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets)")
 	writeEmptyFile(c.F.JSCombinedFile)
 	writeEmptyFile(c.F.GFJSMatches)
 	writeEmptyFile(c.F.GFSecretsMatches)
@@ -468,12 +468,12 @@ func extractHostsFromURLFile(filePath string) []string {
 // Returns true if the scan should be cancelled.
 func stepDirFuzzing(c *Ctx) bool {
 	if c.State.IsStepCompleted("dir_fuzzing") {
-		logger.Section("Step 17: Directory Fuzzing (ffuf) [RESUMED — skipping]")
+		logger.StepHeader("Step 17: Directory Fuzzing (ffuf) [RESUMED — skipping]")
 		return c.cancelled()
 	}
 
 	if c.WordlistPath != "" {
-		logger.Section("Step 17: Directory Fuzzing (ffuf)")
+		logger.StepHeader("Step 17: Directory Fuzzing (ffuf)")
 		targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
 		logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
 
@@ -498,7 +498,7 @@ func stepDirFuzzing(c *Ctx) bool {
 			}
 		}
 	} else {
-		logger.Section("Step 17: Skipping ffuf (no --wordlist provided)")
+		logger.StepHeader("Step 17: Skipping ffuf (no --wordlist provided)")
 		logger.Info("Provide --wordlist to enable ffuf")
 	}
 

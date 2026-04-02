@@ -8,58 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/tools"
 )
-
-// allTools defines the complete list of tools Chaathan uses with metadata
-var allTools = []struct {
-	Name        string
-	Category    string
-	Description string
-	Required    bool
-}{
-	// Subdomain Enumeration
-	{"subfinder", "Enum", "Passive subdomain discovery", true},
-	{"assetfinder", "Enum", "Passive subdomain discovery", true},
-	{"sublist3r", "Enum", "Passive subdomain discovery (Python)", false},
-	{"amass", "Enum", "Active DNS enumeration", false},
-
-	// DNS & Resolution
-	{"dnsx", "DNS", "DNS resolution & record lookup", true},
-	{"shuffledns", "DNS", "DNS brute-force with massdns", false},
-	{"massdns", "DNS", "High-performance DNS resolver (from source)", false},
-
-	// Web Probing
-	{"httpx", "Probe", "HTTP probing & tech detection", true},
-	{"tlsx", "Probe", "TLS certificate analysis & SAN extraction", false},
-	{"naabu", "Probe", "Port scanning (SYN/TCP)", false},
-
-	// URL Discovery
-	{"waybackurls", "URLs", "Wayback Machine URL extraction", false},
-	{"gau", "URLs", "Historical URL discovery", false},
-	{"arjun", "URLs", "Hidden HTTP parameter discovery (Python)", false},
-	{"katana", "Crawl", "Web crawling & spidering", false},
-	{"gospider", "Crawl", "Web crawling & spidering", false},
-
-	// Analysis
-	{"linkfinder", "Analysis", "JavaScript endpoint extraction (Python)", false},
-	{"subdomainizer", "Analysis", "JavaScript subdomain extraction (Python)", false},
-
-	// Fuzzing & Scanning
-	{"ffuf", "Fuzz", "Web fuzzer & directory brute-force", false},
-	{"nuclei", "Vuln", "Template-based vulnerability scanner", true},
-	{"subjack", "Vuln", "Subdomain takeover detection", false},
-	{"dalfox", "Vuln", "XSS vulnerability scanner", false},
-
-	// Recon
-	{"uncover", "Recon", "Shodan/Censys/Fofa search dorking", false},
-	{"metabigor", "Recon", "ASN & org discovery", false},
-	{"github-subdomains", "Recon", "GitHub subdomain scraping", false},
-	{"cloud_enum", "Cloud", "Cloud infrastructure enumeration (Python)", false},
-
-	// Utility
-	{"anew", "Util", "Append unique lines to file", false},
-	{"gf", "Util", "Pattern-based URL/param filtering", false},
-}
 
 var toolsCmd = &cobra.Command{
 	Use:   "tools",
@@ -109,6 +59,7 @@ var categoryStyles = map[string]categoryMeta{
 // ── Tools List ───────────────────────────────────────────────────────────────
 
 func runToolsList(_ *cobra.Command, _ []string) {
+	allTools := tools.AllTools
 	w := 52
 	line := strings.Repeat("─", w)
 
@@ -120,34 +71,26 @@ func runToolsList(_ *cobra.Command, _ []string) {
 		logger.Cyan+logger.Bold, logger.Reset)
 	fmt.Printf("  %s│%s  %s%-50s%s %s│%s\n",
 		logger.Cyan+logger.Bold, logger.Reset,
-		logger.Dim, fmt.Sprintf("%d tools • %d required", len(allTools), countRequired()), logger.Reset,
+		logger.Dim, fmt.Sprintf("%d tools • %d required", len(allTools), tools.CountRequired()), logger.Reset,
 		logger.Cyan+logger.Bold, logger.Reset)
 	fmt.Printf("  %s╰%s╯%s\n\n", logger.Cyan+logger.Bold, line, logger.Reset)
 
 	// Group tools by category (preserve order)
 	type catGroup struct {
-		name  string
-		tools []struct {
-			Name        string
-			Category    string
-			Description string
-			Required    bool
-		}
+		name      string
+		toolInfos []tools.ToolInfo
 	}
 	var groups []catGroup
 	seen := map[string]int{}
 
 	for _, t := range allTools {
 		if idx, ok := seen[t.Category]; ok {
-			groups[idx].tools = append(groups[idx].tools, t)
+			groups[idx].toolInfos = append(groups[idx].toolInfos, t)
 		} else {
 			seen[t.Category] = len(groups)
 			groups = append(groups, catGroup{
-				name: t.Category,
-				tools: []struct {
-					Name, Category, Description string
-					Required                    bool
-				}{t},
+				name:      t.Category,
+				toolInfos: []tools.ToolInfo{t},
 			})
 		}
 	}
@@ -158,7 +101,7 @@ func runToolsList(_ *cobra.Command, _ []string) {
 			logger.Cyan, logger.Reset,
 			meta.icon, meta.color+logger.Bold, g.name, logger.Reset, "")
 
-		for _, t := range g.tools {
+		for _, t := range g.toolInfos {
 			req := ""
 			if t.Required {
 				req = fmt.Sprintf(" %s[required]%s", logger.BrightYellow, logger.Reset)
@@ -179,6 +122,7 @@ func runToolsList(_ *cobra.Command, _ []string) {
 // ── Tools Check ──────────────────────────────────────────────────────────────
 
 func runToolsCheck(_ *cobra.Command, _ []string) {
+	allTools := tools.AllTools
 	w := 52
 	line := strings.Repeat("─", w)
 
@@ -332,14 +276,4 @@ func runToolsCheck(_ *cobra.Command, _ []string) {
 	} else {
 		fmt.Printf("\n  %s✓%s %sAll tools installed! You're good to go.%s 🚀\n\n", logger.BrightGreen, logger.Reset, logger.BrightGreen, logger.Reset)
 	}
-}
-
-func countRequired() int {
-	count := 0
-	for _, t := range allTools {
-		if t.Required {
-			count++
-		}
-	}
-	return count
 }
