@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"io"
+	"math/rand"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -24,6 +25,27 @@ var sessionCookiePrefixes = []string{
 	"session", "sess", "sid", "jsessionid", "phpsessid",
 	"asp.net_sessionid", "connect.sid", "_session",
 	"auth", "token", "jwt", "access_token",
+}
+
+// realUserAgents contains common, high-frequency browser User-Agent strings.
+// Rotating through these prevents WAF fingerprinting that would occur with a
+// static custom UA like "Chaathan-ROI-Metadata/1.0".
+var realUserAgents = []string{
+	// Chrome 124 on Windows 10
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	// Chrome 124 on macOS
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	// Firefox 125 on Windows
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+	// Edge 124 on Windows
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+	// Chrome 124 on Linux
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+}
+
+// randomUA returns a random User-Agent from the pool.
+func randomUA() string {
+	return realUserAgents[rand.Intn(len(realUserAgents))]
 }
 
 type httpSignal struct {
@@ -133,7 +155,13 @@ func collectSignals(urls []string) []httpSignal {
 	}
 
 	go func() {
+		// Rate limit: max 5 requests/sec to avoid WAF bans on targets.
+		// Each URL triggers a GET + an OPTIONS request, so effective rate
+		// is ~10 HTTP requests/sec across all workers.
+		limiter := time.NewTicker(200 * time.Millisecond)
+		defer limiter.Stop()
 		for _, target := range urls {
+			<-limiter.C
 			jobs <- target
 		}
 		close(jobs)
@@ -159,7 +187,7 @@ func fetchSignal(client *http.Client, rawURL string) (httpSignal, bool) {
 	if err != nil {
 		return httpSignal{}, false
 	}
-	req.Header.Set("User-Agent", "Chaathan-ROI-Metadata/1.0")
+	req.Header.Set("User-Agent", randomUA())
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8")
 
 	resp, err := client.Do(req)
@@ -317,7 +345,7 @@ func checkDangerousMethods(client *http.Client, rawURL string) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("User-Agent", "Chaathan-ROI-Metadata/1.0")
+	req.Header.Set("User-Agent", randomUA())
 
 	resp, err := client.Do(req)
 	if err != nil {

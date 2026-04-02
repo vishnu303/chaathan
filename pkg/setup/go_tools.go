@@ -55,7 +55,7 @@ func installGoToolsSection() (installed, skipped, failed int) {
 	var toInstall []goTool
 	skippedCount := 0
 	for _, t := range goTools {
-		if !forceUpdate {
+		if !isForceUpdate() {
 			if _, err := exec.LookPath(t.name); err == nil {
 				skippedCount++
 				continue

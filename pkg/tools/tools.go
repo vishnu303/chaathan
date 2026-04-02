@@ -534,6 +534,18 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 }
 
 // RunGFPattern filters an input file with a single gf pattern and writes matches.
+//
+// INTENTIONAL RUNNER BYPASS: gf is a local text-filtering utility that reads
+// JSON pattern definitions from the host's ~/.gf/ directory. It does NOT make
+// network requests and is not available as a Docker image. Running it through
+// t.Runner.Run() would fail in Docker mode because the container wouldn't have
+// access to the host's ~/.gf/ patterns. Therefore this function uses
+// exec.CommandContext directly. This is a deliberate design choice, not a bug.
+//
+// Implications:
+//   - gf always runs natively regardless of the runner mode (native/docker)
+//   - Retry logic from the Runner is not applied (gf is a pure text filter — retries are meaningless)
+//   - Verbose logging from the Runner is not applied (gf output is captured into the output file)
 func (t *ToolBox) RunGFPattern(ctx context.Context, pattern string, inputFile string, outputFile string) error {
 	if pattern == "" {
 		return fmt.Errorf("gf requires a pattern name")
@@ -542,8 +554,6 @@ func (t *ToolBox) RunGFPattern(ctx context.Context, pattern string, inputFile st
 		return fmt.Errorf("gf requires an input file")
 	}
 
-	// gf is a local text-filtering utility that depends on the host's ~/.gf pattern pack.
-	// Run it natively so it works even when the main scan runner is in docker mode.
 	cmd := exec.CommandContext(ctx, "gf", pattern, inputFile)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -844,20 +845,21 @@ func DeleteScan(scanID int64) error {
 	}
 	defer tx.Rollback()
 
-	// Delete from all related tables (order matters: child rows before parent)
-	tables := []string{
-		"gf_matches",
-		"host_metadata",
-		"url_metadata",
-		"endpoints",
-		"vulnerabilities",
-		"urls",
-		"ports",
-		"subdomains",
+	// Delete from all related tables (order matters: child rows before parent).
+	// Each statement is explicit — no string interpolation into SQL.
+	deletes := []string{
+		"DELETE FROM gf_matches WHERE scan_id = ?",
+		"DELETE FROM host_metadata WHERE scan_id = ?",
+		"DELETE FROM url_metadata WHERE scan_id = ?",
+		"DELETE FROM endpoints WHERE scan_id = ?",
+		"DELETE FROM vulnerabilities WHERE scan_id = ?",
+		"DELETE FROM urls WHERE scan_id = ?",
+		"DELETE FROM ports WHERE scan_id = ?",
+		"DELETE FROM subdomains WHERE scan_id = ?",
 	}
-	for _, table := range tables {
-		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE scan_id = ?", table), scanID); err != nil {
-			return fmt.Errorf("failed to delete from %s: %w", table, err)
+	for _, stmt := range deletes {
+		if _, err := tx.Exec(stmt, scanID); err != nil {
+			return fmt.Errorf("failed to delete scan data: %w", err)
 		}
 	}
 
@@ -1097,7 +1099,10 @@ func AddGFMatches(scanID int64, urls []string, pattern string) error {
 	for _, u := range urls {
 		u = strings.TrimSpace(u)
 		if u != "" {
-			stmt.Exec(scanID, u, pattern)
+			if _, err := stmt.Exec(scanID, u, pattern); err != nil {
+				// Log but continue — partial persistence is better than none
+				log.Printf("[WARN] gf_matches insert failed for %q pattern %q: %v", u, pattern, err)
+			}
 		}
 	}
 	return tx.Commit()
@@ -1146,8 +1151,12 @@ func MarkHostsJSSecrets(scanID int64, hosts []string) error {
 			continue
 		}
 		// Ensure a row exists, then update the flag
-		tx.Exec(`INSERT OR IGNORE INTO host_metadata (scan_id, host) VALUES (?, ?)`, scanID, host)
-		tx.Exec(`UPDATE host_metadata SET has_js_secrets = TRUE, updated_at = CURRENT_TIMESTAMP WHERE scan_id = ? AND host = ?`, scanID, host)
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO host_metadata (scan_id, host) VALUES (?, ?)`, scanID, host); err != nil {
+			return fmt.Errorf("failed to insert host_metadata for %q: %w", host, err)
+		}
+		if _, err := tx.Exec(`UPDATE host_metadata SET has_js_secrets = TRUE, updated_at = CURRENT_TIMESTAMP WHERE scan_id = ? AND host = ?`, scanID, host); err != nil {
+			return fmt.Errorf("failed to flag JS secrets for %q: %w", host, err)
+		}
 	}
 	return tx.Commit()
 }

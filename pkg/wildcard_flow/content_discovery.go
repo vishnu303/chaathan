@@ -35,7 +35,7 @@ import (
 const maxJSDownloads = 200
 
 // ─────────────────────────────────────────────────────────────
-// Step 10 — Historical URL Discovery (Waybackurls + GAU)
+// Step 11 — Historical URL Discovery (Waybackurls + GAU)
 // ─────────────────────────────────────────────────────────────
 
 // stepURLDiscovery runs Waybackurls and GAU in parallel on the target domain.
@@ -46,6 +46,10 @@ func stepURLDiscovery(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.Section("Step 11: Historical URL Discovery")
+
+	// Track individual tool results so we can detect total failure.
+	var waybackOK, gauOK bool
+	var resultMu sync.Mutex
 
 	err := runWithSkip(c, "url discovery", func(sCtx context.Context) error {
 		var wg sync.WaitGroup
@@ -59,6 +63,9 @@ func stepURLDiscovery(c *Ctx) bool {
 					logger.Warning("Waybackurls failed: %v", err)
 				}
 			} else {
+				resultMu.Lock()
+				waybackOK = true
+				resultMu.Unlock()
 				logger.SubStep("[Done] Waybackurls")
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls")
@@ -75,6 +82,9 @@ func stepURLDiscovery(c *Ctx) bool {
 					logger.Warning("GAU failed: %v", err)
 				}
 			} else {
+				resultMu.Lock()
+				gauOK = true
+				resultMu.Unlock()
 				logger.SubStep("[Done] GAU")
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau")
@@ -88,14 +98,18 @@ func stepURLDiscovery(c *Ctx) bool {
 	})
 
 	if err == ErrToolSkipped {
-		// Logged internally by runWithSkip
+		// Skipped by user — mark complete so resume skips this step
+		c.StateMgr.MarkStepComplete(c.State, "url_discovery")
+	} else if !waybackOK && !gauOK {
+		c.StateMgr.MarkStepFailed(c.State, "url_discovery", fmt.Errorf("both Waybackurls and GAU failed"))
+	} else {
+		c.StateMgr.MarkStepComplete(c.State, "url_discovery")
 	}
-	c.StateMgr.MarkStepComplete(c.State, "url_discovery")
 	return c.cancelled()
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 11 — Web Crawling (Katana + GoSpider)
+// Step 12 — Web Crawling (Katana + GoSpider)
 // ─────────────────────────────────────────────────────────────
 
 // stepWebCrawling runs Katana and GoSpider in parallel.
@@ -165,15 +179,14 @@ func stepWebCrawling(c *Ctx) bool {
 
 	if err != nil && err != ErrToolSkipped {
 		c.StateMgr.MarkStepFailed(c.State, "web_crawling", err)
-	} else if err == ErrToolSkipped {
-		// Logged internally by runWithSkip
+	} else {
+		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 	}
-	c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 	return c.cancelled()
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 12 — JavaScript Analysis (LinkFinder)
+// Step 13 — JavaScript Analysis (LinkFinder)
 // ─────────────────────────────────────────────────────────────
 
 // stepJSAnalysis extracts endpoints from JavaScript files with LinkFinder.
@@ -190,7 +203,8 @@ func stepJSAnalysis(c *Ctx) bool {
 		return c.Tb.RunLinkfinder(sCtx, "https://"+c.Domain, c.F.LinkfinderOut)
 	}); err != nil {
 		if err == ErrToolSkipped {
-			// Logged internally by runWithSkip
+			// Skipped steps are still marked complete so resume skips them
+			c.StateMgr.MarkStepComplete(c.State, "js_analysis")
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "js_analysis", err)
 			logger.Warning("Linkfinder failed: %v", err)
@@ -200,13 +214,13 @@ func stepJSAnalysis(c *Ctx) bool {
 			count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.LinkfinderOut, "linkfinder")
 			logger.Info("  Found %d endpoints", count)
 		}
+		c.StateMgr.MarkStepComplete(c.State, "js_analysis")
 	}
-	c.StateMgr.MarkStepComplete(c.State, "js_analysis")
 	return c.cancelled()
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 13 — HTTP Parameter Discovery (Arjun)
+// Step 14 — HTTP Parameter Discovery (Arjun)
 // ─────────────────────────────────────────────────────────────
 
 // stepParamDiscovery discovers HTTP parameters with Arjun (Step 13).
@@ -249,7 +263,7 @@ func stepParamDiscovery(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 14 — URL Consolidation & Live Check
+// Step 15 — URL Consolidation & Live Check
 // ─────────────────────────────────────────────────────────────
 
 // stepURLConsolidation merges all URL sources, live-checks them with Httpx,
@@ -310,7 +324,7 @@ func stepURLConsolidation(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 15 — JS Secret Scan (gf JS + Secrets)
+// Step 16 — JS Secret Scan (gf JS + Secrets)
 // ─────────────────────────────────────────────────────────────
 
 // stepJSSecretScan downloads a capped set of JS files, scans their content
@@ -371,10 +385,22 @@ func stepJSSecretScan(c *Ctx) bool {
 	logger.Info("  Combined %d downloaded JS response file(s)", downloadedFiles)
 
 	logger.SubStep("Running gf JavaScript patterns on downloaded content...")
-	jsMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFJSMatches, jsGFPatterns, 0)
+	var jsMatchCount int
+	if err := runWithSkip(c, "gf JS patterns", func(sCtx context.Context) error {
+		jsMatchCount = collectGFMatches(sCtx, c.Tb, c.F.JSCombinedFile, c.F.GFJSMatches, jsGFPatterns, 0)
+		return nil
+	}); err != nil && err != ErrToolSkipped {
+		logger.Warning("gf JS pattern scan failed: %v", err)
+	}
 
 	logger.SubStep("Running gf secret patterns on downloaded content...")
-	secretMatchCount := collectGFMatches(c.GoCtx, c.Tb, c.F.JSCombinedFile, c.F.GFSecretsMatches, secretGFPatterns, 0)
+	var secretMatchCount int
+	if err := runWithSkip(c, "gf secret patterns", func(sCtx context.Context) error {
+		secretMatchCount = collectGFMatches(sCtx, c.Tb, c.F.JSCombinedFile, c.F.GFSecretsMatches, secretGFPatterns, 0)
+		return nil
+	}); err != nil && err != ErrToolSkipped {
+		logger.Warning("gf secret pattern scan failed: %v", err)
+	}
 
 	if err := utils.MergeAndDeduplicate(existingFiles(c.F.GFJSMatches, c.F.GFSecretsMatches), c.F.GFSecretsFinal); err != nil {
 		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
@@ -435,7 +461,7 @@ func extractHostsFromURLFile(filePath string) []string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 16 — Directory Fuzzing (ffuf)
+// Step 17 — Directory Fuzzing (ffuf)
 // ─────────────────────────────────────────────────────────────
 
 // stepDirFuzzing runs ffuf when a wordlist is provided via --wordlist.
@@ -631,17 +657,19 @@ func convertArjunToURLs(arjunJSON, outputFile string) int {
 		if r.URL == "" || len(r.Params) == 0 {
 			continue
 		}
-		// Build parameterized URL
-		params := url.Values{}
+		// Build parameterized URL preserving original Arjun parameter order.
+		// Using url.Values.Encode() would sort alphabetically, which changes
+		// the semantics for order-sensitive endpoints and WAFs.
+		var paramPairs []string
 		for _, p := range r.Params {
-			params.Set(p, "1")
+			paramPairs = append(paramPairs, url.QueryEscape(p)+"=1")
 		}
-		// Append query string to the base URL
+		qs := strings.Join(paramPairs, "&")
 		base := r.URL
 		if strings.Contains(base, "?") {
-			base += "&" + params.Encode()
+			base += "&" + qs
 		} else {
-			base += "?" + params.Encode()
+			base += "?" + qs
 		}
 		fmt.Fprintln(w, base)
 		count++
@@ -685,7 +713,9 @@ func storeArjunParamCounts(scanID int64, arjunJSON string) int {
 			Host:            strings.ToLower(parsed.Hostname()),
 			ArjunParamCount: len(r.Params),
 		})
-		if err == nil {
+		if err != nil {
+			logger.Warning("Failed to store Arjun param count for %s: %v", r.URL, err)
+		} else {
 			stored++
 		}
 	}

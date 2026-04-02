@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/vishnu303/chaathan-flow/pkg/config"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/vishnu303/chaathan-flow/pkg/config"
 )
 
 // Severity levels for comparison
@@ -486,30 +489,51 @@ func (n *Notifier) sendWebhookStepComplete(step StepComplete) error {
 
 // Helper functions
 
+// postJSON sends a JSON payload with retry logic for transient failures.
+// Retries up to 2 times with exponential backoff (1s, 2s) for network errors
+// and 5xx server errors. Client errors (4xx) are not retried.
 func (n *Notifier) postJSON(url string, payload interface{}) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+	const maxRetries = 2
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt) * time.Second
+			log.Printf("[WARN] notification retry %d/%d after %v", attempt, maxRetries, backoff)
+			time.Sleep(backoff)
+		}
+
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := n.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed: %w", err)
+			continue // network error — retry
+		}
+		io.Copy(io.Discard, resp.Body) // drain body so connection can be reused
+		resp.Body.Close()
+
+		if resp.StatusCode < 400 {
+			return nil // success
+		}
+		lastErr = fmt.Errorf("received error status: %d", resp.StatusCode)
+
+		// Only retry on server errors (5xx); client errors (4xx) are permanent
+		if resp.StatusCode < 500 {
+			return lastErr
+		}
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := n.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("received error status: %d", resp.StatusCode)
-	}
-
-	return nil
+	return lastErr
 }
 
 func getDiscordColor(severity string) int {
@@ -571,12 +595,27 @@ func formatStepLabel(step StepComplete) string {
 }
 
 func escapeMarkdown(s string) string {
+	// Escape all Telegram MarkdownV2 special characters to prevent
+	// injection from attacker-controlled finding names, template IDs, etc.
 	replacer := strings.NewReplacer(
 		"_", "\\_",
 		"*", "\\*",
 		"[", "\\[",
 		"]", "\\]",
 		"`", "\\`",
+		"~", "\\~",
+		">", "\\>",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		"=", "\\=",
+		"|", "\\|",
+		"{", "\\{",
+		"}", "\\}",
+		".", "\\.",
+		"!", "\\!",
+		"(", "\\(",
+		")", "\\)",
 	)
 	return replacer.Replace(s)
 }

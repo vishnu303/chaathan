@@ -98,16 +98,7 @@ func (r *NativeRunner) Run(ctx context.Context, command string, args []string, o
 }
 
 func (r *NativeRunner) runOnce(ctx context.Context, command string, args []string, options *RunOptions) (string, error) {
-	var cmd *exec.Cmd
-
-	switch command {
-	case "cloud_enum":
-		cmd = exec.CommandContext(ctx, "cloud_enum", args...)
-	case "subdomainizer":
-		cmd = exec.CommandContext(ctx, "subdomainizer", args...)
-	default:
-		cmd = exec.CommandContext(ctx, command, args...)
-	}
+	cmd := exec.CommandContext(ctx, command, args...)
 
 	if options.Dir != "" {
 		cmd.Dir = options.Dir

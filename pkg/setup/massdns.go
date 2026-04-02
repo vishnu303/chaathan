@@ -22,7 +22,7 @@ import (
 func installMassDNSSection() (installed, skipped, failed int) {
 	progress.Section("MassDNS", "")
 
-	if !forceUpdate {
+	if !isForceUpdate() {
 		if _, err := exec.LookPath("massdns"); err == nil {
 			progress.ItemOK("Already installed")
 			return 0, 1, 0
