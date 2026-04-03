@@ -22,7 +22,7 @@ import (
 func installMassDNSSection() (installed, skipped, failed int) {
 	progress.Section("MassDNS", "")
 
-	if !forceUpdate {
+	if !isForceUpdate() {
 		if _, err := exec.LookPath("massdns"); err == nil {
 			progress.ItemOK("Already installed")
 			return 0, 1, 0
@@ -39,7 +39,12 @@ func installMassDNSSection() (installed, skipped, failed int) {
 
 	goPath := os.Getenv("GOPATH")
 	if goPath == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			tracker.StopSpinner()
+			progress.ItemFail("massdns", "cannot determine home directory")
+			return 0, 0, 1
+		}
 		goPath = filepath.Join(home, "go")
 	}
 	binDir := filepath.Join(goPath, "bin")

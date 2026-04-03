@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"io"
+	"math/rand"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -26,6 +27,31 @@ var sessionCookiePrefixes = []string{
 	"auth", "token", "jwt", "access_token",
 }
 
+// realUserAgents contains common, high-frequency browser User-Agent strings.
+// Rotating through these prevents WAF fingerprinting that would occur with a
+// static custom UA like "Chaathan-ROI-Metadata/1.0".
+var realUserAgents = []string{
+	// Chrome 147 on Windows 10
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	// Chrome 147 on macOS
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	// Chrome 147 on Linux
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	// Firefox 149 on Windows
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0",
+	// Firefox 149 on macOS
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0",
+	// Edge 147 on Windows
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+	// Safari 18 on macOS
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
+}
+
+// randomUA returns a random User-Agent from the pool.
+func randomUA() string {
+	return realUserAgents[rand.Intn(len(realUserAgents))]
+}
+
 type httpSignal struct {
 	URL                 string
 	Host                string
@@ -45,13 +71,13 @@ type httpSignal struct {
 
 // CollectHostMetadata fetches lightweight metadata for live host URLs and
 // stores one record per host for ROI scoring.
-func CollectHostMetadata(scanID int64, urls []string) (int, error) {
+func CollectHostMetadata(scanID int64, urls []string, proxy string) (int, error) {
 	targets := dedupeByHost(urls)
 	if len(targets) == 0 {
 		return 0, nil
 	}
 
-	results := collectSignals(targets)
+	results := collectSignals(targets, proxy)
 	count := 0
 	for _, signal := range results {
 		err := database.UpsertHostMetadata(scanID, database.HostMetadata{
@@ -77,13 +103,13 @@ func CollectHostMetadata(scanID int64, urls []string) (int, error) {
 
 // CollectURLMetadata fetches lightweight metadata for selected high-value URLs
 // and stores per-path signals for ROI scoring.
-func CollectURLMetadata(scanID int64, urls []string) (int, error) {
+func CollectURLMetadata(scanID int64, urls []string, proxy string) (int, error) {
 	targets := dedupeByURL(urls)
 	if len(targets) == 0 {
 		return 0, nil
 	}
 
-	results := collectSignals(targets)
+	results := collectSignals(targets, proxy)
 	count := 0
 	for _, signal := range results {
 		err := database.UpsertURLMetadata(scanID, database.URLMetadata{
@@ -106,14 +132,20 @@ func CollectURLMetadata(scanID int64, urls []string) (int, error) {
 	return count, nil
 }
 
-func collectSignals(urls []string) []httpSignal {
+func collectSignals(urls []string, proxy string) []httpSignal {
+	transport := &http.Transport{
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 2,
+	}
+	if proxy != "" {
+		if proxyURL, err := neturl.Parse(proxy); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	}
 	client := &http.Client{
-		Timeout: 12 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-			MaxIdleConns:        16,
-			MaxIdleConnsPerHost: 2,
-		},
+		Timeout:   12 * time.Second,
+		Transport: transport,
 	}
 
 	jobs := make(chan string)
@@ -133,7 +165,13 @@ func collectSignals(urls []string) []httpSignal {
 	}
 
 	go func() {
+		// Rate limit: max 5 requests/sec to avoid WAF bans on targets.
+		// Each URL triggers a GET + an OPTIONS request, so effective rate
+		// is ~10 HTTP requests/sec across all workers.
+		limiter := time.NewTicker(200 * time.Millisecond)
+		defer limiter.Stop()
 		for _, target := range urls {
+			<-limiter.C
 			jobs <- target
 		}
 		close(jobs)
@@ -159,7 +197,7 @@ func fetchSignal(client *http.Client, rawURL string) (httpSignal, bool) {
 	if err != nil {
 		return httpSignal{}, false
 	}
-	req.Header.Set("User-Agent", "Chaathan-ROI-Metadata/1.0")
+	req.Header.Set("User-Agent", randomUA())
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8")
 
 	resp, err := client.Do(req)
@@ -317,7 +355,7 @@ func checkDangerousMethods(client *http.Client, rawURL string) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("User-Agent", "Chaathan-ROI-Metadata/1.0")
+	req.Header.Set("User-Agent", randomUA())
 
 	resp, err := client.Do(req)
 	if err != nil {

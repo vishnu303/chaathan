@@ -78,6 +78,23 @@ var WildcardSteps = []Step{
 	{Name: "xss_scanning", Description: "XSS Scanning", Required: false, Tool: "dalfox"},
 }
 
+// CompanySteps defines the steps in the company workflow.
+var CompanySteps = []Step{
+	{Name: "metabigor", Description: "ASN & Network Range Discovery", Required: false, Tool: "metabigor"},
+	{Name: "amass_intel", Description: "Root Domain Discovery", Required: false, Tool: "amass"},
+	{Name: "cloud_enum", Description: "Cloud Enumeration", Required: false, Tool: "cloud_enum"},
+}
+
+// StepsForType returns the step definitions for the given scan type.
+func StepsForType(scanType string) []Step {
+	switch scanType {
+	case "company":
+		return CompanySteps
+	default:
+		return WildcardSteps
+	}
+}
+
 // Manager handles scan state management
 type Manager struct {
 	stateDir string
@@ -197,9 +214,10 @@ func (state *State) IsStepCompleted(stepName string) bool {
 	return false
 }
 
-// GetNextStep returns the next step to execute
+// GetNextStep returns the next step to execute based on scan type.
 func (state *State) GetNextStep() *Step {
-	for i, step := range WildcardSteps {
+	steps := StepsForType(state.Type)
+	for i, step := range steps {
 		if !state.IsStepCompleted(step.Name) {
 			if i >= state.CurrentStep {
 				return &step

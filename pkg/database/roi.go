@@ -595,6 +595,7 @@ func normalizeComparableURL(raw string) string {
 		return strings.TrimRight(strings.ToLower(raw), "/")
 	}
 	parsed.Fragment = ""
+	parsed.User = nil // Strip embedded credentials to prevent leakage into reports
 	s := strings.ToLower(parsed.String())
 	return strings.TrimRight(s, "/")
 }
@@ -888,6 +889,7 @@ func isStaticAsset(rawURL string) bool {
 		".woff", ".woff2", ".ttf", ".eot", ".mp4", ".mp3",
 		".pdf", ".zip", ".tar", ".gz", ".bmp", ".webp", ".avif",
 		".mov", ".avi", ".flv", ".wmv", ".wav", ".ogg",
+		".map", // source maps are auto-generated, not attack surface
 	}
 	for _, ext := range staticExtensions {
 		if strings.HasSuffix(path, ext) {

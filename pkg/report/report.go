@@ -3,12 +3,14 @@ package report
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/vishnu303/chaathan-flow/pkg/database"
+	htmltemplate "html/template"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/vishnu303/chaathan-flow/pkg/database"
 )
 
 // ReportFormat represents the output format
@@ -20,6 +22,23 @@ const (
 	FormatHTML     ReportFormat = "html"
 	FormatText     ReportFormat = "text"
 )
+
+// ExtensionFor returns the file extension (including the dot) for a given
+// report format string. Defaults to ".md" for unrecognised formats.
+func ExtensionFor(format string) string {
+	switch ReportFormat(format) {
+	case FormatMarkdown:
+		return ".md"
+	case FormatJSON:
+		return ".json"
+	case FormatHTML:
+		return ".html"
+	case FormatText:
+		return ".txt"
+	default:
+		return ".md"
+	}
+}
 
 // Report represents a scan report
 type Report struct {
@@ -470,7 +489,11 @@ func (r *Report) toHTML() (string, error) {
 </body>
 </html>`
 
-	t, err := template.New("html-report").Funcs(template.FuncMap{
+	// Use html/template instead of text/template for the HTML export.
+	// This auto-escapes all interpolated content (especially .Evidence which
+	// often contains attacker-controlled payloads like <script> tags),
+	// preventing XSS in the generated HTML report files.
+	t, err := htmltemplate.New("html-report").Funcs(htmltemplate.FuncMap{
 		"joinReasons": joinReasons,
 	}).Parse(tmpl)
 	if err != nil {
@@ -578,8 +601,9 @@ func joinReasons(reasons []string) string {
 	if len(reasons) == 0 {
 		return "-"
 	}
-	if len(reasons) > 3 {
-		reasons = reasons[:3]
+	if len(reasons) > 5 {
+		remaining := len(reasons) - 5
+		return strings.Join(reasons[:5], "; ") + fmt.Sprintf("; ... +%d more", remaining)
 	}
 	return strings.Join(reasons, "; ")
 }

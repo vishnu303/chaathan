@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -19,10 +20,12 @@ import (
 // ─────────────────────────────────────────────────────────────
 
 var (
-	targetCompany  string
-	skipCloudEnum  bool
-	skipMetabigor  bool
-	skipAmassIntel bool
+	targetCompany    string
+	skipCloudEnum    bool
+	skipMetabigor    bool
+	skipAmassIntel   bool
+	companyProxy     string
+	companyRateLimit int
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -48,6 +51,8 @@ func init() {
 	companyCmd.Flags().BoolVar(&skipMetabigor, "skip-metabigor", false, "Skip Metabigor ASN discovery")
 	companyCmd.Flags().BoolVar(&skipAmassIntel, "skip-amass-intel", false, "Skip Amass Intel root domain discovery")
 	companyCmd.Flags().BoolVar(&skipCloudEnum, "skip-cloud-enum", false, "Skip Cloud Enum cloud enumeration")
+	companyCmd.Flags().StringVar(&companyProxy, "proxy", "", "Proxy URL for target-facing tools (e.g., socks5://127.0.0.1:9050)")
+	companyCmd.Flags().IntVar(&companyRateLimit, "rate-limit", 0, "Global rate limit (requests/sec) for all tools (0 = per-tool defaults)")
 	companyCmd.MarkFlagRequired("name")
 	rootCmd.AddCommand(companyCmd)
 }
@@ -62,14 +67,29 @@ func runCompany(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	resultDir, err := CreateOutputDir(targetCompany)
+	// Sanitize target to prevent path traversal and filesystem issues
+	safe := sanitizeTarget(targetCompany)
+	if safe == "" {
+		logger.Error("Company name is invalid after sanitization")
+		return
+	}
+
+	resultDir, err := CreateOutputDir(safe)
 	if err != nil {
 		logger.Error("Error creating output dir: %v", err)
 		return
 	}
 
+	// CLI --proxy and --rate-limit override config file values
+	if companyProxy != "" && Cfg != nil {
+		Cfg.General.Proxy = companyProxy
+	}
+	if companyRateLimit > 0 && Cfg != nil {
+		Cfg.RateLimits.GlobalRPS = companyRateLimit
+	}
+
 	if err := cf.Run(cf.RunConfig{
-		Company:        targetCompany,
+		Company:        safe,
 		ResultDir:      resultDir,
 		Mode:           Mode,
 		Verbose:        Verbose,
@@ -80,4 +100,25 @@ func runCompany(cmd *cobra.Command, args []string) {
 	}); err != nil {
 		logger.Error("Company scan failed: %v", err)
 	}
+}
+
+// sanitizeTarget makes a company name safe for use as a directory name.
+// It strips path separators, collapses whitespace, and removes leading dots
+// to prevent path traversal (e.g. "../../etc/passwd") or hidden directories.
+func sanitizeTarget(name string) string {
+	// Remove path separators
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "\\", "_")
+
+	// Clean the path (resolves .., removes trailing slashes)
+	name = filepath.Base(filepath.Clean(name))
+
+	// Strip leading dots (prevents hidden directories)
+	name = strings.TrimLeft(name, ".")
+
+	// Collapse internal whitespace to single space, trim edges
+	fields := strings.Fields(name)
+	name = strings.Join(fields, " ")
+
+	return name
 }

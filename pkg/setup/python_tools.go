@@ -58,7 +58,7 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 	var toInstall []pyTool
 	skippedCount := 0
 	for _, t := range pyTools {
-		if !forceUpdate && pythonToolInstalled(t.name, t.cmdName, t.module) {
+		if !isForceUpdate() && pythonToolInstalled(t.name, t.cmdName, t.module) {
 			_ = ensurePythonToolShim(t.name, t.module)
 			skippedCount++
 			continue
@@ -69,7 +69,7 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 	type pyScript struct{ name, repo, script, module string }
 	var scriptsToInstall []pyScript
 	for _, t := range pyScripts {
-		if !forceUpdate {
+		if !isForceUpdate() {
 			if _, err := exec.LookPath(t.name); err == nil {
 				// Also verify the core dependency is installed, if one is specified
 				if t.module == "" || pythonModuleInstalled(t.module) {
@@ -124,7 +124,11 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 
 			goPath := os.Getenv("GOPATH")
 			if goPath == "" {
-				home, _ := os.UserHomeDir()
+				home, err := os.UserHomeDir()
+				if err != nil {
+					tracker.Fail(tool.name, "cannot determine home directory")
+					return
+				}
 				goPath = filepath.Join(home, "go")
 			}
 			binDir := filepath.Join(goPath, "bin")

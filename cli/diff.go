@@ -31,6 +31,49 @@ func init() {
 	rootCmd.AddCommand(diffCmd)
 }
 
+// ─────────────────────────────────────────────────────────────
+// Generic diff helper (F11)
+// ─────────────────────────────────────────────────────────────
+
+// diffResult holds the output of diffSets: items present in only the new
+// set (added) and items present in only the old set (removed).
+type diffResult[T any] struct {
+	Added   []T
+	Removed []T
+}
+
+// diffSets computes the added and removed items between two slices.
+// The key function extracts a comparable identity from each element.
+// This eliminates the 4× repeated set-building pattern that was in
+// diffSubdomains, diffPorts, diffVulns, and diffURLs.
+func diffSets[T any, K comparable](old, new []T, key func(T) K) diffResult[T] {
+	oldSet := make(map[K]struct{}, len(old))
+	for _, item := range old {
+		oldSet[key(item)] = struct{}{}
+	}
+	newSet := make(map[K]struct{}, len(new))
+	for _, item := range new {
+		newSet[key(item)] = struct{}{}
+	}
+
+	var r diffResult[T]
+	for _, item := range new {
+		if _, exists := oldSet[key(item)]; !exists {
+			r.Added = append(r.Added, item)
+		}
+	}
+	for _, item := range old {
+		if _, exists := newSet[key(item)]; !exists {
+			r.Removed = append(r.Removed, item)
+		}
+	}
+	return r
+}
+
+// ─────────────────────────────────────────────────────────────
+// runDiff — main diff command handler
+// ─────────────────────────────────────────────────────────────
+
 func runDiff(cmd *cobra.Command, args []string) {
 	oldID, err := utils.ParseScanID(args[0])
 	if err != nil {
@@ -60,64 +103,42 @@ func runDiff(cmd *cobra.Command, args []string) {
 	logger.Info("New: #%d — %s (%s)", newScan.ID, newScan.Target, newScan.StartedAt.Format("2006-01-02 15:04"))
 	fmt.Println()
 
-	// ── Subdomain Diff ──
 	diffSubdomains(oldID, newID)
-
-	// ── Port Diff ──
 	diffPorts(oldID, newID)
-
-	// ── Vulnerability Diff ──
 	diffVulns(oldID, newID)
-
-	// ── URL Diff ──
 	diffURLs(oldID, newID)
 }
+
+// ─────────────────────────────────────────────────────────────
+// Per-entity diff functions (now using diffSets)
+// ─────────────────────────────────────────────────────────────
 
 func diffSubdomains(oldID, newID int64) {
 	oldSubs, _ := database.GetSubdomains(oldID)
 	newSubs, _ := database.GetSubdomains(newID)
 
-	oldSet := make(map[string]bool)
-	for _, s := range oldSubs {
-		oldSet[s.Domain] = true
-	}
-	newSet := make(map[string]bool)
-	for _, s := range newSubs {
-		newSet[s.Domain] = true
-	}
-
-	var added, removed []string
-	for _, s := range newSubs {
-		if !oldSet[s.Domain] {
-			added = append(added, s.Domain)
-		}
-	}
-	for _, s := range oldSubs {
-		if !newSet[s.Domain] {
-			removed = append(removed, s.Domain)
-		}
-	}
+	d := diffSets(oldSubs, newSubs, func(s database.Subdomain) string { return s.Domain })
 
 	logger.Section("Subdomains")
-	logger.Info("Old: %d | New: %d | Added: %d | Removed: %d", len(oldSubs), len(newSubs), len(added), len(removed))
+	logger.Info("Old: %d | New: %d | Added: %d | Removed: %d", len(oldSubs), len(newSubs), len(d.Added), len(d.Removed))
 
-	if len(added) > 0 {
+	if len(d.Added) > 0 {
 		fmt.Println()
 		logger.Success("New subdomains:")
-		for _, s := range added {
-			fmt.Printf("  + %s\n", s)
+		for _, s := range d.Added {
+			fmt.Printf("  + %s\n", s.Domain)
 		}
 	}
 
-	if len(removed) > 0 {
+	if len(d.Removed) > 0 {
 		fmt.Println()
 		logger.Warning("Removed subdomains:")
-		for _, s := range removed {
-			fmt.Printf("  - %s\n", s)
+		for _, s := range d.Removed {
+			fmt.Printf("  - %s\n", s.Domain)
 		}
 	}
 
-	if len(added) == 0 && len(removed) == 0 {
+	if len(d.Added) == 0 && len(d.Removed) == 0 {
 		logger.Info("  No changes")
 	}
 	fmt.Println()
@@ -131,33 +152,22 @@ func diffPorts(oldID, newID int64) {
 		Host string
 		Port int
 	}
-
-	oldSet := make(map[portKey]bool)
-	for _, p := range oldPorts {
-		oldSet[portKey{p.Host, p.Port}] = true
-	}
-
-	var added []database.Port
-	for _, p := range newPorts {
-		if !oldSet[portKey{p.Host, p.Port}] {
-			added = append(added, p)
-		}
-	}
+	d := diffSets(oldPorts, newPorts, func(p database.Port) portKey { return portKey{p.Host, p.Port} })
 
 	logger.Section("Open Ports")
-	logger.Info("Old: %d | New: %d | New ports: %d", len(oldPorts), len(newPorts), len(added))
+	logger.Info("Old: %d | New: %d | New ports: %d", len(oldPorts), len(newPorts), len(d.Added))
 
-	if len(added) > 0 {
+	if len(d.Added) > 0 {
 		fmt.Println()
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "  + HOST\tPORT\tPROTOCOL\tSERVICE")
-		for _, p := range added {
+		for _, p := range d.Added {
 			fmt.Fprintf(w, "  + %s\t%d\t%s\t%s\n", p.Host, p.Port, p.Protocol, p.Service)
 		}
 		w.Flush()
 	}
 
-	if len(added) == 0 {
+	if len(d.Added) == 0 {
 		logger.Info("  No new ports")
 	}
 	fmt.Println()
@@ -171,44 +181,22 @@ func diffVulns(oldID, newID int64) {
 		Host       string
 		TemplateID string
 	}
-
-	oldSet := make(map[vulnKey]bool)
-	for _, v := range oldVulns {
-		oldSet[vulnKey{v.Host, v.TemplateID}] = true
-	}
-
-	var added []database.Vulnerability
-	for _, v := range newVulns {
-		if !oldSet[vulnKey{v.Host, v.TemplateID}] {
-			added = append(added, v)
-		}
-	}
+	d := diffSets(oldVulns, newVulns, func(v database.Vulnerability) vulnKey { return vulnKey{v.Host, v.TemplateID} })
 
 	logger.Section("Vulnerabilities")
-	logger.Info("Old: %d | New: %d | New findings: %d", len(oldVulns), len(newVulns), len(added))
+	logger.Info("Old: %d | New: %d | New findings: %d", len(oldVulns), len(newVulns), len(d.Added))
 
-	if len(added) > 0 {
+	if len(d.Added) > 0 {
 		fmt.Println()
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "  + SEVERITY\tHOST\tNAME\tTEMPLATE")
-		for _, v := range added {
-			severity := v.Severity
-			switch severity {
-			case "critical":
-				severity = "🔴 CRITICAL"
-			case "high":
-				severity = "🟠 HIGH"
-			case "medium":
-				severity = "🟡 MEDIUM"
-			case "low":
-				severity = "🟢 LOW"
-			}
-			fmt.Fprintf(w, "  + %s\t%s\t%s\t%s\n", severity, v.Host, v.Name, v.TemplateID)
+		for _, v := range d.Added {
+			fmt.Fprintf(w, "  + %s\t%s\t%s\t%s\n", logger.EmojiSeverity(v.Severity), v.Host, v.Name, v.TemplateID)
 		}
 		w.Flush()
 	}
 
-	if len(added) == 0 {
+	if len(d.Added) == 0 {
 		logger.Info("  No new vulnerabilities")
 	}
 	fmt.Println()
@@ -218,21 +206,11 @@ func diffURLs(oldID, newID int64) {
 	oldURLs, _ := database.GetURLs(oldID)
 	newURLs, _ := database.GetURLs(newID)
 
-	oldSet := make(map[string]bool)
-	for _, u := range oldURLs {
-		oldSet[u.URL] = true
-	}
-
-	newCount := 0
-	for _, u := range newURLs {
-		if !oldSet[u.URL] {
-			newCount++
-		}
-	}
+	d := diffSets(oldURLs, newURLs, func(u database.URL) string { return u.URL })
 
 	logger.Section("URLs")
-	logger.Info("Old: %d | New: %d | New URLs: %d", len(oldURLs), len(newURLs), newCount)
-	if newCount == 0 {
+	logger.Info("Old: %d | New: %d | New URLs: %d", len(oldURLs), len(newURLs), len(d.Added))
+	if len(d.Added) == 0 {
 		logger.Info("  No new URLs")
 	}
 }

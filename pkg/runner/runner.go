@@ -49,6 +49,58 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+// WithEnv appends environment variables (in "KEY=VALUE" form) to the
+// command's environment. The variables are added on top of os.Environ().
+func WithEnv(env ...string) Option {
+	return func(o *RunOptions) {
+		o.Env = append(o.Env, env...)
+	}
+}
+
+// ── Shared retry logic ──────────────────────────────────────────────────────
+
+// runOnceFunc executes a single attempt and returns (stdout, error).
+type runOnceFunc func(ctx context.Context) (string, error)
+
+// retryRun executes fn up to maxRetries+1 times, with delay between attempts.
+// It respects context cancellation and logs retries via logger.Warning.
+func retryRun(ctx context.Context, command string, maxRetries int, retryDelay time.Duration, fn runOnceFunc) (string, error) {
+	maxAttempts := maxRetries + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		output, err := fn(ctx)
+		if err == nil {
+			return output, nil
+		}
+
+		lastErr = err
+
+		// Don't retry on context cancellation (user pressed Ctrl+C)
+		if ctx.Err() != nil {
+			return output, fmt.Errorf("cancelled: %w", err)
+		}
+
+		// Log retry
+		if attempt < maxAttempts {
+			delay := retryDelay
+			if delay == 0 {
+				delay = 3 * time.Second
+			}
+			logger.Warning("[Retry %d/%d] %s failed: %v — retrying in %s...",
+				attempt, maxRetries, command, err, delay)
+			time.Sleep(delay)
+		}
+	}
+
+	return "", lastErr
+}
+
+// ── NativeRunner ────────────────────────────────────────────────────────────
+
 func (r *NativeRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
 	options := &RunOptions{}
 	for _, o := range opts {
@@ -63,51 +115,13 @@ func (r *NativeRunner) Run(ctx context.Context, command string, args []string, o
 		defer cancel()
 	}
 
-	var lastErr error
-	maxAttempts := r.MaxRetries + 1
-	if maxAttempts < 1 {
-		maxAttempts = 1
-	}
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		output, err := r.runOnce(runCtx, command, args, options)
-		if err == nil {
-			return output, nil
-		}
-
-		lastErr = err
-
-		// Don't retry on context cancellation (user pressed Ctrl+C)
-		if runCtx.Err() != nil {
-			return output, fmt.Errorf("cancelled: %w", err)
-		}
-
-		// Log retry
-		if attempt < maxAttempts {
-			delay := r.RetryDelay
-			if delay == 0 {
-				delay = 3 * time.Second
-			}
-			logger.Warning("[Retry %d/%d] %s failed: %v — retrying in %s...",
-				attempt, r.MaxRetries, command, err, delay)
-			time.Sleep(delay)
-		}
-	}
-
-	return "", lastErr
+	return retryRun(runCtx, command, r.MaxRetries, r.RetryDelay, func(rCtx context.Context) (string, error) {
+		return r.runOnce(rCtx, command, args, options)
+	})
 }
 
 func (r *NativeRunner) runOnce(ctx context.Context, command string, args []string, options *RunOptions) (string, error) {
-	var cmd *exec.Cmd
-
-	switch command {
-	case "cloud_enum":
-		cmd = exec.CommandContext(ctx, "cloud_enum", args...)
-	case "subdomainizer":
-		cmd = exec.CommandContext(ctx, "subdomainizer", args...)
-	default:
-		cmd = exec.CommandContext(ctx, command, args...)
-	}
+	cmd := exec.CommandContext(ctx, command, args...)
 
 	if options.Dir != "" {
 		cmd.Dir = options.Dir
@@ -140,6 +154,8 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 	return stdout.String(), nil
 }
 
+// ── DockerRunner ────────────────────────────────────────────────────────────
+
 func (r *DockerRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
 	options := &RunOptions{}
 	for _, o := range opts {
@@ -154,36 +170,9 @@ func (r *DockerRunner) Run(ctx context.Context, command string, args []string, o
 		defer cancel()
 	}
 
-	var lastErr error
-	maxAttempts := r.MaxRetries + 1
-	if maxAttempts < 1 {
-		maxAttempts = 1
-	}
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		output, err := r.runOnce(runCtx, command, args, options)
-		if err == nil {
-			return output, nil
-		}
-
-		lastErr = err
-
-		if runCtx.Err() != nil {
-			return output, fmt.Errorf("cancelled: %w", err)
-		}
-
-		if attempt < maxAttempts {
-			delay := r.RetryDelay
-			if delay == 0 {
-				delay = 3 * time.Second
-			}
-			logger.Warning("[Retry %d/%d] %s (docker) failed: %v — retrying in %s...",
-				attempt, r.MaxRetries, command, err, delay)
-			time.Sleep(delay)
-		}
-	}
-
-	return "", lastErr
+	return retryRun(runCtx, command, r.MaxRetries, r.RetryDelay, func(rCtx context.Context) (string, error) {
+		return r.runOnce(rCtx, command, args, options)
+	})
 }
 
 func (r *DockerRunner) runOnce(ctx context.Context, command string, args []string, options *RunOptions) (string, error) {
@@ -239,6 +228,8 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 	return stdout.String(), nil
 }
 
+// ── Shared helpers ──────────────────────────────────────────────────────────
+
 // startAndWait ensures context cancellation terminates the entire process group,
 // not just the top-level command. Many recon tools spawn child processes, and
 // skip/cancel must tear those down so the workflow can advance immediately.
@@ -282,77 +273,69 @@ func killProcessGroup(cmd *exec.Cmd) {
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
-func getDockerImage(tool string) string {
-	switch tool {
-	case "amass":
-		return "caffix/amass"
-	case "subfinder":
-		return "projectdiscovery/subfinder"
-	case "nuclei":
-		return "projectdiscovery/nuclei"
-	case "httpx":
-		return "projectdiscovery/httpx"
-	case "naabu":
-		return "projectdiscovery/naabu"
-	case "gau":
-		return "sxcurity/gau"
-	case "assetfinder":
-		return "tomnomnom/assetfinder"
-	case "metabigor":
-		return "j3ssie/metabigor"
-	case "dnsx":
-		return "projectdiscovery/dnsx"
-	case "katana":
-		return "projectdiscovery/katana"
-	case "gospider":
-		return "jaeles-project/gospider"
-	case "ffuf":
-		return "ffuf/ffuf"
-	case "waybackurls":
-		return "sxcurity/waybackurls"
-	case "linkfinder":
-		return "ghcr.io/gerben-stavenga/linkfinder"
-	case "github-endpoints":
-		return "gwen001/github-endpoints"
-	case "github-subdomains":
-		return "gwen001/github-subdomains"
-	// Phase 3 tools
+// ── Docker image registry (F30) ─────────────────────────────────────────────
+//
+// Single lookup table for tool → Docker image + entry-point flag.
+// Tools without an official Docker image use "alpine" as a fallback,
+// meaning they won't work in Docker mode. These are tagged with a comment
+// so operators can supply custom images via config override.
 
-	case "tlsx":
-		return "projectdiscovery/tlsx"
-	case "uncover":
-		return "projectdiscovery/uncover"
-	case "dalfox":
-		return "hahwul/dalfox"
-	case "subjack":
-		return "alpine" // no official docker image
-	case "arjun":
-		return "s0md3v/arjun"
-	case "shuffledns":
-		return "projectdiscovery/shuffledns"
-	case "subdomainizer":
-		return "alpine" // no official docker image
-	default:
-		return "alpine"
+type dockerImageInfo struct {
+	Image      string // Docker Hub image name
+	Entrypoint bool   // true if the image uses ENTRYPOINT (don't pass tool name)
+}
+
+var dockerImages = map[string]dockerImageInfo{
+	// Project Discovery tools — all use ENTRYPOINT
+	"subfinder":   {"projectdiscovery/subfinder", true},
+	"nuclei":      {"projectdiscovery/nuclei", true},
+	"httpx":       {"projectdiscovery/httpx", true},
+	"naabu":       {"projectdiscovery/naabu", true},
+	"dnsx":        {"projectdiscovery/dnsx", true},
+	"katana":      {"projectdiscovery/katana", true},
+	"tlsx":        {"projectdiscovery/tlsx", true},
+	"uncover":     {"projectdiscovery/uncover", true},
+	"shuffledns":  {"projectdiscovery/shuffledns", true},
+
+	// Third-party tools with ENTRYPOINT
+	"amass":       {"caffix/amass", true},
+	"ffuf":        {"ffuf/ffuf", true},
+	"dalfox":      {"hahwul/dalfox", true},
+	"arjun":       {"s0md3v/arjun", true},
+	"linkfinder":  {"ghcr.io/gerben-stavenga/linkfinder", true},
+
+	// Third-party tools WITHOUT ENTRYPOINT (need command passed)
+	"assetfinder":      {"tomnomnom/assetfinder", false},
+	"gau":              {"sxcurity/gau", false},
+	"waybackurls":      {"sxcurity/waybackurls", false},
+	"metabigor":        {"j3ssie/metabigor", false},
+	"gospider":         {"jaeles-project/gospider", false},
+	"github-subdomains": {"gwen001/github-subdomains", false},
+
+	// No official Docker image — alpine fallback (won't work without custom image)
+	"subjack":       {"alpine", false}, // no official image
+	"subdomainizer": {"alpine", false}, // Python script — no official image
+	"sublist3r":     {"alpine", false}, // Python script — no official image
+	"cloud_enum":    {"alpine", false}, // Python script — no official image
+	"massdns":       {"alpine", false}, // compiled from source
+	"anew":          {"alpine", false}, // tiny Go binary — unlikely to need Docker
+	"gf":            {"alpine", false}, // tiny Go binary — unlikely to need Docker
+}
+
+func getDockerImage(tool string) string {
+	if info, ok := dockerImages[tool]; ok {
+		return info.Image
 	}
+	return "alpine"
 }
 
 func isEntrypointImage(tool string) bool {
-	switch tool {
-	case "amass", "nuclei", "httpx", "naabu", "subfinder", "dnsx", "katana", "ffuf", "linkfinder",
-		"tlsx", "uncover", "dalfox", "arjun", "shuffledns":
-		return true
-	default:
-		return false
+	if info, ok := dockerImages[tool]; ok {
+		return info.Entrypoint
 	}
+	return false
 }
 
-func New(mode string, verbose bool) Runner {
-	if mode == "docker" {
-		return &DockerRunner{Verbose: verbose}
-	}
-	return &NativeRunner{Verbose: verbose}
-}
 
 // NewWithRetry creates a runner with retry logic.
 func NewWithRetry(mode string, verbose bool, maxRetries int, retryDelay time.Duration) Runner {
@@ -361,3 +344,4 @@ func NewWithRetry(mode string, verbose bool, maxRetries int, retryDelay time.Dur
 	}
 	return &NativeRunner{Verbose: verbose, MaxRetries: maxRetries, RetryDelay: retryDelay}
 }
+

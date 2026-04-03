@@ -6,36 +6,54 @@ Use this file as the primary entrypoint for any code agent.
 
 ## Repository overview
 
-- `main.go` — starts the Cobra CLI.
-- `cli/` — commands, flags, and argument parsing.
-- `pkg/wildcard_flow/` — wildcard/domain recon workflow.
-- `pkg/company_flow/` — company recon workflow.
-- `pkg/database/` — persistence and ROI ranking.
-- `pkg/report/` — report generation.
-- `pkg/setup/` — external tool installation and checks.
-- `pkg/tools/` and `pkg/runner/` — external command execution.
-- `pkg/scan/` — scan lifecycle management.
-- `pkg/scope/` — scope parsing and filtering.
-- `pkg/config/` — configuration loading.
-- `pkg/logger/` — structured logging.
-- `pkg/notify/` — notifications.
-- `pkg/progress/` — progress tracking.
-- `pkg/metadata/` — scan metadata.
-- `pkg/utils/` — shared utilities.
+```
+chaathan-flow/
+├── main.go                    Entry point — init paths, defer DB close, run CLI
+├── Makefile                   Build, install, setup, test, vet targets
+├── cli/                       Cobra commands, flags, argument parsing
+│   ├── root.go                Global flags, version, PersistentPreRun init
+│   ├── wildcard.go            21-step domain recon command
+│   ├── company.go             3-step company recon command
+│   ├── setup.go               Tool installation entry
+│   ├── scans.go               Scan list/show/resume/delete
+│   ├── query.go               Query subdomains/vulns/ports/urls/endpoints/roi
+│   ├── report.go              Report generation command
+│   ├── export.go              Text file export command
+│   ├── delete.go              Data cleanup commands
+│   ├── diff.go                Scan comparison command
+│   ├── status.go              Dashboard command
+│   ├── config.go              Config management commands
+│   └── tools_cmd.go           Tools list/check commands
+├── pkg/
+│   ├── wildcard_flow/         21-step domain recon workflow (4 phase files)
+│   ├── company_flow/          3-step company recon workflow
+│   ├── orchestrate/           Signal handling, infra bootstrap (runner/toolbox/notifier)
+│   ├── database/              SQLite persistence, queries, ROI ranking, metadata
+│   ├── report/                Report assembly and multi-format export
+│   ├── scan/                  Scan state, resume, step definitions
+│   ├── setup/                 External tool installation and verification
+│   ├── tools/                 Tool registry and wrappers (28 tools)
+│   ├── runner/                External command execution, retry, docker mode
+│   ├── config/                YAML config loading and defaults
+│   ├── metadata/              Host metadata collection (CSP, headers, tech)
+│   ├── scope/                 Scope filtering (in/out-of-scope, IP exclusion)
+│   ├── notify/                Discord, Slack, Telegram notifications
+│   ├── logger/                Styled terminal output, colors, scan UI
+│   ├── progress/              Spinners and progress bars
+│   ├── paths/                 Centralised ~/.chaathan directory paths
+│   └── utils/                 File I/O, parsers, export helpers, validation
+```
 
 ## Core architecture rules
 
-- Keep CLI handlers thin. Business logic belongs in `pkg/`.
-- Keep scan orchestration in workflow packages, not in Cobra commands.
-- Keep SQL, persistence, and ROI logic in `pkg/database/`.
-- Keep report rendering in `pkg/report/`.
-- Keep setup and installation logic in `pkg/setup/`.
-- Treat persisted DB rows, output artifacts, and JSON output as stable product interfaces.
-- Prefer extending existing structs like `RunConfig`, `Ctx`, and `Files` instead of creating ad hoc parameter chains.
+1. **Thin CLI, thick packages.** Cobra handlers parse flags and delegate to `pkg/`. No business logic in `cli/`.
+2. **Workflow packages own orchestration.** Scan step logic lives in `pkg/wildcard_flow/` and `pkg/company_flow/`, not in Cobra commands.
+3. **One owner per concern.** Persistence → `pkg/database/`. Reports → `pkg/report/`. Setup → `pkg/setup/`. Tools → `pkg/tools/` + `pkg/runner/`.
+4. **Extend, don't scatter.** Add fields to `RunConfig`, `Ctx`, or `Files` instead of threading long parameter lists.
+5. **Stable interfaces.** DB rows, output files, and JSON output are product surfaces — check all readers before changing shapes.
+6. **Step functions return `c.cancelled()`.** Never hard-code `return false`. Never call `MarkStepComplete` after `MarkStepFailed` in the same error path.
 
 ## Validation baseline
-
-Use the smallest relevant checks first:
 
 ```bash
 go test ./...
@@ -43,10 +61,10 @@ go vet ./...
 go build -buildvcs=false -o chaathan .
 ```
 
-If a change affects CLI behavior, also inspect the relevant help text.
+If a change affects CLI behavior, also inspect the relevant `--help` output.
 
 ## Agent-specific notes
 
-- Antigravity IDE and Codex agents: deep-dive skills are in `.agents/skills/`.
-- Other agents (Cursor, Claude, etc.): read this file and the relevant skill `SKILL.md` directly from `.agents/skills/<skill-name>/SKILL.md`.
-- Do not invent a second source of truth — mirror or reference this file for other agent config formats.
+- Antigravity and Codex agents: deep-dive skills are in `.agents/skills/`.
+- Other agents (Cursor, Claude, etc.): read this file and the relevant `SKILL.md` directly from `.agents/skills/<skill-name>/SKILL.md`.
+- Do not invent a second source of truth — this file is the canonical agent guide.

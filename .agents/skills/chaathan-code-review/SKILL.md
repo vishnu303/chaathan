@@ -1,83 +1,68 @@
 ---
 name: chaathan-code-review
-description: Use when reviewing changes in the Chaathan repository. Focus on behavioral regressions, workflow breakage, database/report/query inconsistencies, setup risks, and missing validation for this CLI pentesting framework.
+description: Use when reviewing changes in the Chaathan repository. Focuses on behavioral regressions, cross-layer propagation bugs, and orchestration-specific risks.
 ---
 
 # Chaathan Code Review
 
-Use this skill when the user asks for a review rather than an implementation.
+## When to use
 
-## Review priorities
+Activate this skill when reviewing a diff or PR — not when implementing.
 
-Prioritize findings that could break:
+## Priority order
 
-- scan execution or step sequencing
-- CLI compatibility or help/flag behavior
-- database persistence and downstream queries
-- report/export correctness
-- setup/tool availability checks
-- cancellation, resume, or skip semantics
+Review for breakage in this order:
+1. Scan execution and step sequencing
+2. CLI compatibility (flags, help text, argument validation)
+3. Database persistence and downstream queries
+4. Report/export correctness across all formats
+5. Setup and tool availability checks
+6. Cancellation, resume, and skip semantics
+7. Notification delivery
 
-This repository is orchestration-heavy. Small-looking changes often break behavior across multiple layers.
+## Review surfaces
 
-## Main review surfaces
+| Layer | Watch for |
+|-------|-----------|
+| `cli/` | Wrong flags, mismatched help text, duplicated logic, poor validation |
+| `pkg/wildcard_flow/`, `pkg/company_flow/` | Bad step ordering, broken artifact deps, lost cancel/skip handling |
+| `pkg/orchestrate/` | Signal handling regressions, infra bootstrap changes |
+| `pkg/database/` | Schema/query mismatches, unstable uniqueness, ranking regressions |
+| `pkg/report/` + `cli/query.go` | Stale presentation after data-model changes |
+| `pkg/setup/` + `pkg/tools/` | Install/runtime mismatches for external deps |
+| `pkg/metadata/` | Missing metadata fields breaking ROI or reports |
 
-- `cli/`: wrong flags, mismatched help text, duplicated logic, poor argument validation
-- `pkg/wildcard_flow/` and `pkg/company_flow/`: bad step ordering, broken artifact dependencies, lost cancellation/skip handling
-- `pkg/database/`: schema/query mismatches, unstable uniqueness assumptions, ranking regressions
-- `pkg/report/` and `cli/query.go`: stale presentation after data-model changes
-- `pkg/setup/` and `pkg/tools/`: install/runtime mismatches for external dependencies
-
-## What to look for first
-
-1. Does the change break an existing command path?
-2. Does it add a field or artifact without updating all readers?
-3. Does it change output semantics without updating JSON/human-readable modes consistently?
-4. Does it depend on an external tool or file path that may not exist?
-5. Does it widen fatal failure behavior in a workflow that used to log and continue?
-
-## Repo-specific regression patterns
+## Regression patterns specific to this repo
 
 - CLI flag added but not copied into `RunConfig` or workflow `Ctx`
-- workflow artifact renamed without updating downstream consumers
-- database model changed without schema update or migration-safe fallback
-- report field added in one format but missing from others
+- Workflow artifact renamed without updating downstream consumers
+- DB model changed without schema update or migration-safe fallback
+- Report field added in one format but missing from others
 - ROI score changed without updating `Reasons`
-- setup logic installs a tool but `tools check` or runtime invocation still disagrees
-- user-facing step counts/help text drift from actual workflow implementation (21 steps across 4 phases)
-- step function returns hard-coded `false` instead of `c.cancelled()`, breaking Ctrl+C propagation
-- `MarkStepComplete` called after `MarkStepFailed` in the same error path, silently clearing the failure record
-- resume path (`IsStepCompleted` early return) returns `false` instead of `c.cancelled()`
+- Setup installs a tool but `tools check` or runtime still disagrees
+- Step counts/help text drift from actual workflow (21 steps, 4 phases)
+- Step function returns hard-coded `false` instead of `c.cancelled()`
+- `MarkStepComplete` called after `MarkStepFailed` in same error path
+- Resume path (`IsStepCompleted` early return) returns `false` instead of `c.cancelled()`
+- Notification fields out of sync with scan stats
 
 ## Review output style
 
-Lead with concrete findings ordered by severity.
+Lead with concrete findings ordered by severity. For each finding:
+- Affected file and line
+- What breaks or could regress
+- Why it matters in this codebase
 
-For each finding include:
+Keep summaries brief. If no findings, state that explicitly with residual risks noted.
 
-- affected file and line
-- what breaks or could regress
-- why it matters in this codebase
-- the missing validation if relevant
+## Validation cues
 
-Keep summaries brief. If there are no findings, state that explicitly and mention residual risks or untested surfaces.
+**Strong evidence:** `go test ./...`, `go vet ./...`, successful build, direct inspection of affected flow and all downstream readers.
 
-## Useful validation cues
-
-Strong evidence for confidence:
-
-- `go test ./...`
-- `go vet ./...`
-- successful build
-- direct inspection of affected command path and downstream readers
-
-Weak evidence:
-
-- README examples only
-- reasoning from one layer without checking the rest of the flow
+**Weak evidence:** README examples only, reasoning from one layer without checking the rest.
 
 ## Avoid
 
-- Do not review this repo as if it were a pure library. Most risk is in end-to-end orchestration.
-- Do not focus mainly on style unless it affects correctness or maintainability materially.
-- Do not miss propagation bugs across CLI, workflow, DB, report, and setup layers.
+- Do not review this repo as a pure library — most risk is in end-to-end orchestration.
+- Do not focus on style unless it affects correctness or maintainability.
+- Do not miss propagation bugs across CLI → workflow → DB → report → notification layers.

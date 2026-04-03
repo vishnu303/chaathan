@@ -183,8 +183,10 @@ func collectLiveHostTargetsFromHttpx(inputFile, outputFile string) int {
 	seen := make(map[string]bool)
 	count := 0
 	scanner := bufio.NewScanner(file)
+	// 4 MB max line buffer — httpx JSONL can exceed 1 MB when extensive
+	// tech detection, header data, or TLS info is emitted.
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(buf, 4*1024*1024)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -201,6 +203,9 @@ func collectLiveHostTargetsFromHttpx(inputFile, outputFile string) int {
 		seen[result.URL] = true
 		fmt.Fprintln(f, result.URL)
 		count++
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Warning("httpx JSONL scanner error (some lines may have been skipped): %v", err)
 	}
 	return count
 }
@@ -275,8 +280,10 @@ func collectROIMetadataTargetsFromFile(inputFile, outputFile string, perHostLimi
 // collectGFTargetURLs runs installed Tier 1 gf patterns against inputFile,
 // merges the matches and writes them to outputFile.
 // When scanID > 0, persists each URL-pattern pair in the gf_matches table.
-func collectGFTargetURLs(c *Ctx, tb *tools.ToolBox, inputFile, outputFile string) int {
-	return collectGFMatches(c.GoCtx, tb, inputFile, outputFile, tier1GFPatterns, c.ScanID)
+// The caller should pass a skip-aware context (e.g. from runWithSkip) so the
+// user can press 's' to abort gf filtering.
+func collectGFTargetURLs(ctx context.Context, c *Ctx, tb *tools.ToolBox, inputFile, outputFile string) int {
+	return collectGFMatches(ctx, tb, inputFile, outputFile, tier1GFPatterns, c.ScanID)
 }
 
 // collectGFMatches runs the installed gf patterns present in allowlist against
@@ -286,8 +293,19 @@ func collectGFTargetURLs(c *Ctx, tb *tools.ToolBox, inputFile, outputFile string
 func collectGFMatches(ctx context.Context, tb *tools.ToolBox, inputFile, outputFile string, allowlist map[string]bool, scanID int64) int {
 	patterns := installedGFPatterns(allowlist)
 	tmpFiles := make([]string, 0, len(patterns))
+	// Schedule cleanup of all temp files when this function exits,
+	// whether by normal return or panic.
+	defer func() {
+		for _, f := range tmpFiles {
+			os.Remove(f)
+		}
+	}()
 
 	for _, pattern := range patterns {
+		// Bail out early if the context was cancelled (user pressed 's' or Ctrl+C)
+		if ctx.Err() != nil {
+			break
+		}
 		tmpFile := outputFile + "." + pattern
 		if err := tb.RunGFPattern(ctx, pattern, inputFile, tmpFile); err != nil {
 			_ = os.Remove(tmpFile)
@@ -301,7 +319,6 @@ func collectGFMatches(ctx context.Context, tb *tools.ToolBox, inputFile, outputF
 				}
 			}
 			tmpFiles = append(tmpFiles, tmpFile)
-			defer os.Remove(tmpFile)
 		}
 	}
 

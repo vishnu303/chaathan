@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/scan"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 	wf "github.com/vishnu303/chaathan-flow/pkg/wildcard_flow"
@@ -176,9 +176,7 @@ func runScansResume(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	home, _ := os.UserHomeDir()
-	stateDir := filepath.Join(home, ".chaathan", "state")
-	mgr := scan.NewManager(stateDir)
+	mgr := scan.NewManager(paths.StateDir())
 
 	state, err := mgr.LoadState(scanID)
 	if err != nil {

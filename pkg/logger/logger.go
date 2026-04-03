@@ -89,10 +89,17 @@ func Debug(format string, args ...interface{}) {
 	fmt.Printf("  %s│  %s%s\n", Dim, msg, Reset)
 }
 
-// ── Section headers ─────────────────────────────────────────────────────────
-
-// Section prints a modern section header with step counter and elapsed time
+// Section prints a generic section heading without incrementing the step counter.
+// Use this in non-scan commands (status, diff, export, delete, query, etc.)
+// that don't participate in the step-tracking workflow.
 func Section(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Printf("\n  %s┌─%s %s%s%s%s\n", Cyan, Reset, BrightCyan+Bold, msg, Reset, "")
+}
+
+// StepHeader prints a scan-step heading that increments the step counter
+// and shows elapsed time. Use this only in scan workflow phases.
+func StepHeader(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	currentStep++
 

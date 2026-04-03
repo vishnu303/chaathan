@@ -8,6 +8,7 @@ import (
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
 
@@ -230,8 +231,7 @@ func deleteResultFiles(target string) {
 	}
 
 	// Also try the default location
-	home, _ := os.UserHomeDir()
-	defaultDir := filepath.Join(home, ".chaathan", "scans", target)
+	defaultDir := filepath.Join(paths.ScansDir(), target)
 	if _, err := os.Stat(defaultDir); err == nil {
 		if err := os.RemoveAll(defaultDir); err != nil {
 			logger.Warning("Failed to delete %s: %v", defaultDir, err)

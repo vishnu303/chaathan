@@ -9,6 +9,9 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 )
 
 // DB is the global database connection
@@ -649,29 +652,7 @@ func GetVulnerabilities(scanID int64) ([]Vulnerability, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var vulns []Vulnerability
-	for rows.Next() {
-		var v Vulnerability
-		var url, desc, matcher, evidence sql.NullString
-		if err := rows.Scan(&v.ID, &v.ScanID, &v.Host, &url, &v.TemplateID, &v.Name, &v.Severity, &desc, &matcher, &evidence, &v.CreatedAt); err != nil {
-			return nil, err
-		}
-		if url.Valid {
-			v.URL = url.String
-		}
-		if desc.Valid {
-			v.Description = desc.String
-		}
-		if matcher.Valid {
-			v.Matcher = matcher.String
-		}
-		if evidence.Valid {
-			v.Evidence = evidence.String
-		}
-		vulns = append(vulns, v)
-	}
-	return vulns, nil
+	return scanVulnRows(rows)
 }
 
 func GetVulnerabilitiesBySeverity(scanID int64, severity string) ([]Vulnerability, error) {
@@ -684,7 +665,12 @@ func GetVulnerabilitiesBySeverity(scanID int64, severity string) ([]Vulnerabilit
 		return nil, err
 	}
 	defer rows.Close()
+	return scanVulnRows(rows)
+}
 
+// scanVulnRows extracts Vulnerability structs from a *sql.Rows cursor.
+// Shared by GetVulnerabilities and GetVulnerabilitiesBySeverity.
+func scanVulnRows(rows *sql.Rows) ([]Vulnerability, error) {
 	var vulns []Vulnerability
 	for rows.Next() {
 		var v Vulnerability
@@ -832,8 +818,7 @@ func GetScanStats(scanID int64) (*ScanStats, error) {
 
 // GetDefaultDBPath returns the default database path
 func GetDefaultDBPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".chaathan", "chaathan.db")
+	return paths.DatabasePath()
 }
 
 // DeleteScan deletes a scan and all its related data
@@ -844,20 +829,21 @@ func DeleteScan(scanID int64) error {
 	}
 	defer tx.Rollback()
 
-	// Delete from all related tables (order matters: child rows before parent)
-	tables := []string{
-		"gf_matches",
-		"host_metadata",
-		"url_metadata",
-		"endpoints",
-		"vulnerabilities",
-		"urls",
-		"ports",
-		"subdomains",
+	// Delete from all related tables (order matters: child rows before parent).
+	// Each statement is explicit — no string interpolation into SQL.
+	deletes := []string{
+		"DELETE FROM gf_matches WHERE scan_id = ?",
+		"DELETE FROM host_metadata WHERE scan_id = ?",
+		"DELETE FROM url_metadata WHERE scan_id = ?",
+		"DELETE FROM endpoints WHERE scan_id = ?",
+		"DELETE FROM vulnerabilities WHERE scan_id = ?",
+		"DELETE FROM urls WHERE scan_id = ?",
+		"DELETE FROM ports WHERE scan_id = ?",
+		"DELETE FROM subdomains WHERE scan_id = ?",
 	}
-	for _, table := range tables {
-		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE scan_id = ?", table), scanID); err != nil {
-			return fmt.Errorf("failed to delete from %s: %w", table, err)
+	for _, stmt := range deletes {
+		if _, err := tx.Exec(stmt, scanID); err != nil {
+			return fmt.Errorf("failed to delete scan data: %w", err)
 		}
 	}
 
@@ -1097,7 +1083,9 @@ func AddGFMatches(scanID int64, urls []string, pattern string) error {
 	for _, u := range urls {
 		u = strings.TrimSpace(u)
 		if u != "" {
-			stmt.Exec(scanID, u, pattern)
+			if _, err := stmt.Exec(scanID, u, pattern); err != nil {
+				logger.Warning("gf_matches insert failed for %q pattern %q: %v", u, pattern, err)
+			}
 		}
 	}
 	return tx.Commit()
@@ -1146,8 +1134,12 @@ func MarkHostsJSSecrets(scanID int64, hosts []string) error {
 			continue
 		}
 		// Ensure a row exists, then update the flag
-		tx.Exec(`INSERT OR IGNORE INTO host_metadata (scan_id, host) VALUES (?, ?)`, scanID, host)
-		tx.Exec(`UPDATE host_metadata SET has_js_secrets = TRUE, updated_at = CURRENT_TIMESTAMP WHERE scan_id = ? AND host = ?`, scanID, host)
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO host_metadata (scan_id, host) VALUES (?, ?)`, scanID, host); err != nil {
+			return fmt.Errorf("failed to insert host_metadata for %q: %w", host, err)
+		}
+		if _, err := tx.Exec(`UPDATE host_metadata SET has_js_secrets = TRUE, updated_at = CURRENT_TIMESTAMP WHERE scan_id = ? AND host = ?`, scanID, host); err != nil {
+			return fmt.Errorf("failed to flag JS secrets for %q: %w", host, err)
+		}
 	}
 	return tx.Commit()
 }

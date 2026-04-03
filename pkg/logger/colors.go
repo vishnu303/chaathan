@@ -17,6 +17,22 @@ func ColorStatus(status string) string {
 	}
 }
 
+// EmojiStatus returns an emoji-prefixed status string for CLI table output.
+func EmojiStatus(status string) string {
+	switch status {
+	case "completed":
+		return "✅ completed"
+	case "running":
+		return "🔄 running"
+	case "failed":
+		return "❌ failed"
+	case "cancelled":
+		return "⚠️  cancelled"
+	default:
+		return status
+	}
+}
+
 // ColorSeverity returns an ANSI-coloured string for a vulnerability severity.
 // Expected values: "critical", "high", "medium", "low", "info".
 func ColorSeverity(sev string) string {
@@ -35,3 +51,23 @@ func ColorSeverity(sev string) string {
 		return sev
 	}
 }
+
+// EmojiSeverity returns an emoji-prefixed, uppercased severity label
+// for CLI table output (e.g. "🔴 CRITICAL").
+func EmojiSeverity(sev string) string {
+	switch sev {
+	case "critical":
+		return "🔴 CRITICAL"
+	case "high":
+		return "🟠 HIGH"
+	case "medium":
+		return "🟡 MEDIUM"
+	case "low":
+		return "🟢 LOW"
+	case "info":
+		return "🔵 INFO"
+	default:
+		return sev
+	}
+}
+

@@ -20,7 +20,7 @@ func stepCloudEnum(c *Ctx) bool {
 	c.Total++
 
 	if !c.SkipCloudEnum {
-		logger.Section("Step 3: Cloud Enumeration (Cloud Enum)")
+		logger.StepHeader("Step 3: Cloud Enumeration (Cloud Enum)")
 		cloudOut := filepath.Join(c.ResultDir, "cloud_enum.json")
 		logger.SubStep("Running Cloud Enum for keyword: %s", c.Company)
 
@@ -32,7 +32,7 @@ func stepCloudEnum(c *Ctx) bool {
 			c.Completed++
 		}
 	} else {
-		logger.Section("Step 3: Skipping Cloud Enum (--skip-cloud-enum)")
+		logger.StepHeader("Step 3: Skipping Cloud Enum (--skip-cloud-enum)")
 		c.Completed++
 	}
 

@@ -1,71 +1,88 @@
 ---
 name: chaathan-tooling-setup
-description: Use when changing Chaathan external tool installation, setup flows, prerequisites, tool checks, config-driven tool parameters, or failures involving host-installed recon utilities and the project setup process.
+description: Use when changing external tool installation, setup flows, tool checks, config-driven parameters, or failures involving host-installed recon utilities.
 ---
 
-# Chaathan Tooling Setup
+# Chaathan Tooling & Setup
 
-Use this skill for tasks involving external binaries, installation, and setup behavior.
+## When to use
+
+Activate this skill for tasks involving external binary installation, setup behavior, or tool availability.
 
 ## Relevant code
 
-- `cli/setup.go`
-- `cli/tools_cmd.go`
-- `pkg/setup/`
-- `pkg/tools/tools.go`
-- `pkg/runner/runner.go`
-- `pkg/config/config.go`
-- `Makefile`
+| File | Purpose |
+|------|---------|
+| `cli/setup.go` | Setup command entry, `--update` flag |
+| `cli/tools_cmd.go` | `tools list` / `tools check` commands |
+| `pkg/setup/setup.go` | Setup orchestration |
+| `pkg/setup/go_tools.go` | Go tool installation (`go install`) |
+| `pkg/setup/python_tools.go` | Python tool installation (pip/clone) |
+| `pkg/setup/massdns.go` | MassDNS build-from-source |
+| `pkg/setup/gf_patterns.go` | gf pattern installation |
+| `pkg/setup/prereqs.go` | System prerequisite checks |
+| `pkg/setup/log.go` | Setup log file management |
+| `pkg/tools/registry.go` | Canonical tool catalogue (28 tools) |
+| `pkg/tools/tools.go` | Runtime tool wrappers and ToolBox |
+| `pkg/runner/runner.go` | Command execution, retry, docker, UA/proxy |
+| `pkg/config/config.go` | Per-tool config parameters |
+| `Makefile` | `make setup`, `make tools-check` targets |
 
-## Project model
+## Tool categories (from registry)
 
-Chaathan is a Go CLI that orchestrates many third-party recon tools. The project is not only the Go binary. A correct change must account for:
-
-- whether a tool is installed
-- how it is invoked
-- how config overrides map into arguments
-- how setup/check commands report failures
-
-## Working rules
-
-- Keep installation logic in `pkg/setup/`.
-- Keep runtime invocation and argument construction in `pkg/tools/` or the owning workflow step.
-- Keep user-facing checks in `cli/tools_cmd.go` and setup entrypoints in `cli/setup.go`.
-- When a new tool is added, verify both install-time and run-time paths.
+| Category | Tools |
+|----------|-------|
+| Enum | subfinder, assetfinder, sublist3r, amass |
+| DNS | dnsx, shuffledns, massdns |
+| Probe | httpx, tlsx, naabu |
+| URLs | waybackurls, gau, arjun |
+| Crawl | katana, gospider |
+| Analysis | linkfinder, subdomainizer |
+| Fuzz | ffuf |
+| Vuln | nuclei, subjack, dalfox |
+| Recon | uncover, metabigor, github-subdomains |
+| Cloud | cloud_enum |
+| Util | anew, gf |
 
 ## When adding or changing a tool
 
-1. Identify whether it is a Go tool, Python tool, packaged binary, or special-case dependency.
-2. Add or update installation logic in the correct `pkg/setup/` file.
-3. Update availability checks so `chaathan tools check` reports it correctly.
-4. Update workflow/toolbox code to invoke it with controlled arguments.
-5. Update config structs if the tool exposes user-tunable parameters.
-6. Update README examples only if user-visible setup or workflow behavior changed.
+1. Identify type: Go tool (`go install`), Python tool (pip/clone), compiled binary (from source), or system package.
+2. Add/update install logic in the correct `pkg/setup/` file.
+3. Add/update the entry in `pkg/tools/registry.go` (`AllTools`).
+4. Update `tools check` availability reporting.
+5. Update workflow/toolbox code for runtime invocation.
+6. Update config structs if the tool has user-tunable parameters.
+7. Update README only if user-visible setup or workflow behavior changed.
+
+## Working rules
+
+- Installation logic lives in `pkg/setup/`.
+- Runtime invocation and argument construction live in `pkg/tools/` or the owning workflow step.
+- User-facing checks live in `cli/tools_cmd.go`; setup entry in `cli/setup.go`.
+- `AllTools` in `pkg/tools/registry.go` is the single source of truth for the tool catalogue.
+
+## Failure handling
+
+- Prefer explicit, actionable error messages that identify the missing dependency.
+- Do not assume `sudo` or package-manager behavior beyond what the repo already does.
+- Do not turn optional tool absence into a fatal error unless the workflow requires it.
+- Distinguish between: Go code bug in Chaathan, missing external dependency, and bad upstream install command.
 
 ## Validation
-
-At minimum run:
 
 ```bash
 go test ./...
 go build -buildvcs=false -o chaathan .
 ```
 
-If your environment allows it, also inspect:
-
+If environment allows:
 ```bash
 ./chaathan tools check
 ./chaathan setup --help
 ```
 
-For setup bugs, distinguish clearly between:
+## Avoid
 
-- a Go code bug in Chaathan
-- a missing external dependency on the machine
-- a bad upstream tool install command
-
-## Failure handling
-
-- Prefer explicit, actionable error messages that tell the operator what dependency is missing.
-- Do not make setup code assume `sudo` or package-manager behavior beyond what the repository already does.
-- Avoid turning an optional tool absence into a fatal error unless the workflow truly requires it.
+- Do not scatter install logic outside `pkg/setup/`.
+- Do not modify `AllTools` without checking setup, check, and workflow consumers.
+- Do not make setup code own runtime scan behavior.

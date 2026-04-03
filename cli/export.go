@@ -9,6 +9,7 @@ import (
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
 
@@ -67,8 +68,7 @@ func runExport(cmd *cobra.Command, args []string) {
 	if outputDir == "" {
 		outputDir = scan.ResultDir
 		if outputDir == "" {
-			home, _ := os.UserHomeDir()
-			outputDir = filepath.Join(home, ".chaathan", "exports", fmt.Sprintf("scan_%d", scanID))
+			outputDir = filepath.Join(paths.ChaathanHome(), "exports", fmt.Sprintf("scan_%d", scanID))
 		}
 	}
 

@@ -14,23 +14,8 @@ func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
 	uniqueLines := make(map[string]bool)
 
 	for _, file := range inputFiles {
-		// Skip if file doesn't exist or is empty
-		if _, err := os.Stat(file); os.IsNotExist(err) {
-			continue
-		}
-
-		f, err := os.Open(file)
-		if err != nil {
-			return fmt.Errorf("failed to open %s: %w", file, err)
-		}
-		defer f.Close()
-
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
-				uniqueLines[line] = true
-			}
+		if err := readFileInto(file, uniqueLines); err != nil {
+			return err
 		}
 	}
 
@@ -56,6 +41,30 @@ func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
 		}
 	}
 	return writer.Flush()
+}
+
+// readFileInto reads non-empty lines from a single file into the dest map.
+// The file handle is closed when this function returns, avoiding FD leaks
+// that occur when defer is used inside a loop.
+func readFileInto(path string, dest map[string]bool) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil // missing files are silently skipped
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			dest[line] = true
+		}
+	}
+	return nil
 }
 
 // FileExists checks if a file exists and is not a directory

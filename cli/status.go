@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/scan"
 )
 
@@ -52,27 +52,14 @@ func runStatus(cmd *cobra.Command, args []string) {
 				ageStr = fmt.Sprintf("%.0fm ago", age.Minutes())
 			}
 
-			status := s.Status
-			switch status {
-			case "completed":
-				status = "✅ completed"
-			case "running":
-				status = "🔄 running"
-			case "failed":
-				status = "❌ failed"
-			case "cancelled":
-				status = "⚠️  cancelled"
-			}
 
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", s.ID, s.Target, s.Type, status, ageStr)
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", s.ID, s.Target, s.Type, logger.EmojiStatus(s.Status), ageStr)
 		}
 		w.Flush()
 	}
 
 	// ── Running Scans with Progress ──
-	home, _ := os.UserHomeDir()
-	stateDir := filepath.Join(home, ".chaathan", "state")
-	stateMgr := scan.NewManager(stateDir)
+	stateMgr := scan.NewManager(paths.StateDir())
 
 	states, _ := stateMgr.ListResumableScans()
 	if len(states) > 0 {

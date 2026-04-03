@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/report"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
@@ -58,11 +59,13 @@ func runReportGenerate(cmd *cobra.Command, args []string) {
 	// Determine output path
 	outputPath := reportOutput
 	if outputPath == "" {
-		home, _ := os.UserHomeDir()
-		reportsDir := filepath.Join(home, ".chaathan", "reports")
-		os.MkdirAll(reportsDir, 0755)
+		reportsDir := paths.ReportsDir()
+		if err := os.MkdirAll(reportsDir, 0755); err != nil {
+			logger.Error("Failed to create reports directory: %v", err)
+			return
+		}
 
-		ext := getExtension(reportFormat)
+		ext := report.ExtensionFor(reportFormat)
 		timestamp := time.Now().Format("20060102_150405")
 		outputPath = filepath.Join(reportsDir, fmt.Sprintf("scan_%d_%s%s", scanID, timestamp, ext))
 	}
@@ -78,19 +81,4 @@ func runReportGenerate(cmd *cobra.Command, args []string) {
 
 	// Print quick summary
 	logger.Info("\nSummary: %s", rpt.QuickSummary())
-}
-
-func getExtension(format string) string {
-	switch format {
-	case "markdown":
-		return ".md"
-	case "json":
-		return ".json"
-	case "html":
-		return ".html"
-	case "text":
-		return ".txt"
-	default:
-		return ".md"
-	}
 }

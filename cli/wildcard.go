@@ -36,6 +36,8 @@ var (
 	githubToken       string
 	resumeScanID      int64
 	generateReport    bool
+	proxyURL          string
+	rateLimitRPS      int
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -104,6 +106,8 @@ func init() {
 	wildcardCmd.Flags().StringVar(&githubToken, "github-token", "", "GitHub token for GitHub recon (or use GITHUB_TOKEN env)")
 	wildcardCmd.Flags().Int64Var(&resumeScanID, "resume", 0, "Resume a previous scan by ID")
 	wildcardCmd.Flags().BoolVar(&generateReport, "report", true, "Generate report after scan")
+	wildcardCmd.Flags().StringVar(&proxyURL, "proxy", "", "Proxy URL for target-facing tools (e.g., socks5://127.0.0.1:9050)")
+	wildcardCmd.Flags().IntVar(&rateLimitRPS, "rate-limit", 0, "Global rate limit (requests/sec) for all tools (0 = per-tool defaults)")
 	wildcardCmd.MarkFlagRequired("domain")
 	rootCmd.AddCommand(wildcardCmd)
 }
@@ -138,6 +142,14 @@ func runWildcard(cmd *cobra.Command, args []string) {
 
 	// Forward Ctrl+C / 's'-key to wildcard_flow.Run() which owns signal
 	// handling and stdin listener internally.
+
+	// CLI --proxy and --rate-limit override config file values
+	if proxyURL != "" && Cfg != nil {
+		Cfg.General.Proxy = proxyURL
+	}
+	if rateLimitRPS > 0 && Cfg != nil {
+		Cfg.RateLimits.GlobalRPS = rateLimitRPS
+	}
 
 	// Build configuration and delegate to the wildcard_flow package
 	cfg := wf.RunConfig{

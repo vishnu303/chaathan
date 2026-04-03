@@ -13,16 +13,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/config"
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/notify"
+	"github.com/vishnu303/chaathan-flow/pkg/orchestrate"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/runner"
+	"github.com/vishnu303/chaathan-flow/pkg/scan"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
@@ -61,11 +62,16 @@ type Ctx struct {
 	R  runner.Runner
 	Tb *tools.ToolBox
 
+	// State tracking (F18)
+	StateMgr *scan.Manager
+	State    *scan.State
+
 	// Notifications
 	Notifier           *notify.Notifier
 	NotifyStepComplete bool
 
-	// Step counters (updated by each step)
+	// Step counters (updated by each step, kept for backward compat
+	// with step functions that increment c.Completed/c.Failed)
 	Total     int
 	Completed int
 	Failed    int
@@ -96,18 +102,7 @@ func Run(cfg RunConfig) error {
 	goCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle Ctrl+C / SIGTERM
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigChan:
-			logger.Warning("Received interrupt signal. Stopping...")
-			cancel()
-		case <-goCtx.Done():
-		}
-		signal.Stop(sigChan)
-	}()
+	orchestrate.HandleSignals(goCtx, cancel)
 
 	// ── Database record ──────────────────────────────────────
 	configJSON, _ := json.Marshal(map[string]interface{}{
@@ -126,49 +121,34 @@ func Run(cfg RunConfig) error {
 		scanID = dbScan.ID
 	}
 
-	// ── Scan header ──────────────────────────────────────────
+	// ── Scan header & state ──────────────────────────────────
 	logger.ScanHeader("Company", cfg.Company, scanID)
-	logger.InitScanUI(3)
+	logger.InitScanUI(len(scan.CompanySteps))
 
-	// ── Runner & ToolBox ─────────────────────────────────────
-	var r runner.Runner
-	if cfg.Cfg != nil && cfg.Cfg.General.MaxRetries > 0 {
-		delay := time.Duration(cfg.Cfg.General.RetryDelaySec) * time.Second
-		if delay == 0 {
-			delay = 3 * time.Second
-		}
-		r = runner.NewWithRetry(cfg.Mode, cfg.Verbose, cfg.Cfg.General.MaxRetries, delay)
-	} else {
-		r = runner.NewWithRetry(cfg.Mode, cfg.Verbose, 1, 3*time.Second)
-	}
+	stateMgr := scan.NewManager(paths.StateDir())
+	scanState, _ := stateMgr.CreateState(scanID, cfg.Company, "company", cfg.ResultDir, len(scan.CompanySteps), configJSON)
 
-	var toolsCfg *config.ToolsConfig
-	if cfg.Cfg != nil {
-		toolsCfg = &cfg.Cfg.Tools
-	}
-	tb := tools.New(r, toolsCfg)
-
-	var notifier *notify.Notifier
-	if cfg.Cfg != nil && cfg.Cfg.Notifications.Enabled {
-		notifier = notify.New(&cfg.Cfg.Notifications)
-	}
+	// ── Runner, ToolBox & Notifier ──────────────────────────
+	infra := orchestrate.NewInfra(cfg.Mode, cfg.Verbose, cfg.Cfg)
 
 	// ── Build shared Ctx ─────────────────────────────────────
 	c := &Ctx{
-		GoCtx:          goCtx,
-		Cancel:         cancel,
-		ScanID:         scanID,
-		Company:        cfg.Company,
-		ResultDir:      cfg.ResultDir,
-		StartTime:      startTime,
-		R:              r,
-		Tb:             tb,
-		Notifier:       notifier,
+		GoCtx:              goCtx,
+		Cancel:             cancel,
+		ScanID:             scanID,
+		Company:            cfg.Company,
+		ResultDir:          cfg.ResultDir,
+		StartTime:          startTime,
+		R:                  infra.Runner,
+		Tb:                 infra.ToolBox,
+		StateMgr:           stateMgr,
+		State:              scanState,
+		Notifier:           infra.Notifier,
 		NotifyStepComplete: cfg.Cfg != nil && cfg.Cfg.Notifications.StepComplete,
-		SkipMetabigor:  cfg.SkipMetabigor,
-		SkipAmassIntel: cfg.SkipAmassIntel,
-		SkipCloudEnum:  cfg.SkipCloudEnum,
-		Cfg:            cfg.Cfg,
+		SkipMetabigor:      cfg.SkipMetabigor,
+		SkipAmassIntel:     cfg.SkipAmassIntel,
+		SkipCloudEnum:      cfg.SkipCloudEnum,
+		Cfg:                cfg.Cfg,
 	}
 
 	// ── Execute steps ────────────────────────────────────────
@@ -193,9 +173,21 @@ func Run(cfg RunConfig) error {
 func executeStep(c *Ctx, stepNumber int, stepName, stepDescription string, fn func(*Ctx) bool) bool {
 	completedBefore := c.Completed
 	cancelled := fn(c)
+
+	// Track state for dashboard display (F18)
 	if c.Completed > completedBefore {
+		// Step succeeded — mark in scan state
+		if c.State != nil && c.StateMgr != nil {
+			c.StateMgr.MarkStepComplete(c.State, stepName)
+		}
 		notifyStepCompletion(c, stepNumber, stepName, stepDescription)
+	} else if c.Failed > (c.Total - c.Completed - 1) {
+		// Step failed — mark in scan state
+		if c.State != nil && c.StateMgr != nil {
+			c.StateMgr.MarkStepFailed(c.State, stepName, fmt.Errorf("step failed"))
+		}
 	}
+
 	return cancelled
 }
 
@@ -211,7 +203,7 @@ func notifyStepCompletion(c *Ctx, stepNumber int, stepName, stepDescription stri
 		StepName:        stepName,
 		StepDescription: stepDescription,
 		StepNumber:      stepNumber,
-		TotalSteps:      3,
+		TotalSteps:      len(scan.CompanySteps),
 		Duration:        time.Since(c.StartTime),
 		FindingsCount:   countFindingsForStep(c, stepName),
 		Timestamp:       time.Now(),
@@ -252,6 +244,11 @@ func finalizeScan(c *Ctx, status string) {
 
 	if c.ScanID > 0 {
 		database.UpdateScanStatus(c.ScanID, status)
+	}
+
+	// Clean up state file on completion
+	if status == "completed" && c.State != nil && c.StateMgr != nil {
+		c.StateMgr.DeleteState(c.ScanID)
 	}
 
 	// Build stats map

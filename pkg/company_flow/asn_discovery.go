@@ -20,7 +20,7 @@ func stepMetabigor(c *Ctx) bool {
 	c.Total++
 
 	if !c.SkipMetabigor {
-		logger.Section("Step 1: ASN & Network Range Discovery (Metabigor)")
+		logger.StepHeader("Step 1: ASN & Network Range Discovery (Metabigor)")
 		asnOut := filepath.Join(c.ResultDir, "asn_ranges.txt")
 		logger.SubStep("Running Metabigor for org: %s", c.Company)
 
@@ -33,7 +33,7 @@ func stepMetabigor(c *Ctx) bool {
 			c.Completed++
 		}
 	} else {
-		logger.Section("Step 1: Skipping Metabigor (--skip-metabigor)")
+		logger.StepHeader("Step 1: Skipping Metabigor (--skip-metabigor)")
 		c.Completed++
 	}
 

@@ -29,10 +29,17 @@ type RunConfig struct {
 	ForceUpdate bool // reinstall all tools even if already present
 }
 
-// verbose and forceUpdate are set once at the top of Run() and used by
-// each section installer.
-var verbose bool
-var forceUpdate bool
+// opts holds the active setup configuration. It is set once at the top of
+// Run() and accessed by each section installer via the accessor helpers
+// below. Using a struct (instead of two bare package vars) makes the
+// non-reentrant, set-once nature explicit.
+var opts RunConfig
+
+// isVerbose returns true when verbose logging is enabled for this setup run.
+func isVerbose() bool { return opts.Verbose }
+
+// isForceUpdate returns true when tools should be reinstalled even if present.
+func isForceUpdate() bool { return opts.ForceUpdate }
 
 // ─────────────────────────────────────────────────────────────
 // Run — main entry point (called by cli/setup.go)
@@ -40,12 +47,11 @@ var forceUpdate bool
 
 // Run executes the complete chaathan setup workflow.
 func Run(cfg RunConfig) {
-	verbose = cfg.Verbose
-	forceUpdate = cfg.ForceUpdate
+	opts = cfg
 	start := time.Now()
 
 	title := "🔧 Chaathan Setup"
-	if forceUpdate {
+	if isForceUpdate() {
 		title = "🔄 Chaathan Setup (update mode — reinstalling all tools)"
 	}
 	progress.Header(title)

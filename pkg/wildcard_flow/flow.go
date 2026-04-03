@@ -12,17 +12,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/config"
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/notify"
+	"github.com/vishnu303/chaathan-flow/pkg/orchestrate"
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/report"
-	"github.com/vishnu303/chaathan-flow/pkg/runner"
 	"github.com/vishnu303/chaathan-flow/pkg/scan"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
@@ -175,13 +174,18 @@ func newFiles(dir string) Files {
 
 // Ctx is the shared execution context for the entire scan workflow.
 // Every step function receives a *Ctx instead of a long parameter list.
+//
+// RunConfig is embedded so that all CLI-supplied options (skip flags,
+// paths, tokens, etc.) are accessible directly via c.FieldName.
+// Adding a new option to RunConfig automatically makes it available
+// to every step function — no manual copy block needed.
 type Ctx struct {
+	RunConfig // embedded — carries all CLI options
+
 	GoCtx     context.Context
 	Cancel    context.CancelFunc
 	SkipChan  chan struct{}
 	ScanID    int64
-	Domain    string
-	ResultDir string
 	StartTime time.Time
 
 	// Tools & infrastructure
@@ -193,25 +197,11 @@ type Ctx struct {
 	// All file paths
 	F Files
 
-	// Option flags (mirrors RunConfig)
-	SkipAmass         bool
-	SkipNuclei        bool
-	SkipNaabu         bool
-	SkipCrawl         bool
-	SkipSubjack       bool
-	SkipDalfox        bool
-	SkipUncover       bool
-	SkipTlsx          bool
-	SkipArjun         bool
-	SkipShuffleDNS    bool
-	SkipSubdomainizer bool
-	WordlistPath      string
-	DNSWordlistPath   string
-	ResolversPath     string
-	GitHubToken       string
-	Verbose           bool
-	GenerateReport    bool
+	// Notifications
 	NotifyStepComplete bool
+
+	// WAF evasion
+	Proxy string // proxy URL for collector.go (from config or CLI override)
 }
 
 // cancelled returns true when the parent context has been cancelled.
@@ -247,19 +237,7 @@ func Run(cfg RunConfig) error {
 
 	skipChan := make(chan struct{}, 1)
 
-	// Handle Ctrl+C / SIGTERM — cancel the workflow context
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigChan:
-			logger.Warning("Received interrupt signal. Stopping...")
-			cancel()
-		case <-goCtx.Done():
-			// context already cancelled (e.g. resume error path)
-		}
-		signal.Stop(sigChan)
-	}()
+	orchestrate.HandleSignals(goCtx, cancel)
 
 	// Listen for 's'/'S' on stdin — skip the currently running tool
 	go func() {
@@ -311,9 +289,7 @@ func Run(cfg RunConfig) error {
 	logger.ScanHeader("Wildcard", cfg.Domain, scanID)
 	logger.InitScanUI(len(scan.WildcardSteps))
 
-	home, _ := os.UserHomeDir()
-	stateDir := filepath.Join(home, ".chaathan", "state")
-	stateMgr := scan.NewManager(stateDir)
+	stateMgr := scan.NewManager(paths.StateDir())
 
 	var scanState *scan.State
 	if cfg.ResumeScanID > 0 {
@@ -329,32 +305,8 @@ func Run(cfg RunConfig) error {
 		scanState, _ = stateMgr.CreateState(scanID, cfg.Domain, "wildcard", cfg.ResultDir, len(scan.WildcardSteps), configJSON)
 	}
 
-	// ── Runner & ToolBox ─────────────────────────────────────
-	var r runner.Runner
-	if cfg.Cfg != nil && cfg.Cfg.General.MaxRetries > 0 {
-		delay := time.Duration(cfg.Cfg.General.RetryDelaySec) * time.Second
-		if delay == 0 {
-			delay = 3 * time.Second
-		}
-		r = runner.NewWithRetry(cfg.Mode, cfg.Verbose, cfg.Cfg.General.MaxRetries, delay)
-	} else {
-		r = runner.NewWithRetry(cfg.Mode, cfg.Verbose, 1, 3*time.Second)
-	}
-
-	var toolsCfg *config.ToolsConfig
-	if cfg.Cfg != nil {
-		toolsCfg = &cfg.Cfg.Tools
-	}
-	tb := tools.New(r, toolsCfg)
-	if cfg.Cfg != nil {
-		tb.WithAPIKeys(&cfg.Cfg.APIKeys)
-	}
-
-	// ── Notifier ─────────────────────────────────────────────
-	var notifier *notify.Notifier
-	if cfg.Cfg != nil && cfg.Cfg.Notifications.Enabled {
-		notifier = notify.New(&cfg.Cfg.Notifications)
-	}
+	// ── Runner, ToolBox & Notifier ──────────────────────────
+	infra := orchestrate.NewInfra(cfg.Mode, cfg.Verbose, cfg.Cfg)
 
 	// ── Ensure output subdirectories exist ───────────────────
 	if err := os.MkdirAll(filepath.Join(cfg.ResultDir, "intermediate_files"), 0755); err != nil {
@@ -366,142 +318,72 @@ func Run(cfg RunConfig) error {
 
 	// ── Build shared Ctx ─────────────────────────────────────
 	c := &Ctx{
-		GoCtx:             goCtx,
-		Cancel:            cancel,
-		SkipChan:          skipChan,
-		ScanID:            scanID,
-		Domain:            cfg.Domain,
-		ResultDir:         cfg.ResultDir,
-		StartTime:         startTime,
-		Tb:                tb,
-		StateMgr:          stateMgr,
-		State:             scanState,
-		Notifier:          notifier,
-		F:                 newFiles(cfg.ResultDir),
-		SkipAmass:         cfg.SkipAmass,
-		SkipNuclei:        cfg.SkipNuclei,
-		SkipNaabu:         cfg.SkipNaabu,
-		SkipCrawl:         cfg.SkipCrawl,
-		SkipSubjack:       cfg.SkipSubjack,
-		SkipDalfox:        cfg.SkipDalfox,
-		SkipUncover:       cfg.SkipUncover,
-		SkipTlsx:          cfg.SkipTlsx,
-		SkipArjun:         cfg.SkipArjun,
-		SkipShuffleDNS:    cfg.SkipShuffleDNS,
-		SkipSubdomainizer: cfg.SkipSubdomainizer,
-		WordlistPath:      cfg.WordlistPath,
-		DNSWordlistPath:   cfg.DNSWordlistPath,
-		ResolversPath:     cfg.ResolversPath,
-		GitHubToken:       cfg.GitHubToken,
-		Verbose:           cfg.Verbose,
-		GenerateReport:    cfg.GenerateReport,
+		RunConfig:          cfg,
+		GoCtx:              goCtx,
+		Cancel:             cancel,
+		SkipChan:           skipChan,
+		ScanID:             scanID,
+		StartTime:          startTime,
+		Tb:                 infra.ToolBox,
+		StateMgr:           stateMgr,
+		State:              scanState,
+		Notifier:           infra.Notifier,
+		F:                  newFiles(cfg.ResultDir),
 		NotifyStepComplete: cfg.Cfg != nil && cfg.Cfg.Notifications.StepComplete,
+	}
+
+	// Wire proxy from config
+	if cfg.Cfg != nil && cfg.Cfg.General.Proxy != "" {
+		c.Proxy = cfg.Cfg.General.Proxy
 	}
 
 	logger.Info("💡 Press 's' at any time to skip the current tool")
 	logger.Info("Mode: %s", cfg.Mode)
 
-	// ── Execute all steps ────────────────────────────────────
+	// ── Step registry ───────────────────────────────────────
+	// Each entry maps a scan.WildcardSteps name to its implementation.
+	// Order must match scan.WildcardSteps (the source of truth for
+	// step names, descriptions, and resume/progress tracking).
+	steps := []struct {
+		name string
+		fn   func(*Ctx) bool
+	}{
+		// Phase 1 — Asset Discovery (Steps 1–5)
+		{"passive_enum", stepPassiveEnum},
+		{"active_enum", stepActiveEnum},
+		{"github_recon", stepGitHubRecon},
+		{"search_engine_recon", stepSearchEngineRecon},
+		{"js_subdomain_discovery", stepJSSubdomains},
 
-	// ── Phase 1: Asset Discovery (Steps 1–5) ──────────────────────
-	if executeStep(c, "passive_enum", stepPassiveEnum) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "active_enum", stepActiveEnum) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "github_recon", stepGitHubRecon) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "search_engine_recon", stepSearchEngineRecon) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "js_subdomain_discovery", stepJSSubdomains) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
+		// Phase 2 — Validation & Probing (Steps 6–10)
+		{"dns_resolution", stepDNSConsolidation},
+		{"dns_bruteforce", stepDNSBruteforce},
+		{"http_probing", stepHTTPProbing},
+		{"tls_analysis", stepTLSAnalysis},
+		{"port_scanning", stepPortScanning},
 
-	// ── Phase 2: Validation & Probing (Steps 6–10) ──────────────────
-	if executeStep(c, "dns_resolution", stepDNSConsolidation) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "dns_bruteforce", stepDNSBruteforce) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "http_probing", stepHTTPProbing) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "tls_analysis", stepTLSAnalysis) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "port_scanning", stepPortScanning) {
-		finalizeScan(c, "cancelled")
-		return nil
+		// Phase 3 — Content Discovery (Steps 11–17)
+		{"url_discovery", stepURLDiscovery},
+		{"web_crawling", stepWebCrawling},
+		{"js_analysis", stepJSAnalysis},
+		{"param_discovery", stepParamDiscovery},
+		{"url_consolidation", stepURLConsolidation},
+		{"js_secret_scan", stepJSSecretScan},
+		{"dir_fuzzing", stepDirFuzzing},
+
+		// Phase 4 — Vulnerability Scanning (Steps 18–21)
+		{"vuln_scanning", stepVulnScanningInfra},
+		{"vuln_scanning_urls", stepVulnScanningURLs},
+		{"takeover_detection", stepTakeoverDetection},
+		{"xss_scanning", stepXSSScanning},
 	}
 
-	// ── Phase 3: Content Discovery (Steps 11–17) ─────────────────
-	// Step 10: Historical URL Discovery (Wayback/GAU) — runs here so URLs
-	// are collected only for validated live hosts, not dead subdomains.
-	if executeStep(c, "url_discovery", stepURLDiscovery) {
-		finalizeScan(c, "cancelled")
-		return nil
+	for _, step := range steps {
+		if executeStep(c, step.name, step.fn) {
+			finalizeScan(c, "cancelled")
+			return nil
+		}
 	}
-	if executeStep(c, "web_crawling", stepWebCrawling) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "js_analysis", stepJSAnalysis) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-
-	if executeStep(c, "param_discovery", stepParamDiscovery) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "url_consolidation", stepURLConsolidation) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-
-	// ── Phase 3 (cont.) Step 16: JS Secret Scan ─────────────────
-	if executeStep(c, "js_secret_scan", stepJSSecretScan) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-
-	// ── Phase 3 (cont.) Step 17: Directory Fuzzing ──────────────
-	if executeStep(c, "dir_fuzzing", stepDirFuzzing) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-
-	// ── Phase 4: Vulnerability Scanning (Steps 18–21) ──────────
-	if executeStep(c, "vuln_scanning", stepVulnScanningInfra) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-	if executeStep(c, "vuln_scanning_urls", stepVulnScanningURLs) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-
-	// ── Phase 4 (cont.) Steps 20–21 ───────────────────────────
-	if executeStep(c, "takeover_detection", stepTakeoverDetection) {
-		finalizeScan(c, "cancelled")
-		return nil
-	}
-
-	// ── Phase 4 Step 21: XSS Scanning ──────────────────────────
-	executeStep(c, "xss_scanning", stepXSSScanning)
 
 	finalizeScan(c, "completed")
 	return nil
@@ -672,8 +554,7 @@ func finalizeScan(c *Ctx, status string) {
 			logger.Info("\nGenerating report...")
 			rpt, err := report.Generate(c.ScanID)
 			if err == nil {
-				home, _ := os.UserHomeDir()
-				reportPath := filepath.Join(home, ".chaathan", "reports", fmt.Sprintf("scan_%d.md", c.ScanID))
+				reportPath := filepath.Join(paths.ReportsDir(), fmt.Sprintf("scan_%d.md", c.ScanID))
 				if err := rpt.Export(report.FormatMarkdown, reportPath); err == nil {
 					logger.Success("Report saved: %s", reportPath)
 				}

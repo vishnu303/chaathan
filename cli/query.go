@@ -131,7 +131,11 @@ func runQuerySubdomains(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, _ := json.MarshalIndent(subs, "", "  ")
+		data, err := json.MarshalIndent(subs, "", "  ")
+		if err != nil {
+			logger.Error("Failed to marshal JSON: %v", err)
+			return
+		}
 		fmt.Println(string(data))
 		return
 	}
@@ -169,7 +173,11 @@ func runQueryPorts(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, _ := json.MarshalIndent(ports, "", "  ")
+		data, err := json.MarshalIndent(ports, "", "  ")
+		if err != nil {
+			logger.Error("Failed to marshal JSON: %v", err)
+			return
+		}
 		fmt.Println(string(data))
 		return
 	}
@@ -210,7 +218,11 @@ func runQueryVulns(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, _ := json.MarshalIndent(vulns, "", "  ")
+		data, err := json.MarshalIndent(vulns, "", "  ")
+		if err != nil {
+			logger.Error("Failed to marshal JSON: %v", err)
+			return
+		}
 		fmt.Println(string(data))
 		return
 	}
@@ -256,7 +268,11 @@ func runQueryUrls(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, _ := json.MarshalIndent(urls, "", "  ")
+		data, err := json.MarshalIndent(urls, "", "  ")
+		if err != nil {
+			logger.Error("Failed to marshal JSON: %v", err)
+			return
+		}
 		fmt.Println(string(data))
 		return
 	}
@@ -294,7 +310,11 @@ func runQueryEndpoints(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, _ := json.MarshalIndent(endpoints, "", "  ")
+		data, err := json.MarshalIndent(endpoints, "", "  ")
+		if err != nil {
+			logger.Error("Failed to marshal JSON: %v", err)
+			return
+		}
 		fmt.Println(string(data))
 		return
 	}
@@ -369,7 +389,11 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, _ := json.MarshalIndent(targets, "", "  ")
+		data, err := json.MarshalIndent(targets, "", "  ")
+		if err != nil {
+			logger.Error("Failed to marshal JSON: %v", err)
+			return
+		}
 		if queryOutputFile != "" {
 			if err := os.WriteFile(queryOutputFile, data, 0644); err != nil {
 				logger.Error("Failed to write ROI output: %v", err)

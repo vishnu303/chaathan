@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/progress"
 )
 
@@ -33,8 +34,7 @@ var (
 // ─────────────────────────────────────────────────────────────
 
 func initSetupLog() {
-	home, _ := os.UserHomeDir()
-	logDir := filepath.Join(home, ".chaathan", "logs")
+	logDir := filepath.Join(paths.ChaathanHome(), "logs")
 	os.MkdirAll(logDir, 0755)
 
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
@@ -72,7 +72,7 @@ func writeSetupLog(format string, args ...interface{}) {
 func captureCommandOutput(cmd *exec.Cmd, toolName string) error {
 	var stdout, stderr bytes.Buffer
 
-	if verbose {
+	if isVerbose() {
 		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
 		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	} else {

@@ -2,13 +2,15 @@ package cli
 
 import (
 	"fmt"
-	"github.com/vishnu303/chaathan-flow/pkg/config"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/vishnu303/chaathan-flow/pkg/config"
+	"github.com/vishnu303/chaathan-flow/pkg/logger"
 )
 
 var configCmd = &cobra.Command{
@@ -155,6 +157,45 @@ func runConfigPath(cmd *cobra.Command, args []string) {
 	fmt.Println(config.GetDefaultConfigPath())
 }
 
+// ─────────────────────────────────────────────────────────────
+// Config key registry (F17)
+//
+// Each entry maps a dot-separated key to a setter function.
+// Adding a new key requires only adding one line here — the help
+// text and validation are auto-generated from the map keys.
+// ─────────────────────────────────────────────────────────────
+
+type configSetter func(cfg *config.Config, value string)
+
+var configKeys = map[string]configSetter{
+	// API keys
+	"api_keys.github":         func(c *config.Config, v string) { c.APIKeys.GitHub = v },
+	"api_keys.shodan":         func(c *config.Config, v string) { c.APIKeys.Shodan = v },
+	"api_keys.securitytrails": func(c *config.Config, v string) { c.APIKeys.SecurityTrails = v },
+	"api_keys.virustotal":     func(c *config.Config, v string) { c.APIKeys.VirusTotal = v },
+	"api_keys.chaos":          func(c *config.Config, v string) { c.APIKeys.Chaos = v },
+
+	// General
+	"general.verbose":    func(c *config.Config, v string) { c.General.Verbose = v == "true" },
+	"general.mode":       func(c *config.Config, v string) { c.General.Mode = v },
+	"general.output_dir": func(c *config.Config, v string) { c.General.OutputDir = v },
+
+	// Notifications
+	"notifications.discord_webhook": func(c *config.Config, v string) {
+		c.Notifications.DiscordWebhook = v
+		c.Notifications.Enabled = true
+	},
+	"notifications.slack_webhook": func(c *config.Config, v string) {
+		c.Notifications.SlackWebhook = v
+		c.Notifications.Enabled = true
+	},
+	"notifications.telegram_bot_token": func(c *config.Config, v string) { c.Notifications.TelegramBotToken = v },
+	"notifications.telegram_chat_id":   func(c *config.Config, v string) { c.Notifications.TelegramChatID = v },
+	"notifications.enabled":            func(c *config.Config, v string) { c.Notifications.Enabled = v == "true" },
+	"notifications.step_complete":      func(c *config.Config, v string) { c.Notifications.StepComplete = v == "true" },
+	"notifications.min_severity":       func(c *config.Config, v string) { c.Notifications.MinSeverity = v },
+}
+
 func runConfigSet(cmd *cobra.Command, args []string) {
 	key := args[0]
 	value := args[1]
@@ -168,51 +209,28 @@ func runConfigSet(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Set value based on key
-	switch key {
-	case "api_keys.github":
-		cfg.APIKeys.GitHub = value
-	case "api_keys.shodan":
-		cfg.APIKeys.Shodan = value
-	case "api_keys.securitytrails":
-		cfg.APIKeys.SecurityTrails = value
-	case "api_keys.virustotal":
-		cfg.APIKeys.VirusTotal = value
-	case "api_keys.chaos":
-		cfg.APIKeys.Chaos = value
-	case "general.verbose":
-		cfg.General.Verbose = value == "true"
-	case "general.mode":
-		cfg.General.Mode = value
-	case "general.output_dir":
-		cfg.General.OutputDir = value
-	case "notifications.discord_webhook":
-		cfg.Notifications.DiscordWebhook = value
-		cfg.Notifications.Enabled = true
-	case "notifications.slack_webhook":
-		cfg.Notifications.SlackWebhook = value
-		cfg.Notifications.Enabled = true
-	case "notifications.telegram_bot_token":
-		cfg.Notifications.TelegramBotToken = value
-	case "notifications.telegram_chat_id":
-		cfg.Notifications.TelegramChatID = value
-	case "notifications.enabled":
-		cfg.Notifications.Enabled = value == "true"
-	case "notifications.step_complete":
-		cfg.Notifications.StepComplete = value == "true"
-	case "notifications.min_severity":
-		cfg.Notifications.MinSeverity = value
-	default:
+	// Look up setter in registry
+	setter, ok := configKeys[key]
+	if !ok {
 		logger.Error("Unknown config key: %s", key)
 		logger.Info("Available keys:")
-		logger.Info("  api_keys.github, api_keys.shodan, api_keys.securitytrails")
-		logger.Info("  api_keys.virustotal, api_keys.chaos")
-		logger.Info("  general.verbose, general.mode, general.output_dir")
-		logger.Info("  notifications.discord_webhook, notifications.slack_webhook")
-		logger.Info("  notifications.telegram_bot_token, notifications.telegram_chat_id")
-		logger.Info("  notifications.enabled, notifications.step_complete, notifications.min_severity")
+
+		// Group keys by prefix for pretty display
+		groups := map[string][]string{}
+		for k := range configKeys {
+			prefix := strings.SplitN(k, ".", 2)[0]
+			groups[prefix] = append(groups[prefix], k)
+		}
+		for prefix, keys := range groups {
+			logger.Info("  [%s]", prefix)
+			for _, k := range keys {
+				logger.Info("    %s", k)
+			}
+		}
 		return
 	}
+
+	setter(cfg, value)
 
 	// Save config
 	if err := config.Save(cfg, cfgPath); err != nil {
@@ -225,12 +243,9 @@ func runConfigSet(cmd *cobra.Command, args []string) {
 
 func maskSecret(key, value string) string {
 	// Mask sensitive values
-	if len(value) > 8 && (contains(key, "token") || contains(key, "key") || contains(key, "secret") || contains(key, "webhook")) {
+	if len(value) > 8 && (strings.Contains(key, "token") || strings.Contains(key, "key") || strings.Contains(key, "secret") || strings.Contains(key, "webhook")) {
 		return value[:4] + "****" + value[len(value)-4:]
 	}
 	return value
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (s[0:len(substr)] == substr || contains(s[1:], substr)))
-}
