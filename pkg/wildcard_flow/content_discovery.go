@@ -231,6 +231,7 @@ func stepJSAnalysis(c *Ctx) bool {
 func stepParamDiscovery(c *Ctx) bool {
 	if c.State.IsStepCompleted("param_discovery") {
 		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun) [RESUMED — skipping]")
+		return c.cancelled()
 	} else if !c.SkipArjun {
 		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
 		logger.SubStep("Running Arjun on https://%s...", c.Domain)
@@ -238,9 +239,13 @@ func stepParamDiscovery(c *Ctx) bool {
 		if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
 			return c.Tb.RunArjun(sCtx, "https://"+c.Domain, c.F.ArjunOut)
 		}); err != nil {
-			if err != ErrToolSkipped {
+			if err == ErrToolSkipped {
+				// User-skipped counts as intentional — mark complete so resume skips it too.
+				c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+			} else {
 				c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
 				logger.Warning("Arjun failed: %v", err)
+				// Do NOT fall through to MarkStepComplete — failure must persist for resume.
 			}
 		} else {
 			logger.SubStep("[Done] Arjun parameter discovery")
@@ -254,11 +259,12 @@ func stepParamDiscovery(c *Ctx) bool {
 					logger.Info("  Stored Arjun param counts for %d URLs", stored)
 				}
 			}
+			c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		}
 	} else {
 		logger.StepHeader("Step 14: Skipping Arjun (--skip-arjun)")
+		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 	}
-	c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 	return c.cancelled()
 }
 
@@ -303,6 +309,16 @@ func stepURLConsolidation(c *Ctx) bool {
 	} else {
 		liveCount, _ := utils.CountFileLines(c.F.AllURLsLive)
 		logger.Success("  %d live URLs confirmed", liveCount)
+	}
+
+	// Persist live URLs into DB so GetScanStats / query commands reflect reality.
+	// This is intentionally after the skip/fallback block so both paths populate the DB.
+	if c.ScanID > 0 && utils.FileExists(c.F.AllURLsLive) {
+		if dbCount, err := utils.ParseLiveURLsFile(c.ScanID, c.F.AllURLsLive, "httpx-url-check"); err != nil {
+			logger.Warning("Failed to persist live URLs to DB: %v", err)
+		} else if dbCount > 0 {
+			logger.Info("  Stored %d live URLs in database", dbCount)
+		}
 	}
 
 	// ROI metadata enrichment

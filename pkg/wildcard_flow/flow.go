@@ -250,7 +250,8 @@ func Run(cfg RunConfig) error {
 			if buf[0] == 's' || buf[0] == 'S' {
 				select {
 				case skipChan <- struct{}{}:
-					logger.Warning("⏭ Skip requested — skipping current tool...")
+					// "Skip requested" is logged by runWithSkip when it receives
+					// the signal, ensuring correct message ordering.
 				default:
 					// already a skip pending; ignore
 				}

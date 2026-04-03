@@ -12,6 +12,8 @@ package wildcard_flow
 
 import (
 	"context"
+	neturl "net/url"
+	"strings"
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
@@ -192,8 +194,14 @@ func stepTLSAnalysis(c *Ctx) bool {
 				logger.Info("  Stored metadata for %d live hosts", count)
 				// Ensure these hosts are marked live in the subdomains table,
 				// even if httpx was skipped and ParseHttpxOutput never ran.
+				// hostTargets contains full URLs (e.g. https://host); extract the
+				// plain hostname so the UPDATE matches the domain column correctly.
 				for _, h := range hostTargets {
-					database.UpdateSubdomainLive(c.ScanID, h, true, "")
+					host := h
+					if parsed, err := neturl.Parse(h); err == nil && parsed.Hostname() != "" {
+						host = strings.ToLower(parsed.Hostname())
+					}
+					database.UpdateSubdomainLive(c.ScanID, host, true, "")
 				}
 			}
 		}
