@@ -391,67 +391,106 @@ func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
 
 // Telegram notification
 func (n *Notifier) sendTelegram(finding Finding) error {
-	emoji := getSeverityEmoji(finding.Severity)
+	header := getSeverityEmoji(finding.Severity)
+	sev := strings.ToUpper(finding.Severity)
 
-	text := fmt.Sprintf(`%s *[%s] %s*
-
-*Target:* %s
-*Type:* %s`,
-		emoji,
-		strings.ToUpper(finding.Severity),
-		escapeMarkdown(finding.Name),
+	text := fmt.Sprintf(
+		"%s *%s Finding*\n\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"⚡ *\\[%s\\] %s*\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"🎯 *Target*    %s\n"+
+			"🔖 *Type*    %s",
+		header, escapeMarkdown(sev),
+		sev, escapeMarkdown(finding.Name),
 		escapeMarkdown(finding.Target),
 		escapeMarkdown(finding.Type),
 	)
 
 	if finding.Description != "" {
-		text += fmt.Sprintf("\n*Description:* %s", escapeMarkdown(finding.Description))
+		text += fmt.Sprintf("\n📝 *Details*    %s", escapeMarkdown(finding.Description))
 	}
 
 	if finding.URL != "" {
-		text += fmt.Sprintf("\n*URL:* %s", finding.URL)
+		text += fmt.Sprintf("\n🔗 *URL*    %s", escapeMarkdown(finding.URL))
 	}
+
+	if finding.TemplateID != "" {
+		text += fmt.Sprintf("\n🗂 *Template*    %s", escapeMarkdown(finding.TemplateID))
+	}
+
+	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
 
 	return n.sendTelegramMessage(text)
 }
 
 func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
-	text := fmt.Sprintf(`✅ *Scan Completed*
-
-*Target:* %s
-*Scan ID:* %d
-*Duration:* %s`,
+	text := fmt.Sprintf(
+		"🏁 *Scan Completed*\n\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"🎯 *Target*    %s\n"+
+			"🔢 *Scan ID*    %d\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"📊 *Results*\n",
 		escapeMarkdown(scan.Target),
 		scan.ScanID,
-		scan.Duration.String(),
 	)
 
-	for k, v := range scan.Stats {
-		text += fmt.Sprintf("\n*%s:* %d", k, v)
+	// Display stats with per-metric emojis in a preferred order
+	orderedKeys := []string{"subdomains", "live", "urls", "endpoints", "ports", "vulnerabilities"}
+	printed := make(map[string]bool)
+	for _, k := range orderedKeys {
+		if v, ok := scan.Stats[k]; ok {
+			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(strings.Title(k)), v)
+			printed[k] = true
+		}
 	}
+	// Any remaining keys not in the preferred order
+	for k, v := range scan.Stats {
+		if !printed[k] {
+			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(strings.Title(k)), v)
+		}
+	}
+
+	text += fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━\n"+
+			"⏱ *Duration*    %s\n"+
+			"_Chaathan Scanner_",
+		escapeMarkdown(formatDuration(scan.Duration)),
+	)
 
 	return n.sendTelegramMessage(text)
 }
 
 func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
-	text := fmt.Sprintf(`✅ *Step Completed*
+	findings := ""
+	if step.FindingsCount > 0 {
+		findings = fmt.Sprintf("*%d* 🚨", step.FindingsCount)
+	} else {
+		findings = "0"
+	}
 
-*Target:* %s
-*Step:* %d/%d
-*Name:* %s
-*Duration:* %s
-*Findings:* %d`,
+	text := fmt.Sprintf(
+		"✅ *Step Completed*\n\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"🎯 *Target*    %s\n"+
+			"📊 *Progress*    %d / %d\n"+
+			"📋 *Step*    %s\n"+
+			"⏱ *Duration*    %s\n"+
+			"🔍 *Findings*    %s",
 		escapeMarkdown(step.Target),
 		step.StepNumber,
 		step.TotalSteps,
 		escapeMarkdown(formatStepLabel(step)),
-		step.Duration.String(),
-		step.FindingsCount,
+		escapeMarkdown(formatDuration(step.Duration)),
+		findings,
 	)
 
 	if step.ScanType != "" {
-		text += fmt.Sprintf("\n*Scan Type:* %s", escapeMarkdown(step.ScanType))
+		text += fmt.Sprintf("\n🏷 *Type*    %s", escapeMarkdown(step.ScanType))
 	}
+
+	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
 
 	return n.sendTelegramMessage(text)
 }
@@ -462,7 +501,7 @@ func (n *Notifier) sendTelegramMessage(text string) error {
 	payload := map[string]interface{}{
 		"chat_id":    n.cfg.TelegramChatID,
 		"text":       text,
-		"parse_mode": "Markdown",
+		"parse_mode": "MarkdownV2",
 	}
 
 	return n.postJSON(url, payload)
@@ -618,4 +657,47 @@ func escapeMarkdown(s string) string {
 		")", "\\)",
 	)
 	return replacer.Replace(s)
+}
+
+// formatDuration converts a duration to a clean human-readable string.
+// e.g. 19m56.166s → "19m 56s", 3723s → "1h 2m", 45s → "45s"
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		s := int(d.Seconds()) % 60
+		if s == 0 {
+			return fmt.Sprintf("%dm", m)
+		}
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+// statEmoji returns an emoji for a known scan stat key.
+func statEmoji(key string) string {
+	switch strings.ToLower(key) {
+	case "subdomains":
+		return "🌐"
+	case "live":
+		return "💚"
+	case "urls":
+		return "🔗"
+	case "endpoints":
+		return "📌"
+	case "ports":
+		return "⚓"
+	case "vulnerabilities", "vulns":
+		return "🚨"
+	default:
+		return "📊"
+	}
 }

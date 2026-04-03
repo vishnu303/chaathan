@@ -28,7 +28,7 @@ import (
 func stepPassiveEnum(c *Ctx) bool {
 	if c.State.IsStepCompleted("passive_enum") {
 		logger.StepHeader("Step 1: Passive Subdomain Enumeration [RESUMED — skipping]")
-		return false
+		return c.cancelled()
 	}
 	logger.StepHeader("Step 1: Passive Subdomain Enumeration")
 

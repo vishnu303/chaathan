@@ -291,6 +291,41 @@ func ParseURLsFile(scanID int64, filePath, source string) (int, error) {
 	return count, scanner.Err()
 }
 
+// ParseLiveURLsFile parses httpx plain-text output where each line may be
+// "https://url [STATUS_CODE]" (produced by -status-code without -json).
+// Only the primary URL field (before any whitespace) is stored in the DB,
+// so status suffixes never corrupt stored URLs.
+func ParseLiveURLsFile(scanID int64, filePath, source string) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	seen := make(map[string]bool)
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Take only the first field — strips "[200]", "[403]", etc.
+		fields := strings.Fields(line)
+		url := fields[0]
+		if url == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		if err := database.AddURL(scanID, url, 0, "", "", "", source); err != nil {
+			continue
+		}
+		count++
+	}
+
+	return count, scanner.Err()
+}
+
 // ParseFfufOutput parses ffuf JSON output and stores discovered paths as both
 // URLs and endpoints so later ranking/reporting can use the fuzzing data.
 func ParseFfufOutput(scanID int64, filePath string) (int, error) {
