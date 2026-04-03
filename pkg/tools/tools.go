@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -802,8 +803,8 @@ func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, re
 
 // RunSubjack checks discovered subdomains for potential subdomain takeover vulnerabilities
 // by looking for dangling CNAME records pointing to claimable services.
-// Note: the -c (fingerprints) flag is not supported by the current version of subjack;
-// fingerprints are embedded in the binary.
+// The -c flag points to fingerprints.json. Since `go install` places it in the
+// module cache rather than GOPATH/src, we locate it dynamically and pass -c.
 func (t *ToolBox) RunSubjack(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"-w", inputFile,
@@ -813,8 +814,41 @@ func (t *ToolBox) RunSubjack(ctx context.Context, inputFile string, outputFile s
 		"-timeout", "30",
 		"-a",
 	}
+	if fp := findSubjackFingerprints(); fp != "" {
+		args = append(args, "-c", fp)
+	}
 	_, err := t.Runner.Run(ctx, "subjack", args)
 	return err
+}
+
+// findSubjackFingerprints searches common locations for subjack's fingerprints.json.
+func findSubjackFingerprints() string {
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		home, _ := os.UserHomeDir()
+		gopath = filepath.Join(home, "go")
+	}
+
+	// Check module cache (where `go install` puts it)
+	modDir := filepath.Join(gopath, "pkg", "mod", "github.com", "haccer")
+	if entries, err := os.ReadDir(modDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), "subjack@") {
+				fp := filepath.Join(modDir, e.Name(), "fingerprints.json")
+				if _, err := os.Stat(fp); err == nil {
+					return fp
+				}
+			}
+		}
+	}
+
+	// Fallback: legacy GOPATH/src location
+	legacy := filepath.Join(gopath, "src", "github.com", "haccer", "subjack", "fingerprints.json")
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+
+	return ""
 }
 
 // --- XSS Scanning ---

@@ -13,6 +13,7 @@ package wildcard_flow
 import (
 	"context"
 
+	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/metadata"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
@@ -189,6 +190,11 @@ func stepTLSAnalysis(c *Ctx) bool {
 				logger.Warning("Host metadata enrichment failed: %v", err)
 			} else if count > 0 {
 				logger.Info("  Stored metadata for %d live hosts", count)
+				// Ensure these hosts are marked live in the subdomains table,
+				// even if httpx was skipped and ParseHttpxOutput never ran.
+				for _, h := range hostTargets {
+					database.UpdateSubdomainLive(c.ScanID, h, true, "")
+				}
 			}
 		}
 	}
