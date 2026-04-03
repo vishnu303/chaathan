@@ -32,12 +32,6 @@ type Config struct {
 }
 
 type GeneralConfig struct {
-	// Output directory for scan results
-	OutputDir string `yaml:"output_dir"`
-
-	// Database path
-	DatabasePath string `yaml:"database_path"`
-
 	// Default execution mode: native or docker
 	Mode string `yaml:"mode"`
 
@@ -46,12 +40,6 @@ type GeneralConfig struct {
 
 	// Number of concurrent tools to run
 	Concurrency int `yaml:"concurrency"`
-
-	// DNS resolvers file path
-	ResolversFile string `yaml:"resolvers_file"`
-
-	// Wordlist paths
-	Wordlists WordlistsConfig `yaml:"wordlists"`
 
 	// Retry configuration
 	MaxRetries    int `yaml:"max_retries"`     // number of retries for failed tools (default: 1)
@@ -63,6 +51,18 @@ type GeneralConfig struct {
 
 	// WAF evasion: Proxy support
 	Proxy string `yaml:"proxy"` // e.g., "socks5://127.0.0.1:9050" or "http://proxy:8080"
+
+	// DNS resolvers file path
+	ResolversFile string `yaml:"resolvers_file"`
+
+	// Output directory for scan results
+	OutputDir string `yaml:"output_dir"`
+
+	// Database path
+	DatabasePath string `yaml:"database_path"`
+
+	// Wordlist paths
+	Wordlists WordlistsConfig `yaml:"wordlists"`
 }
 
 type WordlistsConfig struct {
@@ -130,59 +130,38 @@ type ToolsConfig struct {
 }
 
 type SubfinderConfig struct {
-	Threads   int      `yaml:"threads"`
-	Timeout   int      `yaml:"timeout"`
-	Sources   []string `yaml:"sources"`
-	Recursive bool     `yaml:"recursive"`
+	Threads int `yaml:"threads"`
+	Timeout int `yaml:"timeout"`
 }
 
 type AmassConfig struct {
-	Timeout    int  `yaml:"timeout"`
-	Active     bool `yaml:"active"`
-	Brute      bool `yaml:"brute"`
-	MinRecurse int  `yaml:"min_recurse"`
-	MaxDepth   int  `yaml:"max_depth"`
+	Timeout int `yaml:"timeout"`
 }
 
 type NucleiConfig struct {
-	Concurrency  int      `yaml:"concurrency"`
-	RateLimit    int      `yaml:"rate_limit"`
-	BulkSize     int      `yaml:"bulk_size"`
-	Templates    []string `yaml:"templates"`
-	ExcludeTags  []string `yaml:"exclude_tags"`
-	Severity     []string `yaml:"severity"`
-	Retries      int      `yaml:"retries"`
-	Timeout      int      `yaml:"timeout"`
-	HeadlessMode bool     `yaml:"headless"`
+	Concurrency int      `yaml:"concurrency"`
+	RateLimit   int      `yaml:"rate_limit"`
+	ExcludeTags []string `yaml:"exclude_tags"`
+	Severity    []string `yaml:"severity"`
 }
 
 type HttpxConfig struct {
 	Threads         int      `yaml:"threads"`
 	Timeout         int      `yaml:"timeout"`
-	Retries         int      `yaml:"retries"`
 	Ports           []string `yaml:"ports"`
-	TechDetect      bool     `yaml:"tech_detect"`
-	StatusCode      bool     `yaml:"status_code"`
-	Title           bool     `yaml:"title"`
 	FollowRedirects bool     `yaml:"follow_redirects"`
 }
 
 type NaabuConfig struct {
-	Threads  int    `yaml:"threads"`
-	Rate     int    `yaml:"rate"`
-	Ports    string `yaml:"ports"`     // e.g., "top-1000" or "80,443,8080"
-	ScanType string `yaml:"scan_type"` // s (SYN), c (Connect)
-	Retries  int    `yaml:"retries"`
+	Threads int    `yaml:"threads"`
+	Rate    int    `yaml:"rate"`
+	Ports   string `yaml:"ports"` // e.g., "top-1000" or "80,443,8080"
 }
 
 type FfufConfig struct {
-	Threads        int   `yaml:"threads"`
-	Timeout        int   `yaml:"timeout"`
-	MatchCodes     []int `yaml:"match_codes"`
-	FilterCodes    []int `yaml:"filter_codes"`
-	FilterSize     []int `yaml:"filter_size"`
-	Recursion      bool  `yaml:"recursion"`
-	RecursionDepth int   `yaml:"recursion_depth"`
+	Threads    int   `yaml:"threads"`
+	Timeout    int   `yaml:"timeout"`
+	MatchCodes []int `yaml:"match_codes"`
 }
 
 type NotificationConfig struct {
@@ -237,16 +216,9 @@ type ScopeConfig struct {
 }
 
 type RateLimitConfig struct {
-	// Global requests per second limit
+	// Global requests per second limit — acts as a ceiling across all tools.
+	// Per-tool rates are configured in their respective tools.* sections.
 	GlobalRPS int `yaml:"global_rps"`
-
-	// Per-tool rate limits (requests per second)
-	Subfinder int `yaml:"subfinder"`
-	Httpx     int `yaml:"httpx"`
-	Nuclei    int `yaml:"nuclei"`
-	Naabu     int `yaml:"naabu"`
-	Ffuf      int `yaml:"ffuf"`
-	Katana    int `yaml:"katana"`
 }
 
 // Global config instance
@@ -336,48 +308,32 @@ func DefaultConfig() *Config {
 		},
 		Tools: ToolsConfig{
 			Subfinder: SubfinderConfig{
-				Threads:   30,
-				Timeout:   30,
-				Recursive: false,
+				Threads: 30,
+				Timeout: 30,
 			},
 			Amass: AmassConfig{
-				Timeout:    60,
-				Active:     true,
-				Brute:      false,
-				MinRecurse: 2,
+				Timeout: 60,
 			},
 			Nuclei: NucleiConfig{
 				Concurrency: 25,
 				RateLimit:   150,
-				BulkSize:    25,
 				Severity:    []string{"low", "medium", "high", "critical"},
 				ExcludeTags: []string{"dos", "fuzz"},
-				Retries:     1,
-				Timeout:     10,
 			},
 			Httpx: HttpxConfig{
 				Threads:         50,
 				Timeout:         10,
-				Retries:         2,
 				Ports:           []string{"80", "443", "8080", "8443", "8000", "8888"},
-				TechDetect:      true,
-				StatusCode:      true,
-				Title:           true,
 				FollowRedirects: true,
 			},
 			Naabu: NaabuConfig{
-				Threads:  25,
-				Rate:     1000,
-				Ports:    "", // empty = use -top-ports 1000 (set explicit ports like "80,443" to override)
-				ScanType: "s",
-				Retries:  3,
+				Threads: 25,
+				Rate:    1000,
 			},
 			Ffuf: FfufConfig{
-				Threads:        50,
-				Timeout:        10,
-				MatchCodes:     []int{200, 201, 204, 301, 302, 307, 401, 403, 405, 500},
-				Recursion:      false,
-				RecursionDepth: 2,
+				Threads:    50,
+				Timeout:    10,
+				MatchCodes: []int{200, 201, 204, 301, 302, 307, 401, 403, 405, 500},
 			},
 		},
 		Notifications: NotificationConfig{
@@ -391,13 +347,7 @@ func DefaultConfig() *Config {
 			ExcludeIPs: []string{},
 		},
 		RateLimits: RateLimitConfig{
-			GlobalRPS: 100,
-			Subfinder: 50,
-			Httpx:     100,
-			Nuclei:    150,
-			Naabu:     1000,
-			Ffuf:      100,
-			Katana:    50,
+			GlobalRPS: 0, // disabled by default; set to cap all tools
 		},
 	}
 }

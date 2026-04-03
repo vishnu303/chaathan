@@ -287,11 +287,7 @@ scope:
   allowed_ports: []
 
 rate_limits:
-  global_rps: 100
-  subfinder: 50
-  httpx: 100
-  nuclei: 150
-  naabu: 1000
+  global_rps: 0   # ceiling across all tools; 0 = disabled
 ```
 
 </details>
