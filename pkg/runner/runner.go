@@ -313,7 +313,6 @@ var dockerImages = map[string]dockerImageInfo{
 	"github-subdomains": {"gwen001/github-subdomains", false},
 
 	// No official Docker image — alpine fallback (won't work without custom image)
-	"subjack":       {"alpine", false}, // no official image
 	"hakrawler":      {"hakluke/hakrawler", true}, // reads stdin; official ENTRYPOINT image
 	"sublist3r":     {"alpine", false}, // Python script — no official image
 	"cloud_enum":    {"alpine", false}, // Python script — no official image

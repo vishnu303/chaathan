@@ -23,7 +23,7 @@ var (
 	skipNuclei        bool
 	skipNaabu         bool
 	skipCrawl         bool
-	skipSubjack       bool
+	skipTakeovers     bool
 	skipDalfox        bool
 	skipUncover       bool
 	skipTlsx          bool
@@ -78,7 +78,7 @@ organised into 4 clean phases:
  PHASE 4 — VULNERABILITY SCANNING (Steps 18–21)
  18. Vulnerability Scanning — Infra (Nuclei) [Optional, --skip-nuclei]
  19. Vulnerability Scanning — URLs (Nuclei) [Optional, --skip-nuclei]
- 20. Subdomain Takeover Detection (Subjack) [Optional, --skip-subjack]
+ 20. Subdomain Takeover Detection (Nuclei) [Optional, --skip-takeovers]
  21. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
 
 Press 's' at any time during scanning to skip the current tool.
@@ -90,11 +90,11 @@ All results are stored in a SQLite database for querying and reporting.
 func init() {
 	wildcardCmd.Flags().StringVarP(&targetDomain, "domain", "d", "", "Target domain (required)")
 	wildcardCmd.Flags().BoolVar(&skipAmass, "skip-amass", false, "Skip Amass (slow but thorough)")
-	wildcardCmd.Flags().BoolVar(&skipNuclei, "skip-nuclei", false, "Skip Nuclei vulnerability scanning")
+	wildcardCmd.Flags().BoolVar(&skipNuclei, "skip-nuclei", false, "Skip vulnerability scanning (Nuclei infra/URLs/takeovers)")
 	wildcardCmd.Flags().BoolVar(&skipNaabu, "skip-naabu", false, "Skip Naabu port scanning")
 	wildcardCmd.Flags().BoolVar(&skipCrawl, "skip-crawl", false, "Skip web crawling (Katana + GoSpider)")
-	wildcardCmd.Flags().BoolVar(&skipSubjack, "skip-subjack", false, "Skip subdomain takeover detection")
 	wildcardCmd.Flags().BoolVar(&skipDalfox, "skip-dalfox", false, "Skip XSS scanning (Dalfox)")
+	wildcardCmd.Flags().BoolVar(&skipTakeovers, "skip-takeovers", false, "Skip subdomain takeover detection (Nuclei takeovers)")
 	wildcardCmd.Flags().BoolVar(&skipUncover, "skip-uncover", false, "Skip search engine dorking (Uncover)")
 	wildcardCmd.Flags().BoolVar(&skipTlsx, "skip-tlsx", false, "Skip TLS certificate analysis")
 	wildcardCmd.Flags().BoolVar(&skipArjun, "skip-arjun", false, "Skip Arjun parameter discovery")
@@ -162,7 +162,7 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		SkipNuclei:        skipNuclei,
 		SkipNaabu:         skipNaabu,
 		SkipCrawl:         skipCrawl,
-		SkipSubjack:       skipSubjack,
+		SkipTakeovers:     skipTakeovers,
 		SkipDalfox:        skipDalfox,
 		SkipUncover:       skipUncover,
 		SkipTlsx:          skipTlsx,

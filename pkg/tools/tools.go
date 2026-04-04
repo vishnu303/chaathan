@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -808,54 +807,22 @@ func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, re
 
 // --- Subdomain Takeover ---
 
-// RunSubjack checks discovered subdomains for potential subdomain takeover vulnerabilities
-// by looking for dangling CNAME records pointing to claimable services.
-// The -c flag points to fingerprints.json. Since `go install` places it in the
-// module cache rather than GOPATH/src, we locate it dynamically and pass -c.
-func (t *ToolBox) RunSubjack(ctx context.Context, inputFile string, outputFile string) error {
+// RunNucleiTakeovers runs nuclei specifically with the takeovers template directory.
+func (t *ToolBox) RunNucleiTakeovers(ctx context.Context, targetsFile string, outputFile string) error {
+	rateLimit := t.effectiveRate(t.nucleiRateLimit())
 	args := []string{
-		"-w", inputFile,
+		"-l", targetsFile,
+		"-t", "takeovers/",
+		"-c", strconv.Itoa(t.nucleiConcurrency()),
+		"-rl", strconv.Itoa(rateLimit),
+		"-jsonl",
 		"-o", outputFile,
-		"-ssl",
-		"-t", "50",
-		"-timeout", "30",
-		"-a",
 	}
-	if fp := findSubjackFingerprints(); fp != "" {
-		args = append(args, "-c", fp)
-	}
-	_, err := t.Runner.Run(ctx, "subjack", args)
+
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	_, err := t.Runner.Run(ctx, "nuclei", args)
 	return err
-}
-
-// findSubjackFingerprints searches common locations for subjack's fingerprints.json.
-func findSubjackFingerprints() string {
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		home, _ := os.UserHomeDir()
-		gopath = filepath.Join(home, "go")
-	}
-
-	// Check module cache (where `go install` puts it)
-	modDir := filepath.Join(gopath, "pkg", "mod", "github.com", "haccer")
-	if entries, err := os.ReadDir(modDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() && strings.HasPrefix(e.Name(), "subjack@") {
-				fp := filepath.Join(modDir, e.Name(), "fingerprints.json")
-				if _, err := os.Stat(fp); err == nil {
-					return fp
-				}
-			}
-		}
-	}
-
-	// Fallback: legacy GOPATH/src location
-	legacy := filepath.Join(gopath, "src", "github.com", "haccer", "subjack", "fingerprints.json")
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
-	}
-
-	return ""
 }
 
 // --- XSS Scanning ---

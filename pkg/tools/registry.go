@@ -48,7 +48,6 @@ var AllTools = []ToolInfo{
 	// Fuzzing & Scanning
 	{"ffuf", "Fuzz", "Web fuzzer & directory brute-force", false, "github.com/ffuf/ffuf/v2@latest"},
 	{"nuclei", "Vuln", "Template-based vulnerability scanner", true, "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"},
-	{"subjack", "Vuln", "Subdomain takeover detection", false, "github.com/haccer/subjack@latest"},
 	{"dalfox", "Vuln", "XSS vulnerability scanner", false, "github.com/hahwul/dalfox/v2@latest"},
 
 	// Recon

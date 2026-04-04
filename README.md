@@ -64,7 +64,7 @@ chaathan wildcard -d target.com
 | **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, Hakrawler | `all_subdomains.txt` |
 | **2 — Validation** | 6–10 | DNSx, ShuffleDNS, Httpx, tlsx, Naabu | `live_hosts.txt` |
 | **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, GoLinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
-| **4 — Vulnerability Scan** | 18–21 | Nuclei (infra + URLs), Subjack, Dalfox | DB findings |
+| **4 — Vulnerability Scan** | 18–21 | Nuclei (infra + URLs + takeovers), Dalfox| DB findings |
 
 <details>
 <summary>Full step breakdown</summary>
@@ -90,7 +90,7 @@ chaathan wildcard -d target.com
 | 17 | ffuf | Directory fuzzing | needs `--wordlist` |
 | 18 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
 | 19 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
-| 20 | Subjack | Subdomain takeover detection | `--skip-subjack` |
+| 20 | Nuclei (Takeovers) | Subdomain takeover detection | `--skip-takeovers` |
 | 21 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
 
 </details>
@@ -375,7 +375,7 @@ With `ua_rotation: true` in config: randomized browser UAs + rotating IPs via To
 | **Web Crawling** | katana, gospider |
 | **JS Analysis** | GoLinkFinder, hakrawler |
 | **Fuzzing** | ffuf |
-| **Vuln Scanning** | nuclei, subjack, dalfox |
+| **Vuln Scanning** | nuclei, dalfox |
 | **Passive Recon** | uncover, metabigor, github-subdomains |
 | **Cloud** | cloud_enum |
 | **Utility** | anew, gf |

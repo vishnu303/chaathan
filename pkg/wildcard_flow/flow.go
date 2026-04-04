@@ -45,7 +45,7 @@ type RunConfig struct {
 	SkipNuclei        bool
 	SkipNaabu         bool
 	SkipCrawl         bool
-	SkipSubjack       bool
+	SkipTakeovers     bool
 	SkipDalfox        bool
 	SkipUncover       bool
 	SkipTlsx          bool
@@ -265,7 +265,7 @@ func Run(cfg RunConfig) error {
 		"skip_nuclei":        cfg.SkipNuclei,
 		"skip_naabu":         cfg.SkipNaabu,
 		"skip_crawl":         cfg.SkipCrawl,
-		"skip_subjack":       cfg.SkipSubjack,
+		"skip_takeovers":     cfg.SkipTakeovers,
 		"skip_dalfox":        cfg.SkipDalfox,
 		"skip_uncover":       cfg.SkipUncover,
 		"skip_tlsx":          cfg.SkipTlsx,

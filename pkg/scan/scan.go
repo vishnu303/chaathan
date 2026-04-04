@@ -74,7 +74,7 @@ var WildcardSteps = []Step{
 	// Phase 4 — Vulnerability Scanning
 	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},
 	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},
-	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "subjack"},
+	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "nuclei"},
 	{Name: "xss_scanning", Description: "XSS Scanning", Required: false, Tool: "dalfox"},
 }
 
