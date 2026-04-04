@@ -42,7 +42,7 @@ var AllTools = []ToolInfo{
 	{"gospider", "Crawl", "Web crawling & spidering", false, "github.com/jaeles-project/gospider@latest"},
 
 	// Analysis
-	{"GoLinkFinder", "Analysis", "JavaScript endpoint extraction (Go)", false, "github.com/0xsha/GoLinkFinder@latest"},
+	{"GoLinkFinder", "Analysis", "JavaScript endpoint extraction (Go)", false, "github.com/rix4uni/GoLinkFinder@latest"},
 	{"hakrawler", "Crawl", "Fast web crawler for endpoint & asset discovery", false, "github.com/hakluke/hakrawler@latest"},
 
 	// Fuzzing & Scanning
