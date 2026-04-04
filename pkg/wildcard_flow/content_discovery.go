@@ -32,8 +32,6 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
 
-const maxJSDownloads = 200
-
 // ─────────────────────────────────────────────────────────────
 // Step 11 — Historical URL Discovery (Waybackurls + GAU)
 // ─────────────────────────────────────────────────────────────
@@ -357,13 +355,13 @@ func stepJSSecretScan(c *Ctx) bool {
 	writeEmptyFile(c.F.GFSecretsMatches)
 	writeEmptyFile(c.F.GFSecretsFinal)
 
-	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, maxJSDownloads)
+	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, 0)
 	if jsCount == 0 {
 		logger.Info("  No JavaScript URLs found in live URL set")
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
 		return c.cancelled()
 	}
-	logger.Info("  Selected %d JavaScript URL(s) for conservative fetching", jsCount)
+	logger.Info("  Selected %d JavaScript URL(s) for fetching", jsCount)
 
 	if err := os.RemoveAll(c.F.JSDownloadsDir); err != nil {
 		logger.Warning("Failed to reset JS download directory: %v", err)
