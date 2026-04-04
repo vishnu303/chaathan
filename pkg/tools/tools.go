@@ -260,11 +260,11 @@ func (t *ToolBox) nucleiSeverity() []string {
 }
 
 func (t *ToolBox) nucleiInfraTags() []string {
-	return []string{"cves", "exposures", "misconfiguration", "takeovers", "ssl"}
+	return []string{"cve", "exposure", "misconfig", "takeover", "ssl"}
 }
 
 func (t *ToolBox) nucleiURLTags() []string {
-	return []string{"xss", "sqli", "ssrf", "lfi", "rce", "redirect", "exposures"}
+	return []string{"xss", "sqli", "ssrf", "lfi", "rce", "redirect", "exposure"}
 }
 
 func (t *ToolBox) ffufThreads() int {
@@ -807,12 +807,12 @@ func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, re
 
 // --- Subdomain Takeover ---
 
-// RunNucleiTakeovers runs nuclei specifically with the takeovers template directory.
+// RunNucleiTakeovers runs nuclei specifically for subdomain takeovers.
 func (t *ToolBox) RunNucleiTakeovers(ctx context.Context, targetsFile string, outputFile string) error {
 	rateLimit := t.effectiveRate(t.nucleiRateLimit())
 	args := []string{
 		"-l", targetsFile,
-		"-t", "takeovers/",
+		"-tags", "takeover",
 		"-c", strconv.Itoa(t.nucleiConcurrency()),
 		"-rl", strconv.Itoa(rateLimit),
 		"-jsonl",
