@@ -42,8 +42,8 @@ var AllTools = []ToolInfo{
 	{"gospider", "Crawl", "Web crawling & spidering", false, "github.com/jaeles-project/gospider@latest"},
 
 	// Analysis
-	{"linkfinder", "Analysis", "JavaScript endpoint extraction (Python)", false, ""},
-	{"subdomainizer", "Analysis", "JavaScript subdomain extraction (Python)", false, ""},
+	{"GoLinkFinder", "Analysis", "JavaScript endpoint extraction (Go)", false, "github.com/0xsha/GoLinkFinder@latest"},
+	{"hakrawler", "Crawl", "Fast web crawler for endpoint & asset discovery", false, "github.com/hakluke/hakrawler@latest"},
 
 	// Fuzzing & Scanning
 	{"ffuf", "Fuzz", "Web fuzzer & directory brute-force", false, "github.com/ffuf/ffuf/v2@latest"},

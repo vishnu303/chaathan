@@ -302,7 +302,7 @@ var dockerImages = map[string]dockerImageInfo{
 	"ffuf":        {"ffuf/ffuf", true},
 	"dalfox":      {"hahwul/dalfox", true},
 	"arjun":       {"s0md3v/arjun", true},
-	"linkfinder":  {"ghcr.io/gerben-stavenga/linkfinder", true},
+	"GoLinkFinder": {"alpine", false}, // no official image; go binary compiled from source
 
 	// Third-party tools WITHOUT ENTRYPOINT (need command passed)
 	"assetfinder":      {"tomnomnom/assetfinder", false},
@@ -314,7 +314,7 @@ var dockerImages = map[string]dockerImageInfo{
 
 	// No official Docker image — alpine fallback (won't work without custom image)
 	"subjack":       {"alpine", false}, // no official image
-	"subdomainizer": {"alpine", false}, // Python script — no official image
+	"hakrawler":      {"hakluke/hakrawler", true}, // reads stdin; official ENTRYPOINT image
 	"sublist3r":     {"alpine", false}, // Python script — no official image
 	"cloud_enum":    {"alpine", false}, // Python script — no official image
 	"massdns":       {"alpine", false}, // compiled from source

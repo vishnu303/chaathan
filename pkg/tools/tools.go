@@ -552,10 +552,33 @@ func (t *ToolBox) RunCloudEnum(ctx context.Context, keyword string, outputFile s
 	return err
 }
 
-func (t *ToolBox) RunSubdomainizer(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-u", url, "-o", outputFile}
-	_, err := t.Runner.Run(ctx, "subdomainizer", args)
-	return err
+func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile string) error {
+	// hakrawler reads target URLs from stdin (echo URL | hakrawler).
+	// We bypass the Runner here so we can wire stdin correctly.
+	// hakrawler is a local binary — no network auth, no Docker concern.
+	args := []string{"-subs", "-u", "-d", "3"}
+	args = t.appendProxy(args, "-proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		// hakrawler has no rate-limit flag; skip silently
+	}
+
+	cmd := exec.CommandContext(ctx, "hakrawler", args...)
+	cmd.Stdin = strings.NewReader(url + "\n")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			// Cancelled / skipped — save partial output if any
+			if stdout.Len() > 0 {
+				_ = writeToFile(outputFile, stdout.String())
+			}
+			return ctx.Err()
+		}
+		return fmt.Errorf("%v: %s", err, stderr.String())
+	}
+	return writeToFile(outputFile, stdout.String())
 }
 
 // --- URL Discovery ---
@@ -574,32 +597,11 @@ func (t *ToolBox) RunWaybackurls(ctx context.Context, domain string, outputFile 
 	return writeToFile(outputFile, output)
 }
 
-// RunLinkfinder extracts endpoints from JavaScript files
-func (t *ToolBox) RunLinkfinder(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-i", url, "-o", "cli"}
-	output, err := t.Runner.Run(ctx, "linkfinder", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
-	}
-	return writeToFile(outputFile, output)
-}
-
-// RunLinkfinderOnFile runs linkfinder on a local JS file
-func (t *ToolBox) RunLinkfinderOnFile(ctx context.Context, jsFile string, outputFile string) error {
-	args := []string{"-i", jsFile, "-o", "cli"}
-	output, err := t.Runner.Run(ctx, "linkfinder", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
-	}
-	return writeToFile(outputFile, output)
+// RunGoLinkFinder extracts endpoints from JavaScript files found at the given URL.
+func (t *ToolBox) RunGoLinkFinder(ctx context.Context, url string, outputFile string) error {
+	args := []string{"-d", url, "-o", outputFile}
+	_, err := t.Runner.Run(ctx, "GoLinkFinder", args)
+	return err
 }
 
 // RunArjun discovers hidden HTTP parameters from a file of URLs (replaces single URL version)

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/vishnu303/chaathan-flow/pkg/progress"
 )
@@ -62,6 +64,8 @@ func installPrerequisites() {
 	} else {
 		progress.ItemOK(fmt.Sprintf("%d packages installed", len(toInstall)))
 	}
+
+	ensurePathSetup()
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -89,4 +93,73 @@ func runSysCmd(name string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// ─────────────────────────────────────────────────────────────
+// ensurePathSetup — add ~/.local/bin and ~/go/bin to PATH in rc files
+// ─────────────────────────────────────────────────────────────
+
+func ensurePathSetup() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	pathsToAdd := []string{
+		`export PATH="$HOME/.local/bin:$PATH"`,
+		`export PATH="$HOME/go/bin:$PATH"`,
+	}
+
+	rcFiles := []string{
+		filepath.Join(home, ".bashrc"),
+		filepath.Join(home, ".zshrc"),
+	}
+
+	for _, rc := range rcFiles {
+		if _, err := os.Stat(rc); os.IsNotExist(err) {
+			continue // skip if the user doesn't use this shell
+		}
+
+		content, err := os.ReadFile(rc)
+		if err != nil {
+			continue
+		}
+
+		fileContent := string(content)
+		added := false
+
+		f, err := os.OpenFile(rc, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			continue
+		}
+
+		for _, p := range pathsToAdd {
+			if !strings.Contains(fileContent, p) {
+				if !added {
+					f.WriteString("\n# Chaathan PATH configuration\n")
+					added = true
+				}
+				f.WriteString(p + "\n")
+			}
+		}
+		f.Close()
+
+		if added {
+			progress.ItemOK(fmt.Sprintf("Added paths to %s (Restart terminal to apply)", filepath.Base(rc)))
+		}
+	}
+
+	// Also update the current Go process's PATH so that subsequent setup functions 
+	// or tool runs in this same execution session can find the new paths instantly.
+	currentPath := os.Getenv("PATH")
+	localBin := filepath.Join(home, ".local", "bin")
+	goBin := filepath.Join(home, "go", "bin")
+
+	if !strings.Contains(currentPath, localBin) {
+		currentPath = localBin + string(os.PathListSeparator) + currentPath
+	}
+	if !strings.Contains(currentPath, goBin) {
+		currentPath = goBin + string(os.PathListSeparator) + currentPath
+	}
+	os.Setenv("PATH", currentPath)
 }

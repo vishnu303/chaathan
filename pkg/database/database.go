@@ -81,7 +81,7 @@ type Endpoint struct {
 	ScanID    int64     `json:"scan_id"`
 	URL       string    `json:"url"`
 	Method    string    `json:"method,omitempty"`
-	Source    string    `json:"source"` // linkfinder, katana, gospider
+	Source    string    `json:"source"` // golinkfinder, katana, gospider, etc.
 	CreatedAt time.Time `json:"created_at"`
 }
 

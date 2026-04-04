@@ -6,7 +6,7 @@
 //
 //  11. Historical URL Discovery (Waybackurls + GAU) [Parallel]
 //  12. Web Crawling (Katana + GoSpider) [Parallel, Optional]
-//  13. JavaScript Analysis — Endpoint Discovery (LinkFinder)
+//  13. JavaScript Analysis — Endpoint Discovery (GoLinkFinder)
 //  14. HTTP Parameter Discovery (Arjun) [Optional]
 //  15. URL Consolidation & Live Check (httpx) + ROI metadata
 //  16. JS Secret Scan (gf JS + Secrets)
@@ -186,10 +186,10 @@ func stepWebCrawling(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 13 — JavaScript Analysis (LinkFinder)
+// Step 13 — JavaScript Analysis (GoLinkFinder)
 // ─────────────────────────────────────────────────────────────
 
-// stepJSAnalysis extracts endpoints from JavaScript files with LinkFinder.
+// stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
 // Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_analysis") {
@@ -197,21 +197,21 @@ func stepJSAnalysis(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 13: JavaScript Analysis")
-	logger.SubStep("Running Linkfinder...")
+	logger.SubStep("Running GoLinkFinder...")
 
-	if err := runWithSkip(c, "linkfinder", func(sCtx context.Context) error {
-		return c.Tb.RunLinkfinder(sCtx, "https://"+c.Domain, c.F.LinkfinderOut)
+	if err := runWithSkip(c, "GoLinkFinder", func(sCtx context.Context) error {
+		return c.Tb.RunGoLinkFinder(sCtx, "https://"+c.Domain, c.F.GoLinkFinderOut)
 	}); err != nil {
 		if err == ErrToolSkipped {
 			// Skipped steps are still marked complete so resume skips them
 			c.StateMgr.MarkStepComplete(c.State, "js_analysis")
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "js_analysis", err)
-			logger.Warning("Linkfinder failed: %v", err)
+			logger.Warning("GoLinkFinder failed: %v", err)
 		}
 	} else {
 		if c.ScanID > 0 {
-			count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.LinkfinderOut, "linkfinder")
+			count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.GoLinkFinderOut, "golinkfinder")
 			logger.Info("  Found %d endpoints", count)
 		}
 		c.StateMgr.MarkStepComplete(c.State, "js_analysis")

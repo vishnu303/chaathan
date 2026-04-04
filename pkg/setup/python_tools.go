@@ -1,7 +1,6 @@
 // Python Tools Installation
 //
-// Installs pip-based Python security tools (sublist3r, linkfinder, arjun,
-// cloud_enum) and script-based tools cloned directly from GitHub (subdomainizer).
+// Installs pip-based Python security tools (sublist3r, arjun, cloud_enum).
 // Creates shell shims in ~/.local/bin/ for pip packages that don't ship a
 // stand-alone binary.
 package setup
@@ -27,20 +26,10 @@ var pyTools = []struct {
 	module   string
 }{
 	{"cloud_enum", "git+https://github.com/initstring/cloud_enum.git", "cloud_enum.py", "cloud_enum"},
-	{"sublist3r", "git+https://github.com/aboul3la/Sublist3r.git", "sublist3r.py", "sublist3r"},
-	{"linkfinder", "git+https://github.com/GerbenJavado/LinkFinder.git", "linkfinder.py", "linkfinder"},
+	{"sublist3r", "sublist3r", "sublist3r", "sublist3r"},
 	{"arjun", "arjun", "arjun", "arjun"},
 }
 
-// Python scripts that need manual cloning (not available via pip)
-var pyScripts = []struct {
-	name   string
-	repo   string
-	script string
-	module string // A core module to check to verify dependencies are satisfied
-}{
-	{"subdomainizer", "https://github.com/nsonaniya2010/SubDomainizer.git", "SubDomainizer.py", "bs4"},
-}
 
 // ─────────────────────────────────────────────────────────────
 // installPythonToolsSection
@@ -66,22 +55,8 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 		toInstall = append(toInstall, pyTool{t.name, t.package_, t.cmdName, t.module})
 	}
 
-	type pyScript struct{ name, repo, script, module string }
-	var scriptsToInstall []pyScript
-	for _, t := range pyScripts {
-		if !isForceUpdate() {
-			if _, err := exec.LookPath(t.name); err == nil {
-				// Also verify the core dependency is installed, if one is specified
-				if t.module == "" || pythonModuleInstalled(t.module) {
-					skippedCount++
-					continue
-				}
-			}
-		}
-		scriptsToInstall = append(scriptsToInstall, pyScript{t.name, t.repo, t.script, t.module})
-	}
 
-	totalToInstall := len(toInstall) + len(scriptsToInstall)
+	totalToInstall := len(toInstall)
 	detail := fmt.Sprintf("%d to install, %d already installed", totalToInstall, skippedCount)
 	if skippedCount == 0 {
 		detail = fmt.Sprintf("%d to install", totalToInstall)
@@ -115,63 +90,6 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 		}(t)
 	}
 
-	// script-based tools (clone + copy binary)
-	for _, t := range scriptsToInstall {
-		wg.Add(1)
-		go func(tool pyScript) {
-			defer wg.Done()
-			tracker.Start(tool.name)
-
-			goPath := os.Getenv("GOPATH")
-			if goPath == "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					tracker.Fail(tool.name, "cannot determine home directory")
-					return
-				}
-				goPath = filepath.Join(home, "go")
-			}
-			binDir := filepath.Join(goPath, "bin")
-
-			tempDir, err := os.MkdirTemp("", tool.name+"_*")
-			if err != nil {
-				tracker.Fail(tool.name, err.Error())
-				return
-			}
-			defer os.RemoveAll(tempDir)
-
-			cloneCmd := exec.Command("git", "clone", "--depth", "1", tool.repo, tempDir)
-			if err := captureCommandOutput(cloneCmd, tool.name+" (clone)"); err != nil {
-				tracker.Fail(tool.name, "clone failed")
-				return
-			}
-
-			// Install requirements if they exist (e.g. termcolor for SubDomainizer).
-			// A missing dependency will cause the tool to fail at runtime, so treat
-			// a requirements install failure as a hard failure here.
-			reqFile := filepath.Join(tempDir, "requirements.txt")
-			if _, err := os.Stat(reqFile); err == nil {
-				reqCmd := exec.Command(pip, "install", "--break-system-packages", "-r", reqFile)
-				if err := captureCommandOutput(reqCmd, tool.name+" (reqs)"); err != nil {
-					tracker.Fail(tool.name, "requirements install failed: "+err.Error())
-					return
-				}
-			}
-
-			src := filepath.Join(tempDir, tool.script)
-			dst := filepath.Join(binDir, tool.name)
-			input, err := os.ReadFile(src)
-			if err != nil {
-				tracker.Fail(tool.name, "read failed")
-				return
-			}
-			if err := os.WriteFile(dst, input, 0755); err != nil {
-				tracker.Fail(tool.name, "write failed")
-				return
-			}
-			tracker.Complete(tool.name)
-		}(t)
-	}
 
 	wg.Wait()
 	tracker.StopSpinner()

@@ -156,7 +156,7 @@ func runToolsCheck(_ *cobra.Command, _ []string) {
 		path, err := exec.LookPath(t.Name)
 		if err != nil {
 			// Also check common Python script locations
-			if t.Name == "sublist3r" || t.Name == "linkfinder" || t.Name == "cloud_enum" || t.Name == "subdomainizer" {
+			if t.Name == "sublist3r" || t.Name == "cloud_enum" {
 				path, err = exec.LookPath(t.Name + ".py")
 			}
 		}

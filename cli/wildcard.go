@@ -57,7 +57,7 @@ organised into 4 clean phases:
   2. Active Enumeration (Amass) [Optional, --skip-amass]
   3. GitHub Subdomain Discovery [Requires GITHUB_TOKEN]
   4. Search Engine Dorking (Uncover/Shodan/Censys) [Optional, --skip-uncover]
-  5. JavaScript Subdomain Extraction (SubDomainizer) [Optional, --skip-subdomainizer]
+  5. JavaScript Crawling (Hakrawler) [Optional, --skip-subdomainizer]
 
  PHASE 2 — VALIDATION (Steps 6–10)
   6. Consolidation & DNS Resolution (DNSx)
@@ -69,7 +69,7 @@ organised into 4 clean phases:
  PHASE 3 — CONTENT DISCOVERY (Steps 11–17)
  11. Historical URL Discovery (Waybackurls, GAU) [Parallel]
  12. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
- 13. JavaScript Analysis (LinkFinder)
+ 13. JavaScript Analysis (GoLinkFinder)
  14. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
  15. URL Consolidation & Live Check (httpx)
  16. JS Secret Scan (gf + httpx)
@@ -99,7 +99,7 @@ func init() {
 	wildcardCmd.Flags().BoolVar(&skipTlsx, "skip-tlsx", false, "Skip TLS certificate analysis")
 	wildcardCmd.Flags().BoolVar(&skipArjun, "skip-arjun", false, "Skip Arjun parameter discovery")
 	wildcardCmd.Flags().BoolVar(&skipShuffleDNS, "skip-shuffledns", false, "Skip ShuffleDNS brute-force")
-	wildcardCmd.Flags().BoolVar(&skipSubdomainizer, "skip-subdomainizer", false, "Skip SubDomainizer JS subdomain extraction")
+	wildcardCmd.Flags().BoolVar(&skipSubdomainizer, "skip-subdomainizer", false, "Skip Hakrawler JS crawling")
 	wildcardCmd.Flags().StringVarP(&wordlistPath, "wordlist", "w", "", "Wordlist for directory fuzzing (enables ffuf)")
 	wildcardCmd.Flags().StringVar(&dnsWordlistPath, "dns-wordlist", "", "Wordlist for DNS brute-force with ShuffleDNS")
 	wildcardCmd.Flags().StringVar(&resolversPath, "resolvers", "", "Custom DNS resolvers file for ShuffleDNS")

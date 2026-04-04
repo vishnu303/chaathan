@@ -252,7 +252,7 @@ func runScansResume(cmd *cobra.Command, args []string) {
 			SkipTlsx:          boolOpt("skip_tlsx"),
 			SkipArjun:         boolOpt("skip_arjun"),
 			SkipShuffleDNS:    boolOpt("skip_shuffledns"),
-			SkipSubdomainizer: boolOpt("skip_subdomainizer"),
+			SkipSubdomainizer: boolOpt("skip_hakrawler") || boolOpt("skip_subdomainizer"),
 			WordlistPath:      strOpt("wordlist"),
 			DNSWordlistPath:   strOpt("dns_wordlist"),
 			GitHubToken:       token,

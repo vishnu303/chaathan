@@ -61,9 +61,9 @@ chaathan wildcard -d target.com
 
 | Phase | Steps | Tools | Output |
 |-------|-------|-------|--------|
-| **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, SubDomainizer | `all_subdomains.txt` |
+| **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, Hakrawler | `all_subdomains.txt` |
 | **2 — Validation** | 6–10 | DNSx, ShuffleDNS, Httpx, tlsx, Naabu | `live_hosts.txt` |
-| **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, LinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
+| **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, GoLinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
 | **4 — Vulnerability Scan** | 18–21 | Nuclei (infra + URLs), Subjack, Dalfox | DB findings |
 
 <details>
@@ -75,7 +75,7 @@ chaathan wildcard -d target.com
 | 2 | Amass | Active DNS brute-force | `--skip-amass` |
 | 3 | github-subdomains | GitHub scraping for subdomains | needs `--github-token` |
 | 4 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
-| 5 | SubDomainizer | JavaScript subdomain extraction | `--skip-subdomainizer` |
+| 5 | Hakrawler | JavaScript crawling for subdomain & endpoint discovery | `--skip-subdomainizer` |
 | 6 | DNSx | Consolidation + DNS resolution | — |
 | 7 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
 | 8 | Httpx | HTTP probing + tech detection | — |
@@ -83,7 +83,7 @@ chaathan wildcard -d target.com
 | 10 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
 | 11 | Waybackurls, GAU | Historical URL discovery | — |
 | 12 | Katana, GoSpider | Web crawling | `--skip-crawl` |
-| 13 | LinkFinder | JavaScript endpoint extraction | — |
+| 13 | GoLinkFinder | JavaScript endpoint extraction | — |
 | 14 | Arjun | HTTP parameter discovery | `--skip-arjun` |
 | 15 | Httpx | URL consolidation + live check | — |
 | 16 | Httpx, gf | JS file secret scan | — |
@@ -373,7 +373,7 @@ With `ua_rotation: true` in config: randomized browser UAs + rotating IPs via To
 | **Web Probing** | httpx, tlsx, naabu |
 | **URL Discovery** | waybackurls, gau, arjun |
 | **Web Crawling** | katana, gospider |
-| **JS Analysis** | linkfinder, subdomainizer |
+| **JS Analysis** | GoLinkFinder, hakrawler |
 | **Fuzzing** | ffuf |
 | **Vuln Scanning** | nuclei, subjack, dalfox |
 | **Passive Recon** | uncover, metabigor, github-subdomains |

@@ -90,8 +90,8 @@ type Files struct {
 	NaabuOut           string
 	KatanaOut          string
 	GospiderOut        string
-	LinkfinderOut      string
-	SubdomainizerOut   string
+	GoLinkFinderOut    string
+	HakrawlerOut       string
 	ArjunOut           string
 	ArjunURLsOut       string
 	AllURLsRaw         string
@@ -142,8 +142,8 @@ func newFiles(dir string) Files {
 		NaabuOut:           j("naabu_ports.txt"),
 		KatanaOut:          j("katana_urls.txt"),
 		GospiderOut:        j("gospider_urls.txt"),
-		LinkfinderOut:      j("linkfinder_endpoints.txt"),
-		SubdomainizerOut:   j("subdomainizer_subs.txt"),
+		GoLinkFinderOut:    j("golinkfinder_endpoints.txt"),
+		HakrawlerOut:       j("hakrawler_crawl.txt"),
 		ArjunOut:           j("arjun_params.json"),
 		ArjunURLsOut:       j("arjun_urls.txt"),
 		AllURLsRaw:         j("all_urls_raw.txt"),
@@ -216,7 +216,7 @@ func (c *Ctx) urlSources() []string {
 		c.F.GauOut,
 		c.F.KatanaOut,
 		c.F.GospiderOut,
-		c.F.LinkfinderOut,
+		c.F.GoLinkFinderOut,
 		c.F.ArjunURLsOut,
 	}
 }
@@ -271,7 +271,7 @@ func Run(cfg RunConfig) error {
 		"skip_tlsx":          cfg.SkipTlsx,
 		"skip_arjun":         cfg.SkipArjun,
 		"skip_shuffledns":    cfg.SkipShuffleDNS,
-		"skip_subdomainizer": cfg.SkipSubdomainizer,
+		"skip_hakrawler":     cfg.SkipSubdomainizer,
 		"wordlist":           cfg.WordlistPath,
 		"dns_wordlist":       cfg.DNSWordlistPath,
 		"github":             cfg.GitHubToken != "",
@@ -467,9 +467,9 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "web_crawling":
 		return countLines(c.F.KatanaOut, c.F.GospiderOut)
 	case "js_analysis":
-		return countLines(c.F.LinkfinderOut)
+		return countLines(c.F.GoLinkFinderOut)
 	case "js_subdomain_discovery":
-		return countLines(c.F.SubdomainizerOut)
+		return countLines(c.F.HakrawlerOut)
 	case "param_discovery":
 		return countLines(c.F.ArjunURLsOut)
 	case "url_consolidation":

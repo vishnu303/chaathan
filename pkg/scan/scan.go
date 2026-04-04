@@ -55,7 +55,7 @@ var WildcardSteps = []Step{
 	{Name: "active_enum", Description: "Active Subdomain Enumeration", Required: false, Tool: "amass"},
 	{Name: "github_recon", Description: "GitHub Subdomain Discovery", Required: false, Tool: "github-subdomains"},
 	{Name: "search_engine_recon", Description: "Search Engine Dorking", Required: false, Tool: "uncover"},
-	{Name: "js_subdomain_discovery", Description: "JavaScript Subdomain Extraction", Required: false, Tool: "subdomainizer"},
+	{Name: "js_subdomain_discovery", Description: "JavaScript Crawling (Hakrawler)", Required: false, Tool: "hakrawler"},
 
 	// Phase 2 — Validation & Fingerprint
 	{Name: "dns_resolution", Description: "Consolidation & DNS Resolution", Required: true, Tool: "dnsx"},
@@ -66,7 +66,7 @@ var WildcardSteps = []Step{
 	// Phase 3 — Content Discovery
 	{Name: "url_discovery", Description: "Historical URL Discovery", Required: false, Tool: "waybackurls,gau"},
 	{Name: "web_crawling", Description: "Web Crawling", Required: false, Tool: "katana,gospider"},
-	{Name: "js_analysis", Description: "JavaScript Analysis", Required: false, Tool: "linkfinder"},
+	{Name: "js_analysis", Description: "JavaScript Analysis (GoLinkFinder)", Required: false, Tool: "GoLinkFinder"},
 	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
 	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
 	{Name: "js_secret_scan", Description: "JS File Secret Scan (gf)", Required: false, Tool: "httpx,gf"},

@@ -28,7 +28,7 @@ var setupCmd = &cobra.Command{
 
 Categories:
   - Go tools:     subfinder, httpx, nuclei, katana, naabu, etc.
-  - Python tools: sublist3r, subdomainizer, linkfinder, arjun
+  - Python tools: sublist3r, arjun
   - From source:  massdns (high-performance DNS resolver)
 
 Already-installed tools are skipped automatically.
