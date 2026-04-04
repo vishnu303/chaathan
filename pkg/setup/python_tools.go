@@ -79,7 +79,14 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 		go func(tool pyTool) {
 			defer wg.Done()
 			tracker.Start(tool.name)
-			cmd := exec.Command(pip, "install", "--break-system-packages", tool.pkg)
+			args := []string{"install", "--break-system-packages", tool.pkg}
+			// Both sublist3r and arjun use unpinned older requests/urllib3 which breaks on Python 3.12+ 
+			// due to the complete removal of the six module from urllib3.packages. 
+			// We force an upgrade (or constraint) to a working urllib3 1.26.x series here.
+			if tool.name == "sublist3r" || tool.name == "arjun" {
+				args = append(args, "urllib3>=1.26.18,<2")
+			}
+			cmd := exec.Command(pip, args...)
 			if err := captureCommandOutput(cmd, tool.name); err != nil {
 				tracker.Fail(tool.name, err.Error())
 			} else if err := ensurePythonToolShim(tool.name, tool.module); err != nil {
