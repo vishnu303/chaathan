@@ -217,7 +217,7 @@ func stepSearchEngineRecon(c *Ctx) bool {
 func stepJSSubdomains(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_subdomain_discovery") {
 		logger.StepHeader("Step 5: JS Crawling (Hakrawler) [RESUMED — skipping]")
-	} else if !c.SkipSubdomainizer {
+	} else if !c.SkipHakrawler {
 		logger.StepHeader("Step 5: JS Crawling (Hakrawler)")
 		logger.SubStep("Running Hakrawler on https://%s...", c.Domain)
 
@@ -242,7 +242,7 @@ func stepJSSubdomains(c *Ctx) bool {
 		}
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 	} else {
-		logger.StepHeader("Step 5: Skipping Hakrawler (--skip-subdomainizer)")
+		logger.StepHeader("Step 5: Skipping Hakrawler (--skip-hakrawler)")
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 	}
 	return c.cancelled()

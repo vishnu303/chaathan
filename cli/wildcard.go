@@ -29,7 +29,7 @@ var (
 	skipTlsx          bool
 	skipArjun         bool
 	skipShuffleDNS    bool
-	skipSubdomainizer bool
+	skipHakrawler     bool
 	wordlistPath      string
 	dnsWordlistPath   string
 	resolversPath     string
@@ -57,7 +57,7 @@ organised into 4 clean phases:
   2. Active Enumeration (Amass) [Optional, --skip-amass]
   3. GitHub Subdomain Discovery [Requires GITHUB_TOKEN]
   4. Search Engine Dorking (Uncover/Shodan/Censys) [Optional, --skip-uncover]
-  5. JavaScript Crawling (Hakrawler) [Optional, --skip-subdomainizer]
+  5. JavaScript Crawling (Hakrawler) [Optional, --skip-hakrawler]
 
  PHASE 2 — VALIDATION (Steps 6–10)
   6. Consolidation & DNS Resolution (DNSx)
@@ -99,7 +99,7 @@ func init() {
 	wildcardCmd.Flags().BoolVar(&skipTlsx, "skip-tlsx", false, "Skip TLS certificate analysis")
 	wildcardCmd.Flags().BoolVar(&skipArjun, "skip-arjun", false, "Skip Arjun parameter discovery")
 	wildcardCmd.Flags().BoolVar(&skipShuffleDNS, "skip-shuffledns", false, "Skip ShuffleDNS brute-force")
-	wildcardCmd.Flags().BoolVar(&skipSubdomainizer, "skip-subdomainizer", false, "Skip Hakrawler JS crawling")
+	wildcardCmd.Flags().BoolVar(&skipHakrawler, "skip-hakrawler", false, "Skip Hakrawler JS crawling")
 	wildcardCmd.Flags().StringVarP(&wordlistPath, "wordlist", "w", "", "Wordlist for directory fuzzing (enables ffuf)")
 	wildcardCmd.Flags().StringVar(&dnsWordlistPath, "dns-wordlist", "", "Wordlist for DNS brute-force with ShuffleDNS")
 	wildcardCmd.Flags().StringVar(&resolversPath, "resolvers", "", "Custom DNS resolvers file for ShuffleDNS")
@@ -168,7 +168,7 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		SkipTlsx:          skipTlsx,
 		SkipArjun:         skipArjun,
 		SkipShuffleDNS:    skipShuffleDNS,
-		SkipSubdomainizer: skipSubdomainizer,
+		SkipHakrawler:     skipHakrawler,
 		WordlistPath:      wordlistPath,
 		DNSWordlistPath:   dnsWordlistPath,
 		ResolversPath:     resolversPath,

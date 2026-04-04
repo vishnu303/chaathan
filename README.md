@@ -75,7 +75,7 @@ chaathan wildcard -d target.com
 | 2 | Amass | Active DNS brute-force | `--skip-amass` |
 | 3 | github-subdomains | GitHub scraping for subdomains | needs `--github-token` |
 | 4 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
-| 5 | Hakrawler | JavaScript crawling for subdomain & endpoint discovery | `--skip-subdomainizer` |
+| 5 | Hakrawler | JavaScript crawling for subdomain & endpoint discovery | `--skip-hakrawler` |
 | 6 | DNSx | Consolidation + DNS resolution | — |
 | 7 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
 | 8 | Httpx | HTTP probing + tech detection | — |

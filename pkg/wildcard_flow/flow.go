@@ -51,7 +51,7 @@ type RunConfig struct {
 	SkipTlsx          bool
 	SkipArjun         bool
 	SkipShuffleDNS    bool
-	SkipSubdomainizer bool
+	SkipHakrawler bool
 
 	// Paths / tokens
 	WordlistPath    string
@@ -271,7 +271,7 @@ func Run(cfg RunConfig) error {
 		"skip_tlsx":          cfg.SkipTlsx,
 		"skip_arjun":         cfg.SkipArjun,
 		"skip_shuffledns":    cfg.SkipShuffleDNS,
-		"skip_hakrawler":     cfg.SkipSubdomainizer,
+		"skip_hakrawler":     cfg.SkipHakrawler,
 		"wordlist":           cfg.WordlistPath,
 		"dns_wordlist":       cfg.DNSWordlistPath,
 		"github":             cfg.GitHubToken != "",
