@@ -123,9 +123,12 @@ func ScanHeader(scanType string, target string, scanID int64) {
 
 	fmt.Printf("\n")
 	fmt.Printf("  %s╭%s╮%s\n", Cyan+Bold, line, Reset)
-	fmt.Printf("  %s│%s  🔍 %s%-44s%s %s│%s\n", Cyan+Bold, Reset, White+Bold, scanType+" Scan", Reset, Cyan+Bold, Reset)
+	// '  ' (2) + '🔍 ' (3) + 46 + ' ' (1) = 52
+	fmt.Printf("  %s│%s  🔍 %s%-46s%s %s│%s\n", Cyan+Bold, Reset, White+Bold, scanType+" Scan", Reset, Cyan+Bold, Reset)
+	// '  ' (2) + '🎯 ' (3) + 'Target:' (7) + ' ' (1) + 38 + ' ' (1) = 52
 	fmt.Printf("  %s│%s  %s🎯 Target:%s %-38s %s│%s\n", Cyan+Bold, Reset, Dim, Reset, target, Cyan+Bold, Reset)
 	if scanID > 0 {
+		// '  ' (2) + '🆔 ' (3) + 'Scan ID:' (8) + ' ' (1) + 37 + ' ' (1) = 52
 		fmt.Printf("  %s│%s  %s🆔 Scan ID:%s %-37d %s│%s\n", Cyan+Bold, Reset, Dim, Reset, scanID, Cyan+Bold, Reset)
 	}
 	fmt.Printf("  %s╰%s╯%s\n", Cyan+Bold, line, Reset)
@@ -163,25 +166,37 @@ func ScanSummary(status string, target string, scanID int64, duration time.Durat
 
 	fmt.Printf("\n")
 	fmt.Printf("  %s╭%s╮%s\n", Cyan+Bold, line, Reset)
-	fmt.Printf("  %s│%s  %s%s%s %sScan %s%s%-39s%s│%s\n",
+	
+	statusStr := capitalize(status)
+	pad1 := w - 2 - 1 - 6 - len(statusStr) // '  ' (2), statusIcon (1), ' Scan ' (6)
+	if pad1 < 0 { pad1 = 0 }
+	fmt.Printf("  %s│%s  %s%s%s %sScan %s%s%s%s│%s\n",
 		Cyan+Bold, Reset, statusColor+Bold, statusIcon, Reset,
-		White+Bold, capitalize(status), Reset,
-		strings.Repeat(" ", 0), Cyan+Bold, Reset)
-	fmt.Printf("  %s│%s  %s🎯 %s%s %-39s%s│%s\n", Cyan+Bold, Reset, Dim, target, Reset, "", Cyan+Bold, Reset)
-	fmt.Printf("  %s│%s  %s⏱  %s%s %-39s%s│%s\n", Cyan+Bold, Reset, Dim, fmtDuration(duration), Reset, "", Cyan+Bold, Reset)
+		White+Bold, statusStr, Reset,
+		strings.Repeat(" ", pad1), Cyan+Bold, Reset)
+
+	pad2 := w - 2 - 2 - len(target) - 1 // '  ' (2), '🎯' (1/2), len(target), extra space. Assume '🎯 ' is 3 columns.
+	pad2 = w - 5 - len(target)
+	if pad2 < 0 { pad2 = 0 }
+	fmt.Printf("  %s│%s  %s🎯 %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, target, Reset, strings.Repeat(" ", pad2), Cyan+Bold, Reset)
+
+	durStr := fmtDuration(duration)
+	pad3 := w - 6 - len(durStr) // '  ' (2) + '⏱  ' (4)
+	if pad3 < 0 { pad3 = 0 }
+	fmt.Printf("  %s│%s  %s⏱  %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, durStr, Reset, strings.Repeat(" ", pad3), Cyan+Bold, Reset)
 
 	if len(stats) > 0 {
 		fmt.Printf("  %s│%s  %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, strings.Repeat("╌", w-2), Reset, Cyan+Bold, Reset)
 		for label, value := range stats {
-			padding := 39 - len(label) - len(value)
-			if padding < 1 {
-				padding = 1
-			}
+			// '  ' (2) + len(label) + 1 + len(value)
+			used := 2 + len(label) + 1 + len(value)
+			padding := w - used
+			if padding < 1 { padding = 1 }
 			fmt.Printf("  %s│%s  %s%s%s %s%s%s%s %s│%s\n",
 				Cyan+Bold, Reset,
 				Dim, label+":", Reset,
 				BrightCyan+Bold, value, Reset,
-				strings.Repeat(" ", padding),
+				strings.Repeat(" ", padding-1),
 				Cyan+Bold, Reset)
 		}
 	}

@@ -64,6 +64,8 @@ func ParseHttpxOutput(scanID int64, filePath string) (int, error) {
 
 	count := 0
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -177,9 +179,9 @@ type NaabuResult struct {
 
 // FfufResult represents a single ffuf discovery item.
 type FfufResult struct {
-	Input map[string]string `json:"input"`
-	URL   string            `json:"url"`
-	Status int              `json:"status"`
+	Input  map[string]string `json:"input"`
+	URL    string            `json:"url"`
+	Status int               `json:"status"`
 }
 
 // ParseNaabuOutput parses naabu output and stores in database
@@ -418,14 +420,25 @@ func ParseSubjackOutput(scanID int64, filePath string) (int, error) {
 			parts := strings.SplitN(line, "]", 2)
 			if len(parts) >= 2 {
 				domain := strings.TrimSpace(parts[1])
+				service := ""
+				if hostAndMeta := strings.SplitN(domain, " - ", 2); len(hostAndMeta) == 2 {
+					domain = strings.TrimSpace(hostAndMeta[0])
+					service = strings.TrimSpace(hostAndMeta[1])
+				}
+				name := "Subdomain Takeover"
+				desc := "Potential subdomain takeover detected"
+				if service != "" {
+					name = "Subdomain Takeover - " + service
+					desc = "Potential subdomain takeover detected (" + service + ")"
+				}
 				err := database.AddVulnerability(
 					scanID,
 					domain,
 					"",
 					"subdomain-takeover",
-					"Subdomain Takeover",
+					name,
 					"critical",
-					"Potential subdomain takeover detected",
+					desc,
 					"",
 					line,
 				)
@@ -447,6 +460,7 @@ type TlsxResult struct {
 	SubjectCN   string   `json:"subject_cn"`
 	SubjectOrg  []string `json:"subject_org"`
 	SANs        []string `json:"san"`
+	SubjectAN   []string `json:"subject_an"`
 	Issuer      string   `json:"issuer_cn"`
 	NotBefore   string   `json:"not_before"`
 	NotAfter    string   `json:"not_after"`
@@ -482,8 +496,13 @@ func ParseTlsxOutput(scanID int64, filePath string, targetDomain string) (newSub
 			continue
 		}
 
-		// Extract SANs as new subdomains
-		for _, san := range result.SANs {
+		// Extract SANs as new subdomains. Newer tlsx JSON uses subject_an,
+		// while older probe-driven output may still emit san.
+		sans := result.SANs
+		if len(sans) == 0 {
+			sans = result.SubjectAN
+		}
+		for _, san := range sans {
 			san = strings.TrimPrefix(san, "*.")
 			if !seenSANs[san] && strings.HasSuffix(san, targetDomain) {
 				seenSANs[san] = true
@@ -599,10 +618,12 @@ func ParseUncoverOutput(scanID int64, filePath string) (subs int, ports int, err
 type DalfoxResult struct {
 	Type     string `json:"type"`
 	Severity string `json:"severity"`
-	URL      string `json:"data"`
+	URL      string `json:"url"`
+	Data     string `json:"data"`
 	Payload  string `json:"payload"`
 	Param    string `json:"param"`
 	CWE      string `json:"cwe"`
+	Method   string `json:"method"`
 }
 
 // ParseDalfoxOutput parses dalfox output for XSS findings.
@@ -626,22 +647,60 @@ func ParseDalfoxOutput(scanID int64, filePath string) (int, error) {
 
 		// Try JSON first
 		var result DalfoxResult
-		if err := json.Unmarshal([]byte(line), &result); err == nil && result.URL != "" {
+		if err := json.Unmarshal([]byte(line), &result); err == nil {
+			targetURL := strings.TrimSpace(result.URL)
+			if targetURL == "" {
+				targetURL = strings.TrimSpace(result.Data)
+			}
+			if targetURL == "" {
+				continue
+			}
+
 			severity := "medium"
 			if result.Severity != "" {
 				severity = strings.ToLower(result.Severity)
 			}
 
+			templateID := "xss"
+			if result.Type != "" {
+				templateID = "xss-" + strings.ToLower(result.Type)
+			}
+
+			name := "XSS Finding"
+			if result.Type != "" && result.Param != "" {
+				name = "XSS (" + result.Type + ") - Param: " + result.Param
+			} else if result.Type != "" {
+				name = "XSS (" + result.Type + ")"
+			} else if result.Param != "" {
+				name = "XSS - Param: " + result.Param
+			}
+
+			desc := "Potential XSS detected by Dalfox"
+			if result.Param != "" {
+				desc = "Cross-Site Scripting found via parameter: " + result.Param
+			}
+
+			var evidenceParts []string
+			if result.Payload != "" {
+				evidenceParts = append(evidenceParts, "Payload: "+result.Payload)
+			}
+			if result.Method != "" {
+				evidenceParts = append(evidenceParts, "Method: "+result.Method)
+			}
+			if result.CWE != "" {
+				evidenceParts = append(evidenceParts, "CWE: "+result.CWE)
+			}
+
 			err := database.AddVulnerability(
 				scanID,
-				result.URL,
-				result.URL,
-				"xss-"+result.Type,
-				"XSS ("+result.Type+") - Param: "+result.Param,
+				targetURL,
+				targetURL,
+				templateID,
+				name,
 				severity,
-				"Cross-Site Scripting found via parameter: "+result.Param,
+				desc,
 				"",
-				"Payload: "+result.Payload,
+				strings.Join(evidenceParts, "\n"),
 			)
 			if err != nil {
 				continue

@@ -64,6 +64,9 @@ func readFileInto(path string, dest map[string]bool) error {
 			dest[line] = true
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed reading %s: %w", path, err)
+	}
 	return nil
 }
 

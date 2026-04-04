@@ -22,8 +22,8 @@ import (
 type ToolBox struct {
 	Runner     runner.Runner
 	Config     *config.ToolsConfig
-	General    *config.GeneralConfig    // WAF evasion settings (UA rotation, proxy, etc.)
-	RateLimits *config.RateLimitConfig  // Global rate-limit override
+	General    *config.GeneralConfig   // WAF evasion settings (UA rotation, proxy, etc.)
+	RateLimits *config.RateLimitConfig // Global rate-limit override
 	APIKeys    *config.APIKeysConfig
 }
 
@@ -430,16 +430,21 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 
 // --- Web Crawling & Fuzzing ---
 
-func (t *ToolBox) RunGoSpider(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-s", url, "-o", outputFile, "-c", "10", "-d", "3"}
+func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3"}
 	args = t.appendGoSpiderUA(args)
 	args = t.appendProxy(args, "--proxy")
-	_, err := t.Runner.Run(ctx, "gospider", args)
+	output, err := t.Runner.Run(ctx, "gospider", args)
+	if strings.TrimSpace(output) != "" {
+		if writeErr := writeToFile(outputFile, output); writeErr != nil {
+			return writeErr
+		}
+	}
 	return err
 }
 
-func (t *ToolBox) RunKatana(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-u", url, "-o", outputFile, "-jc"}
+func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{"-list", inputFile, "-o", outputFile, "-jc"}
 	args = t.appendUAHeader(args)
 	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
@@ -597,9 +602,9 @@ func (t *ToolBox) RunLinkfinderOnFile(ctx context.Context, jsFile string, output
 	return writeToFile(outputFile, output)
 }
 
-// RunArjun discovers hidden HTTP parameters on a URL
-func (t *ToolBox) RunArjun(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-u", url, "-oJ", outputFile, "--stable"}
+// RunArjun discovers hidden HTTP parameters from a file of URLs (replaces single URL version)
+func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
 	args = t.appendArjunUA(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
@@ -613,13 +618,13 @@ func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, output
 	return err
 }
 
-// RunHttpxURLCheck live-checks a list of URLs (not subdomains) and outputs only live URLs
+// RunHttpxURLCheck live-checks a list of URLs (not subdomains) and outputs only live URLs.
+// Intentionally omits -status-code to prevent format poisoning in downstream gf/nuclei runs.
 func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputFile string) error {
 	args := []string{
 		"-l", urlsFile,
 		"-threads", strconv.Itoa(t.httpxThreads()),
 		"-timeout", strconv.Itoa(t.httpxTimeout()),
-		"-status-code",
 		"-no-fallback",
 		"-o", outputFile,
 	}
@@ -858,10 +863,10 @@ func findSubjackFingerprints() string {
 func (t *ToolBox) RunDalfox(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"file", inputFile,
+		"--format", "jsonl",
 		"-o", outputFile,
 		"--silence",
 		"--no-color",
-		"--output-all",
 	}
 	args = t.appendDalfoxUA(args)
 	args = t.appendProxy(args, "--proxy")
@@ -900,14 +905,16 @@ func (t *ToolBox) RunDalfoxURL(ctx context.Context, targetURL string, outputFile
 // --- TLS/SSL Analysis ---
 
 // RunTlsx grabs TLS certificate information from live hosts.
-// Extracts SANs (extra subdomains), expiry info, and cipher details.
-// NOTE: -resp-only is only valid with -san/-cn alone; omit it when using -so/-ex.
+// tlsx v1.2.2 rejects -san/-cn when mixed with other probes, but plain JSON
+// output already includes certificate metadata needed for post-processing.
 func (t *ToolBox) RunTlsx(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"-l", inputFile,
 		"-o", outputFile,
 		"-json",
-		"-san", "-cn", // Request SANs and Common Name (do not mix with -so or -ex)
+		"-silent",
+		"-nc",
+		"-duc",
 		"-c", "50",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
@@ -920,7 +927,9 @@ func (t *ToolBox) RunTlsxHost(ctx context.Context, host string, outputFile strin
 		"-u", host,
 		"-o", outputFile,
 		"-json",
-		"-san", "-cn",
+		"-silent",
+		"-nc",
+		"-duc",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err

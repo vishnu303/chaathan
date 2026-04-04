@@ -159,7 +159,7 @@ func newFiles(dir string) Files {
 		// Nuclei JSON outputs go to final_files/ — they are product files
 		NucleiOut:        jf("nuclei_vulns.json"),
 		NucleiURLOut:     jf("nuclei_url_vulns.json"),
-		DalfoxOut:        jf("dalfox_xss.json"),
+		DalfoxOut:        jf("dalfox_xss.jsonl"),
 		// Nuclei working files (URL target lists) stay in intermediate_files/
 		NucleiURLTargets: j("nuclei_url_targets.txt"),
 		NucleiGFMatches:  j("nuclei_url_targets_gf.txt"),

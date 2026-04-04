@@ -135,7 +135,7 @@ func stepWebCrawling(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Katana")
-			if err := c.Tb.RunKatana(sCtx, "https://"+c.Domain, c.F.KatanaOut); err != nil {
+			if err := c.Tb.RunKatana(sCtx, c.F.HttpxLiveHosts, c.F.KatanaOut); err != nil {
 				if sCtx.Err() == nil {
 					crawlFailMu.Lock()
 					crawlFailed = true
@@ -154,7 +154,7 @@ func stepWebCrawling(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] GoSpider")
-			if err := c.Tb.RunGoSpider(sCtx, "https://"+c.Domain, c.F.GospiderOut); err != nil {
+			if err := c.Tb.RunGoSpider(sCtx, c.F.HttpxLiveHosts, c.F.GospiderOut); err != nil {
 				if sCtx.Err() == nil {
 					crawlFailMu.Lock()
 					crawlFailed = true
@@ -234,10 +234,10 @@ func stepParamDiscovery(c *Ctx) bool {
 		return c.cancelled()
 	} else if !c.SkipArjun {
 		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
-		logger.SubStep("Running Arjun on https://%s...", c.Domain)
+		logger.SubStep("Running Arjun on live hosts...")
 
 		if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
-			return c.Tb.RunArjun(sCtx, "https://"+c.Domain, c.F.ArjunOut)
+			return c.Tb.RunArjun(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut)
 		}); err != nil {
 			if err == ErrToolSkipped {
 				// User-skipped counts as intentional — mark complete so resume skips it too.
