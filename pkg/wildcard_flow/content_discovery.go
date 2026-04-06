@@ -355,7 +355,7 @@ func stepJSSecretScan(c *Ctx) bool {
 	writeEmptyFile(c.F.GFSecretsMatches)
 	writeEmptyFile(c.F.GFSecretsFinal)
 
-	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, 0)
+	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, c.Cfg.General.JSLimit)
 	if jsCount == 0 {
 		logger.Info("  No JavaScript URLs found in live URL set")
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
@@ -422,6 +422,12 @@ func stepJSSecretScan(c *Ctx) bool {
 		writeEmptyFile(c.F.GFSecretsFinal)
 	}
 
+	// Prepend the size of the combined file to the top of the secrets file
+	if content, err := os.ReadFile(c.F.GFSecretsFinal); err == nil {
+		header := fmt.Sprintf("// Scan Metadata | JS Combined File Size: %.4f GB\n", float64(combinedBytes)/(1024*1024*1024))
+		_ = os.WriteFile(c.F.GFSecretsFinal, append([]byte(header), content...), 0644)
+	}
+
 	totalFindings, _ := utils.CountFileLines(c.F.GFSecretsFinal)
 	if totalFindings > 0 {
 		logger.Info("  Found %d JS/secret findings (%d JS matches, %d secret matches)", totalFindings, jsMatchCount, secretMatchCount)
@@ -439,6 +445,11 @@ func stepJSSecretScan(c *Ctx) bool {
 		}
 	} else {
 		logger.Info("  No JS or secret findings matched installed gf patterns")
+	}
+
+	// Free up massive amounts of storage by deleting the combined file after the scan finishes
+	if err := os.Remove(c.F.JSCombinedFile); err == nil {
+		logger.Info("  Cleaned up %s to free storage", c.F.JSCombinedFile)
 	}
 
 	c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
@@ -541,7 +552,7 @@ func collectJSURLsFromFile(inputFile, outputFile string, limit int) int {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := extractPrimaryURL(scanner.Text())
-		if line == "" || seen[line] || !isJavaScriptURL(line) {
+		if line == "" || seen[line] || !isUsefulJSURL(line) {
 			continue
 		}
 		seen[line] = true
@@ -562,6 +573,30 @@ func extractPrimaryURL(raw string) string {
 		return ""
 	}
 	return fields[0]
+}
+
+// isUsefulJSURL checks if a URL is a JavaScript file and filters out common
+// third-party libraries to maximize the value of the JS download limit.
+func isUsefulJSURL(raw string) bool {
+	if !isJavaScriptURL(raw) {
+		return false
+	}
+	
+	lower := strings.ToLower(raw)
+	
+	stopwords := []string{
+		"jquery", "bootstrap", "react", "react-dom", "vue", "angular", 
+		"moment", "lodash", "underscore", "chart", "d3", "analytics", 
+		"gtm.js", "google-analytics", "ads.js", "tracking", "fontawesome", 
+		"recaptcha", "polyfill", "vendor.js", "node_modules", "swagger-ui",
+	}
+	
+	for _, stopword := range stopwords {
+		if strings.Contains(lower, stopword) {
+			return false
+		}
+	}
+	return true
 }
 
 // isJavaScriptURL returns true when the URL path ends in .js, ignoring query
@@ -606,6 +641,7 @@ func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, err
 	for _, path := range files {
 		data, err := os.ReadFile(path)
 		if err != nil || len(data) == 0 {
+			os.Remove(path) // also clean up empty files to save space
 			continue
 		}
 		n, err := out.Write(data)
@@ -617,7 +653,14 @@ func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, err
 			return writtenFiles, totalBytes, err
 		}
 		writtenFiles++
+
+		// Destructive merge: immediately delete the original file to keep storage flat
+		os.Remove(path)
 	}
+	
+	// Remove the now-empty download directory completely
+	os.RemoveAll(downloadDir)
+
 	return writtenFiles, totalBytes, nil
 }
 

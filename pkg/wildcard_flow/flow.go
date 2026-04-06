@@ -59,8 +59,8 @@ type RunConfig struct {
 	ResolversPath   string
 	GitHubToken     string
 
-	// Resume
-	ResumeScanID int64
+	// Control parameters
+	ResumeScanID   int64
 
 	// Post-scan
 	GenerateReport bool
