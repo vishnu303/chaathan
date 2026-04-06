@@ -245,7 +245,7 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 			roi.EndpointCount = endpointData.Total
 			roi.KatanaCount = endpointData.BySource["katana"]
 			roi.GoSpiderCount = endpointData.BySource["gospider"]
-			roi.LinkFinderCount = endpointData.BySource["linkfinder"]
+			roi.LinkFinderCount = endpointData.BySource["golinkfinder"]
 			roi.FfufCount = endpointData.BySource["ffuf"]
 
 			addPoints(minInt(20, endpointData.Total), fmt.Sprintf("%d discovered endpoints on host", endpointData.Total))

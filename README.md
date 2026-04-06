@@ -13,7 +13,7 @@ A modular CLI pentesting framework for bug bounty reconnaissance and vulnerabili
 
 ## What It Does
 
-Chaathan runs a **21-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, JS secret scanning, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
+Chaathan runs a **22-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, JS secret scanning, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
 
 ## Install
 
@@ -38,7 +38,7 @@ make setup          # Install all external tools
 chaathan setup                          # Install tools (first time)
 chaathan setup --update                 # Reinstall / update all tools
 
-chaathan wildcard -d target.com         # Full 21-step domain recon
+chaathan wildcard -d target.com         # Full 22-step domain recon
 chaathan company -n "Company Inc"       # Company/org discovery
 
 chaathan tools check                    # Verify tool installations
@@ -53,7 +53,7 @@ chaathan report generate 1 --format html      # Generate report
 
 ## Workflows
 
-### Wildcard Scan (21 Steps)
+### Wildcard Scan (22 Steps)
 
 ```bash
 chaathan wildcard -d target.com
@@ -61,10 +61,11 @@ chaathan wildcard -d target.com
 
 | Phase | Steps | Tools | Output |
 |-------|-------|-------|--------|
-| **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, SubDomainizer | `all_subdomains.txt` |
+| **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, Hakrawler | `all_subdomains.txt` |
 | **2 — Validation** | 6–10 | DNSx, ShuffleDNS, Httpx, tlsx, Naabu | `live_hosts.txt` |
-| **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, LinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
-| **4 — Vulnerability Scan** | 18–21 | Nuclei (infra + URLs), Subjack, Dalfox | DB findings |
+| **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, GoLinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
+| **4 — Vulnerability Scan** | 18–21 | Nuclei (infra + URLs + takeovers), Dalfox| DB findings |
+| **5 — Fingerprinting** | 22 | Httpx, Nuclei | Tech/WAF JSON |
 
 <details>
 <summary>Full step breakdown</summary>
@@ -75,7 +76,7 @@ chaathan wildcard -d target.com
 | 2 | Amass | Active DNS brute-force | `--skip-amass` |
 | 3 | github-subdomains | GitHub scraping for subdomains | needs `--github-token` |
 | 4 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
-| 5 | SubDomainizer | JavaScript subdomain extraction | `--skip-subdomainizer` |
+| 5 | Hakrawler | JavaScript crawling for subdomain & endpoint discovery | `--skip-hakrawler` |
 | 6 | DNSx | Consolidation + DNS resolution | — |
 | 7 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
 | 8 | Httpx | HTTP probing + tech detection | — |
@@ -83,15 +84,16 @@ chaathan wildcard -d target.com
 | 10 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
 | 11 | Waybackurls, GAU | Historical URL discovery | — |
 | 12 | Katana, GoSpider | Web crawling | `--skip-crawl` |
-| 13 | LinkFinder | JavaScript endpoint extraction | — |
+| 13 | GoLinkFinder | JavaScript endpoint extraction | — |
 | 14 | Arjun | HTTP parameter discovery | `--skip-arjun` |
 | 15 | Httpx | URL consolidation + live check | — |
 | 16 | Httpx, gf | JS file secret scan | — |
 | 17 | ffuf | Directory fuzzing | needs `--wordlist` |
 | 18 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
 | 19 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
-| 20 | Subjack | Subdomain takeover detection | `--skip-subjack` |
+| 20 | Nuclei (Takeovers) | Subdomain takeover detection | `--skip-takeovers` |
 | 21 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
+| 22 | Httpx, Nuclei | Technology & WAF Fingerprinting | `--skip-fingerprint` |
 
 </details>
 
@@ -132,7 +134,7 @@ chaathan company -n "Company Inc"
 
 | Command | Description |
 |---------|-------------|
-| `chaathan wildcard -d <domain>` | 21-step domain recon workflow |
+| `chaathan wildcard -d <domain>` | 22-step domain recon workflow |
 | `chaathan wildcard -d <domain> --proxy <url>` | Scan through a proxy |
 | `chaathan wildcard -d <domain> --rate-limit <n>` | Cap all tools to N req/sec |
 | `chaathan company -n <name>` | 3-step company discovery workflow |
@@ -373,9 +375,9 @@ With `ua_rotation: true` in config: randomized browser UAs + rotating IPs via To
 | **Web Probing** | httpx, tlsx, naabu |
 | **URL Discovery** | waybackurls, gau, arjun |
 | **Web Crawling** | katana, gospider |
-| **JS Analysis** | linkfinder, subdomainizer |
+| **JS Analysis** | GoLinkFinder, hakrawler |
 | **Fuzzing** | ffuf |
-| **Vuln Scanning** | nuclei, subjack, dalfox |
+| **Vuln Scanning** | nuclei, dalfox |
 | **Passive Recon** | uncover, metabigor, github-subdomains |
 | **Cloud** | cloud_enum |
 | **Utility** | anew, gf |
@@ -436,7 +438,7 @@ chaathan-flow/
 ├── Makefile                   # Build, install, setup, test, vet
 ├── cli/                       # Cobra commands (13 files)
 │   ├── root.go                # Global flags, version, init
-│   ├── wildcard.go            # 21-step recon command
+│   ├── wildcard.go            # 22-step recon command
 │   ├── company.go             # 3-step company command
 │   ├── setup.go               # Tool installation
 │   ├── scans.go               # Scan management
@@ -449,7 +451,7 @@ chaathan-flow/
 │   ├── config.go              # Config management
 │   └── tools_cmd.go           # Tools list/check
 ├── pkg/
-│   ├── wildcard_flow/         # 21-step workflow (4 phase files + helpers)
+│   ├── wildcard_flow/         # 22-step workflow (5 phase files + helpers)
 │   ├── company_flow/          # 3-step workflow (3 step files + flow)
 │   ├── orchestrate/           # Signal handling, infra bootstrap
 │   ├── database/              # SQLite persistence, queries, ROI ranking

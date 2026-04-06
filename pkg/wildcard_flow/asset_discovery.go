@@ -8,7 +8,7 @@
 //  2. Active Subdomain Enumeration (Amass) [Optional]
 //  3. GitHub Subdomain Discovery [Requires token]
 //  4. Search-Engine Dorking (Uncover) [Optional]
-//  5. JavaScript Subdomain Extraction (SubDomainizer) [Optional]
+//  5. JavaScript Crawling (Hakrawler) [Optional]
 package wildcard_flow
 
 import (
@@ -209,41 +209,40 @@ func stepSearchEngineRecon(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 5 — JavaScript Subdomain Extraction (SubDomainizer)
+// Step 5 — JS Crawling (Hakrawler)
 // ─────────────────────────────────────────────────────────────
 
-// stepJSSubdomains discovers subdomains embedded in JavaScript with SubDomainizer.
+// stepJSCrawl crawls the root domain with Hakrawler to surface additional links and subdomains.
 // Returns true if the scan should be cancelled.
 func stepJSSubdomains(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_subdomain_discovery") {
-		logger.StepHeader("Step 5: JavaScript Subdomain Extraction (SubDomainizer) [RESUMED — skipping]")
-	} else if !c.SkipSubdomainizer {
-		logger.StepHeader("Step 5: JavaScript Subdomain Extraction (SubDomainizer)")
-		logger.SubStep("Running SubDomainizer on https://%s...", c.Domain)
+		logger.StepHeader("Step 5: JS Crawling (Hakrawler) [RESUMED — skipping]")
+	} else if !c.SkipHakrawler {
+		logger.StepHeader("Step 5: JS Crawling (Hakrawler)")
+		logger.SubStep("Running Hakrawler on https://%s...", c.Domain)
 
-		if err := runWithSkip(c, "subdomainizer", func(sCtx context.Context) error {
-			return c.Tb.RunSubdomainizer(sCtx, "https://"+c.Domain, c.F.SubdomainizerOut)
+		if err := runWithSkip(c, "hakrawler", func(sCtx context.Context) error {
+			return c.Tb.RunHakrawler(sCtx, "https://"+c.Domain, c.F.HakrawlerOut)
 		}); err != nil {
 			if err == ErrToolSkipped {
 				// Logged internally by runWithSkip
 			} else {
 				c.StateMgr.MarkStepFailed(c.State, "js_subdomain_discovery", err)
-				logger.Warning("SubDomainizer failed: %v", err)
+				logger.Warning("Hakrawler failed: %v", err)
 			}
 		} else {
 			if c.ScanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.SubdomainizerOut, "subdomainizer")
+				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.HakrawlerOut, "hakrawler")
 				if count > 0 {
-					logger.Info("  Found %d subdomains from JavaScript analysis", count)
-
+					logger.Info("  Found %d links/subdomains from Hakrawler", count)
 				} else {
-					logger.Info("  No new subdomains found in JavaScript")
+					logger.Info("  No new items found from Hakrawler")
 				}
 			}
 		}
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 	} else {
-		logger.StepHeader("Step 5: Skipping SubDomainizer (--skip-subdomainizer)")
+		logger.StepHeader("Step 5: Skipping Hakrawler (--skip-hakrawler)")
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 	}
 	return c.cancelled()

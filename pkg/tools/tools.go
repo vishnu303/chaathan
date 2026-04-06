@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -22,8 +21,8 @@ import (
 type ToolBox struct {
 	Runner     runner.Runner
 	Config     *config.ToolsConfig
-	General    *config.GeneralConfig    // WAF evasion settings (UA rotation, proxy, etc.)
-	RateLimits *config.RateLimitConfig  // Global rate-limit override
+	General    *config.GeneralConfig   // WAF evasion settings (UA rotation, proxy, etc.)
+	RateLimits *config.RateLimitConfig // Global rate-limit override
 	APIKeys    *config.APIKeysConfig
 }
 
@@ -261,11 +260,11 @@ func (t *ToolBox) nucleiSeverity() []string {
 }
 
 func (t *ToolBox) nucleiInfraTags() []string {
-	return []string{"cves", "exposures", "misconfiguration", "takeovers", "ssl"}
+	return []string{"cve", "exposure", "misconfig", "takeover", "ssl"}
 }
 
 func (t *ToolBox) nucleiURLTags() []string {
-	return []string{"xss", "sqli", "ssrf", "lfi", "rce", "redirect", "exposures"}
+	return []string{"xss", "sqli", "ssrf", "lfi", "rce", "redirect", "exposure"}
 }
 
 func (t *ToolBox) ffufThreads() int {
@@ -430,16 +429,21 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 
 // --- Web Crawling & Fuzzing ---
 
-func (t *ToolBox) RunGoSpider(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-s", url, "-o", outputFile, "-c", "10", "-d", "3"}
+func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3"}
 	args = t.appendGoSpiderUA(args)
 	args = t.appendProxy(args, "--proxy")
-	_, err := t.Runner.Run(ctx, "gospider", args)
+	output, err := t.Runner.Run(ctx, "gospider", args)
+	if strings.TrimSpace(output) != "" {
+		if writeErr := writeToFile(outputFile, output); writeErr != nil {
+			return writeErr
+		}
+	}
 	return err
 }
 
-func (t *ToolBox) RunKatana(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-u", url, "-o", outputFile, "-jc"}
+func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{"-list", inputFile, "-o", outputFile, "-jc"}
 	args = t.appendUAHeader(args)
 	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
@@ -547,10 +551,33 @@ func (t *ToolBox) RunCloudEnum(ctx context.Context, keyword string, outputFile s
 	return err
 }
 
-func (t *ToolBox) RunSubdomainizer(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-u", url, "-o", outputFile}
-	_, err := t.Runner.Run(ctx, "subdomainizer", args)
-	return err
+func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile string) error {
+	// hakrawler reads target URLs from stdin (echo URL | hakrawler).
+	// We bypass the Runner here so we can wire stdin correctly.
+	// hakrawler is a local binary — no network auth, no Docker concern.
+	args := []string{"-subs", "-u", "-d", "3"}
+	args = t.appendProxy(args, "-proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		// hakrawler has no rate-limit flag; skip silently
+	}
+
+	cmd := exec.CommandContext(ctx, "hakrawler", args...)
+	cmd.Stdin = strings.NewReader(url + "\n")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			// Cancelled / skipped — save partial output if any
+			if stdout.Len() > 0 {
+				_ = writeToFile(outputFile, stdout.String())
+			}
+			return ctx.Err()
+		}
+		return fmt.Errorf("%v: %s", err, stderr.String())
+	}
+	return writeToFile(outputFile, stdout.String())
 }
 
 // --- URL Discovery ---
@@ -569,37 +596,16 @@ func (t *ToolBox) RunWaybackurls(ctx context.Context, domain string, outputFile 
 	return writeToFile(outputFile, output)
 }
 
-// RunLinkfinder extracts endpoints from JavaScript files
-func (t *ToolBox) RunLinkfinder(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-i", url, "-o", "cli"}
-	output, err := t.Runner.Run(ctx, "linkfinder", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
-	}
-	return writeToFile(outputFile, output)
+// RunGoLinkFinder extracts endpoints from JavaScript files found at the given URL.
+func (t *ToolBox) RunGoLinkFinder(ctx context.Context, url string, outputFile string) error {
+	args := []string{"-d", url, "-o", outputFile}
+	_, err := t.Runner.Run(ctx, "GoLinkFinder", args)
+	return err
 }
 
-// RunLinkfinderOnFile runs linkfinder on a local JS file
-func (t *ToolBox) RunLinkfinderOnFile(ctx context.Context, jsFile string, outputFile string) error {
-	args := []string{"-i", jsFile, "-o", "cli"}
-	output, err := t.Runner.Run(ctx, "linkfinder", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
-	}
-	return writeToFile(outputFile, output)
-}
-
-// RunArjun discovers hidden HTTP parameters on a URL
-func (t *ToolBox) RunArjun(ctx context.Context, url string, outputFile string) error {
-	args := []string{"-u", url, "-oJ", outputFile, "--stable"}
+// RunArjun discovers hidden HTTP parameters from a file of URLs (replaces single URL version)
+func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
 	args = t.appendArjunUA(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
@@ -613,13 +619,13 @@ func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, output
 	return err
 }
 
-// RunHttpxURLCheck live-checks a list of URLs (not subdomains) and outputs only live URLs
+// RunHttpxURLCheck live-checks a list of URLs (not subdomains) and outputs only live URLs.
+// Intentionally omits -status-code to prevent format poisoning in downstream gf/nuclei runs.
 func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputFile string) error {
 	args := []string{
 		"-l", urlsFile,
 		"-threads", strconv.Itoa(t.httpxThreads()),
 		"-timeout", strconv.Itoa(t.httpxTimeout()),
-		"-status-code",
 		"-no-fallback",
 		"-o", outputFile,
 	}
@@ -801,54 +807,22 @@ func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, re
 
 // --- Subdomain Takeover ---
 
-// RunSubjack checks discovered subdomains for potential subdomain takeover vulnerabilities
-// by looking for dangling CNAME records pointing to claimable services.
-// The -c flag points to fingerprints.json. Since `go install` places it in the
-// module cache rather than GOPATH/src, we locate it dynamically and pass -c.
-func (t *ToolBox) RunSubjack(ctx context.Context, inputFile string, outputFile string) error {
+// RunNucleiTakeovers runs nuclei specifically for subdomain takeovers.
+func (t *ToolBox) RunNucleiTakeovers(ctx context.Context, targetsFile string, outputFile string) error {
+	rateLimit := t.effectiveRate(t.nucleiRateLimit())
 	args := []string{
-		"-w", inputFile,
+		"-l", targetsFile,
+		"-tags", "takeover",
+		"-c", strconv.Itoa(t.nucleiConcurrency()),
+		"-rl", strconv.Itoa(rateLimit),
+		"-jsonl",
 		"-o", outputFile,
-		"-ssl",
-		"-t", "50",
-		"-timeout", "30",
-		"-a",
 	}
-	if fp := findSubjackFingerprints(); fp != "" {
-		args = append(args, "-c", fp)
-	}
-	_, err := t.Runner.Run(ctx, "subjack", args)
+
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	_, err := t.Runner.Run(ctx, "nuclei", args)
 	return err
-}
-
-// findSubjackFingerprints searches common locations for subjack's fingerprints.json.
-func findSubjackFingerprints() string {
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		home, _ := os.UserHomeDir()
-		gopath = filepath.Join(home, "go")
-	}
-
-	// Check module cache (where `go install` puts it)
-	modDir := filepath.Join(gopath, "pkg", "mod", "github.com", "haccer")
-	if entries, err := os.ReadDir(modDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() && strings.HasPrefix(e.Name(), "subjack@") {
-				fp := filepath.Join(modDir, e.Name(), "fingerprints.json")
-				if _, err := os.Stat(fp); err == nil {
-					return fp
-				}
-			}
-		}
-	}
-
-	// Fallback: legacy GOPATH/src location
-	legacy := filepath.Join(gopath, "src", "github.com", "haccer", "subjack", "fingerprints.json")
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
-	}
-
-	return ""
 }
 
 // --- XSS Scanning ---
@@ -858,10 +832,10 @@ func findSubjackFingerprints() string {
 func (t *ToolBox) RunDalfox(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"file", inputFile,
+		"--format", "jsonl",
 		"-o", outputFile,
 		"--silence",
 		"--no-color",
-		"--output-all",
 	}
 	args = t.appendDalfoxUA(args)
 	args = t.appendProxy(args, "--proxy")
@@ -900,14 +874,16 @@ func (t *ToolBox) RunDalfoxURL(ctx context.Context, targetURL string, outputFile
 // --- TLS/SSL Analysis ---
 
 // RunTlsx grabs TLS certificate information from live hosts.
-// Extracts SANs (extra subdomains), expiry info, and cipher details.
-// NOTE: -resp-only is only valid with -san/-cn alone; omit it when using -so/-ex.
+// tlsx v1.2.2 rejects -san/-cn when mixed with other probes, but plain JSON
+// output already includes certificate metadata needed for post-processing.
 func (t *ToolBox) RunTlsx(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{
 		"-l", inputFile,
 		"-o", outputFile,
 		"-json",
-		"-san", "-cn", // Request SANs and Common Name (do not mix with -so or -ex)
+		"-silent",
+		"-nc",
+		"-duc",
 		"-c", "50",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
@@ -920,7 +896,9 @@ func (t *ToolBox) RunTlsxHost(ctx context.Context, host string, outputFile strin
 		"-u", host,
 		"-o", outputFile,
 		"-json",
-		"-san", "-cn",
+		"-silent",
+		"-nc",
+		"-duc",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err
@@ -966,6 +944,47 @@ func (t *ToolBox) uncoverEngines() []string {
 		engines = append(engines, "fofa")
 	}
 	return engines
+}
+
+// --- Fingerprinting & WAF ---
+
+// RunHttpxFingerprint runs HTTPX purely for tech detection, gathering technologies used by live hosts.
+func (t *ToolBox) RunHttpxFingerprint(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{
+		"-l", inputFile,
+		"-threads", strconv.Itoa(t.httpxThreads()),
+		"-timeout", strconv.Itoa(t.httpxTimeout()),
+		"-tech-detect", "-json",
+		"-o", outputFile,
+	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-http-proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		args = append(args, "-rl", strconv.Itoa(rps))
+	}
+	_, err := t.Runner.Run(ctx, "httpx", args)
+	return err
+}
+
+// RunNucleiWAF runs Nuclei specifically for WAF detection with a conservative rate limit.
+func (t *ToolBox) RunNucleiWAF(ctx context.Context, inputFile string, outputFile string) error {
+	// WAF detection needs a gentler rate limit as sending malicious tags will quickly trigger blocks.
+	rateLimit := t.effectiveRate(50) 
+	concurrency := 10
+
+	args := []string{
+		"-l", inputFile,
+		"-c", strconv.Itoa(concurrency),
+		"-rl", strconv.Itoa(rateLimit),
+		"-tags", "waf",
+		"-jsonl",
+		"-o", outputFile,
+	}
+
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	_, err := t.Runner.Run(ctx, "nuclei", args)
+	return err
 }
 
 // Helper

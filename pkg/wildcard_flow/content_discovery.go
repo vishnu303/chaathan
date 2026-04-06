@@ -6,7 +6,7 @@
 //
 //  11. Historical URL Discovery (Waybackurls + GAU) [Parallel]
 //  12. Web Crawling (Katana + GoSpider) [Parallel, Optional]
-//  13. JavaScript Analysis — Endpoint Discovery (LinkFinder)
+//  13. JavaScript Analysis — Endpoint Discovery (GoLinkFinder)
 //  14. HTTP Parameter Discovery (Arjun) [Optional]
 //  15. URL Consolidation & Live Check (httpx) + ROI metadata
 //  16. JS Secret Scan (gf JS + Secrets)
@@ -31,8 +31,6 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/metadata"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
-
-const maxJSDownloads = 200
 
 // ─────────────────────────────────────────────────────────────
 // Step 11 — Historical URL Discovery (Waybackurls + GAU)
@@ -98,7 +96,19 @@ func stepURLDiscovery(c *Ctx) bool {
 	})
 
 	if err == ErrToolSkipped {
-		// Skipped by user — mark complete so resume skips this step
+		// Skipped by user — log partial results from any tool that wrote output before the skip
+		if c.ScanID > 0 {
+			if utils.FileExists(c.F.WaybackOut) {
+				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls"); count > 0 {
+					logger.Info("  Waybackurls partial: %d URLs", count)
+				}
+			}
+			if utils.FileExists(c.F.GauOut) {
+				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau"); count > 0 {
+					logger.Info("  GAU partial: %d URLs", count)
+				}
+			}
+		}
 		c.StateMgr.MarkStepComplete(c.State, "url_discovery")
 	} else if !waybackOK && !gauOK {
 		c.StateMgr.MarkStepFailed(c.State, "url_discovery", fmt.Errorf("both Waybackurls and GAU failed"))
@@ -135,7 +145,7 @@ func stepWebCrawling(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Katana")
-			if err := c.Tb.RunKatana(sCtx, "https://"+c.Domain, c.F.KatanaOut); err != nil {
+			if err := c.Tb.RunKatana(sCtx, c.F.HttpxLiveHosts, c.F.KatanaOut); err != nil {
 				if sCtx.Err() == nil {
 					crawlFailMu.Lock()
 					crawlFailed = true
@@ -154,7 +164,7 @@ func stepWebCrawling(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] GoSpider")
-			if err := c.Tb.RunGoSpider(sCtx, "https://"+c.Domain, c.F.GospiderOut); err != nil {
+			if err := c.Tb.RunGoSpider(sCtx, c.F.HttpxLiveHosts, c.F.GospiderOut); err != nil {
 				if sCtx.Err() == nil {
 					crawlFailMu.Lock()
 					crawlFailed = true
@@ -180,16 +190,29 @@ func stepWebCrawling(c *Ctx) bool {
 	if err != nil && err != ErrToolSkipped {
 		c.StateMgr.MarkStepFailed(c.State, "web_crawling", err)
 	} else {
+		// Log partial results when skipped — tools may have written output before cancel
+		if err == ErrToolSkipped && c.ScanID > 0 {
+			if utils.FileExists(c.F.KatanaOut) {
+				if count, _ := utils.CountFileLines(c.F.KatanaOut); count > 0 {
+					logger.Info("  Katana partial: %d URLs", count)
+				}
+			}
+			if utils.FileExists(c.F.GospiderOut) {
+				if count, _ := utils.CountFileLines(c.F.GospiderOut); count > 0 {
+					logger.Info("  GoSpider partial: %d URLs", count)
+				}
+			}
+		}
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 	}
 	return c.cancelled()
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 13 — JavaScript Analysis (LinkFinder)
+// Step 13 — JavaScript Analysis (GoLinkFinder)
 // ─────────────────────────────────────────────────────────────
 
-// stepJSAnalysis extracts endpoints from JavaScript files with LinkFinder.
+// stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
 // Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_analysis") {
@@ -197,21 +220,21 @@ func stepJSAnalysis(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 13: JavaScript Analysis")
-	logger.SubStep("Running Linkfinder...")
+	logger.SubStep("Running GoLinkFinder...")
 
-	if err := runWithSkip(c, "linkfinder", func(sCtx context.Context) error {
-		return c.Tb.RunLinkfinder(sCtx, "https://"+c.Domain, c.F.LinkfinderOut)
+	if err := runWithSkip(c, "GoLinkFinder", func(sCtx context.Context) error {
+		return c.Tb.RunGoLinkFinder(sCtx, "https://"+c.Domain, c.F.GoLinkFinderOut)
 	}); err != nil {
 		if err == ErrToolSkipped {
 			// Skipped steps are still marked complete so resume skips them
 			c.StateMgr.MarkStepComplete(c.State, "js_analysis")
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "js_analysis", err)
-			logger.Warning("Linkfinder failed: %v", err)
+			logger.Warning("GoLinkFinder failed: %v", err)
 		}
 	} else {
 		if c.ScanID > 0 {
-			count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.LinkfinderOut, "linkfinder")
+			count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.GoLinkFinderOut, "golinkfinder")
 			logger.Info("  Found %d endpoints", count)
 		}
 		c.StateMgr.MarkStepComplete(c.State, "js_analysis")
@@ -234,10 +257,10 @@ func stepParamDiscovery(c *Ctx) bool {
 		return c.cancelled()
 	} else if !c.SkipArjun {
 		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
-		logger.SubStep("Running Arjun on https://%s...", c.Domain)
+		logger.SubStep("Running Arjun on live hosts...")
 
 		if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
-			return c.Tb.RunArjun(sCtx, "https://"+c.Domain, c.F.ArjunOut)
+			return c.Tb.RunArjun(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut)
 		}); err != nil {
 			if err == ErrToolSkipped {
 				// User-skipped counts as intentional — mark complete so resume skips it too.
@@ -288,6 +311,11 @@ func stepURLConsolidation(c *Ctx) bool {
 		c.StateMgr.MarkStepFailed(c.State, "url_consolidation", err)
 		logger.Warning("URL merge failed: %v", err)
 	} else {
+		// Sanitize: unescape \uXXXX sequences, strip non-URL lines (GoSpider tags,
+		// relative paths from GoLinkFinder), and re-deduplicate.
+		if err := utils.SanitizeURLFile(c.F.AllURLsRaw); err != nil {
+			logger.Warning("URL sanitization failed: %v", err)
+		}
 		rawCount, _ := utils.CountFileLines(c.F.AllURLsRaw)
 		logger.Info("  Merged %d unique URLs", rawCount)
 	}
@@ -357,19 +385,18 @@ func stepJSSecretScan(c *Ctx) bool {
 	writeEmptyFile(c.F.GFSecretsMatches)
 	writeEmptyFile(c.F.GFSecretsFinal)
 
-	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, maxJSDownloads)
+	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, c.Cfg.General.JSLimit)
 	if jsCount == 0 {
 		logger.Info("  No JavaScript URLs found in live URL set")
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
 		return c.cancelled()
 	}
-	logger.Info("  Selected %d JavaScript URL(s) for conservative fetching", jsCount)
+	logger.Info("  Selected %d JavaScript URL(s) for fetching", jsCount)
 
 	if err := os.RemoveAll(c.F.JSDownloadsDir); err != nil {
 		logger.Warning("Failed to reset JS download directory: %v", err)
 	}
 	if err := os.MkdirAll(c.F.JSDownloadsDir, 0755); err != nil {
-		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
 		logger.Warning("Could not create JS download directory: %v", err)
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
 		return c.cancelled()
@@ -388,7 +415,6 @@ func stepJSSecretScan(c *Ctx) bool {
 
 	downloadedFiles, combinedBytes, err := concatenateDownloadedFiles(c.F.JSDownloadsDir, c.F.JSCombinedFile)
 	if err != nil {
-		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
 		logger.Warning("Failed to combine downloaded JS content: %v", err)
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
 		return c.cancelled()
@@ -441,6 +467,20 @@ func stepJSSecretScan(c *Ctx) bool {
 		}
 	} else {
 		logger.Info("  No JS or secret findings matched installed gf patterns")
+	}
+
+	// Prepend the size of the combined file to the top of the secrets file
+	// (only when there are actual findings — avoids a comment-only file in final_files/)
+	if totalFindings > 0 {
+		if content, err := os.ReadFile(c.F.GFSecretsFinal); err == nil {
+			header := fmt.Sprintf("// Scan Metadata | JS Combined File Size: %.4f GB\n", float64(combinedBytes)/(1024*1024*1024))
+			_ = os.WriteFile(c.F.GFSecretsFinal, append([]byte(header), content...), 0644)
+		}
+	}
+
+	// Free up massive amounts of storage by deleting the combined file after the scan finishes
+	if err := os.Remove(c.F.JSCombinedFile); err == nil {
+		logger.Info("  Cleaned up %s to free storage", c.F.JSCombinedFile)
 	}
 
 	c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
@@ -543,7 +583,7 @@ func collectJSURLsFromFile(inputFile, outputFile string, limit int) int {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := extractPrimaryURL(scanner.Text())
-		if line == "" || seen[line] || !isJavaScriptURL(line) {
+		if line == "" || seen[line] || !isUsefulJSURL(line) {
 			continue
 		}
 		seen[line] = true
@@ -564,6 +604,30 @@ func extractPrimaryURL(raw string) string {
 		return ""
 	}
 	return fields[0]
+}
+
+// isUsefulJSURL checks if a URL is a JavaScript file and filters out common
+// third-party libraries to maximize the value of the JS download limit.
+func isUsefulJSURL(raw string) bool {
+	if !isJavaScriptURL(raw) {
+		return false
+	}
+	
+	lower := strings.ToLower(raw)
+	
+	stopwords := []string{
+		"jquery", "bootstrap", "react", "react-dom", "vue", "angular", 
+		"moment", "lodash", "underscore", "chart", "d3", "analytics", 
+		"gtm.js", "google-analytics", "ads.js", "tracking", "fontawesome", 
+		"recaptcha", "polyfill", "vendor.js", "node_modules", "swagger-ui",
+	}
+	
+	for _, stopword := range stopwords {
+		if strings.Contains(lower, stopword) {
+			return false
+		}
+	}
+	return true
 }
 
 // isJavaScriptURL returns true when the URL path ends in .js, ignoring query
@@ -608,6 +672,7 @@ func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, err
 	for _, path := range files {
 		data, err := os.ReadFile(path)
 		if err != nil || len(data) == 0 {
+			os.Remove(path) // also clean up empty files to save space
 			continue
 		}
 		n, err := out.Write(data)
@@ -619,7 +684,14 @@ func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, err
 			return writtenFiles, totalBytes, err
 		}
 		writtenFiles++
+
+		// Destructive merge: immediately delete the original file to keep storage flat
+		os.Remove(path)
 	}
+	
+	// Remove the now-empty download directory completely
+	os.RemoveAll(downloadDir)
+
 	return writtenFiles, totalBytes, nil
 }
 

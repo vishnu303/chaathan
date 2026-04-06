@@ -64,6 +64,8 @@ func ParseHttpxOutput(scanID int64, filePath string) (int, error) {
 
 	count := 0
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -100,17 +102,23 @@ func ParseHttpxOutput(scanID int64, filePath string) (int, error) {
 	return count, scanner.Err()
 }
 
-// NucleiResult represents a line from nuclei JSON output
+// NucleiResult represents a line from nuclei JSON output.
+// Nuclei puts name, severity, and description inside a nested "info" object.
 type NucleiResult struct {
-	TemplateID    string   `json:"template-id"`
-	TemplateName  string   `json:"name"`
-	Severity      string   `json:"severity"`
-	Host          string   `json:"host"`
-	MatchedAt     string   `json:"matched-at"`
-	ExtractorName string   `json:"extractor-name"`
-	Matcher       string   `json:"matcher-name"`
-	Description   string   `json:"description"`
-	Extracted     []string `json:"extracted-results"`
+	TemplateID    string          `json:"template-id"`
+	Info          NucleiResultInfo `json:"info"`
+	Host          string          `json:"host"`
+	MatchedAt     string          `json:"matched-at"`
+	ExtractorName string          `json:"extractor-name"`
+	Matcher       string          `json:"matcher-name"`
+	Extracted     []string        `json:"extracted-results"`
+}
+
+// NucleiResultInfo holds the nested info fields from Nuclei's JSONL output.
+type NucleiResultInfo struct {
+	Name        string `json:"name"`
+	Severity    string `json:"severity"`
+	Description string `json:"description"`
 }
 
 // ParseNucleiOutput parses nuclei JSON output and stores in database
@@ -143,7 +151,7 @@ func ParseNucleiOutput(scanID int64, filePath string) (int, error) {
 			evidence = strings.Join(result.Extracted, "\n")
 		}
 
-		name := result.TemplateName
+		name := result.Info.Name
 		if name == "" {
 			name = result.TemplateID
 		}
@@ -154,8 +162,8 @@ func ParseNucleiOutput(scanID int64, filePath string) (int, error) {
 			result.MatchedAt,
 			result.TemplateID,
 			name,
-			strings.ToLower(result.Severity),
-			result.Description,
+			strings.ToLower(result.Info.Severity),
+			result.Info.Description,
 			result.Matcher,
 			evidence,
 		)
@@ -177,9 +185,9 @@ type NaabuResult struct {
 
 // FfufResult represents a single ffuf discovery item.
 type FfufResult struct {
-	Input map[string]string `json:"input"`
-	URL   string            `json:"url"`
-	Status int              `json:"status"`
+	Input  map[string]string `json:"input"`
+	URL    string            `json:"url"`
+	Status int               `json:"status"`
 }
 
 // ParseNaabuOutput parses naabu output and stores in database
@@ -369,76 +377,7 @@ func isHTTPMethod(s string) bool {
 
 // --- Phase 3: New tool parsers ---
 
-// SubjackResult represents a line from subjack output
-type SubjackResult struct {
-	Domain  string `json:"domain"`
-	Service string `json:"service"`
-	CNAME   string `json:"cname"`
-}
 
-// ParseSubjackOutput parses subjack output for subdomain takeover findings.
-// Each finding is stored as a critical vulnerability.
-func ParseSubjackOutput(scanID int64, filePath string) (int, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	count := 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		// Subjack output format: "[Vulnerable] example.com - Service: GitHub Pages"
-		// or JSON format
-		var result SubjackResult
-		if err := json.Unmarshal([]byte(line), &result); err == nil && result.Domain != "" {
-			// JSON format
-			err := database.AddVulnerability(
-				scanID,
-				result.Domain,
-				"",
-				"subdomain-takeover",
-				"Subdomain Takeover - "+result.Service,
-				"critical",
-				"Dangling CNAME to "+result.CNAME+" ("+result.Service+")",
-				"",
-				"CNAME: "+result.CNAME,
-			)
-			if err != nil {
-				continue
-			}
-			count++
-		} else if strings.Contains(line, "Vulnerable") {
-			// Text format: [Vulnerable] domain.com
-			parts := strings.SplitN(line, "]", 2)
-			if len(parts) >= 2 {
-				domain := strings.TrimSpace(parts[1])
-				err := database.AddVulnerability(
-					scanID,
-					domain,
-					"",
-					"subdomain-takeover",
-					"Subdomain Takeover",
-					"critical",
-					"Potential subdomain takeover detected",
-					"",
-					line,
-				)
-				if err != nil {
-					continue
-				}
-				count++
-			}
-		}
-	}
-
-	return count, scanner.Err()
-}
 
 // TlsxResult represents a line from tlsx JSON output
 type TlsxResult struct {
@@ -447,6 +386,7 @@ type TlsxResult struct {
 	SubjectCN   string   `json:"subject_cn"`
 	SubjectOrg  []string `json:"subject_org"`
 	SANs        []string `json:"san"`
+	SubjectAN   []string `json:"subject_an"`
 	Issuer      string   `json:"issuer_cn"`
 	NotBefore   string   `json:"not_before"`
 	NotAfter    string   `json:"not_after"`
@@ -482,8 +422,13 @@ func ParseTlsxOutput(scanID int64, filePath string, targetDomain string) (newSub
 			continue
 		}
 
-		// Extract SANs as new subdomains
-		for _, san := range result.SANs {
+		// Extract SANs as new subdomains. Newer tlsx JSON uses subject_an,
+		// while older probe-driven output may still emit san.
+		sans := result.SANs
+		if len(sans) == 0 {
+			sans = result.SubjectAN
+		}
+		for _, san := range sans {
 			san = strings.TrimPrefix(san, "*.")
 			if !seenSANs[san] && strings.HasSuffix(san, targetDomain) {
 				seenSANs[san] = true
@@ -599,10 +544,12 @@ func ParseUncoverOutput(scanID int64, filePath string) (subs int, ports int, err
 type DalfoxResult struct {
 	Type     string `json:"type"`
 	Severity string `json:"severity"`
-	URL      string `json:"data"`
+	URL      string `json:"url"`
+	Data     string `json:"data"`
 	Payload  string `json:"payload"`
 	Param    string `json:"param"`
 	CWE      string `json:"cwe"`
+	Method   string `json:"method"`
 }
 
 // ParseDalfoxOutput parses dalfox output for XSS findings.
@@ -626,22 +573,60 @@ func ParseDalfoxOutput(scanID int64, filePath string) (int, error) {
 
 		// Try JSON first
 		var result DalfoxResult
-		if err := json.Unmarshal([]byte(line), &result); err == nil && result.URL != "" {
+		if err := json.Unmarshal([]byte(line), &result); err == nil {
+			targetURL := strings.TrimSpace(result.URL)
+			if targetURL == "" {
+				targetURL = strings.TrimSpace(result.Data)
+			}
+			if targetURL == "" {
+				continue
+			}
+
 			severity := "medium"
 			if result.Severity != "" {
 				severity = strings.ToLower(result.Severity)
 			}
 
+			templateID := "xss"
+			if result.Type != "" {
+				templateID = "xss-" + strings.ToLower(result.Type)
+			}
+
+			name := "XSS Finding"
+			if result.Type != "" && result.Param != "" {
+				name = "XSS (" + result.Type + ") - Param: " + result.Param
+			} else if result.Type != "" {
+				name = "XSS (" + result.Type + ")"
+			} else if result.Param != "" {
+				name = "XSS - Param: " + result.Param
+			}
+
+			desc := "Potential XSS detected by Dalfox"
+			if result.Param != "" {
+				desc = "Cross-Site Scripting found via parameter: " + result.Param
+			}
+
+			var evidenceParts []string
+			if result.Payload != "" {
+				evidenceParts = append(evidenceParts, "Payload: "+result.Payload)
+			}
+			if result.Method != "" {
+				evidenceParts = append(evidenceParts, "Method: "+result.Method)
+			}
+			if result.CWE != "" {
+				evidenceParts = append(evidenceParts, "CWE: "+result.CWE)
+			}
+
 			err := database.AddVulnerability(
 				scanID,
-				result.URL,
-				result.URL,
-				"xss-"+result.Type,
-				"XSS ("+result.Type+") - Param: "+result.Param,
+				targetURL,
+				targetURL,
+				templateID,
+				name,
 				severity,
-				"Cross-Site Scripting found via parameter: "+result.Param,
+				desc,
 				"",
-				"Payload: "+result.Payload,
+				strings.Join(evidenceParts, "\n"),
 			)
 			if err != nil {
 				continue

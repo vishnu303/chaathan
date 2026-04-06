@@ -42,13 +42,12 @@ var AllTools = []ToolInfo{
 	{"gospider", "Crawl", "Web crawling & spidering", false, "github.com/jaeles-project/gospider@latest"},
 
 	// Analysis
-	{"linkfinder", "Analysis", "JavaScript endpoint extraction (Python)", false, ""},
-	{"subdomainizer", "Analysis", "JavaScript subdomain extraction (Python)", false, ""},
+	{"GoLinkFinder", "Analysis", "JavaScript endpoint extraction (Go)", false, "github.com/rix4uni/GoLinkFinder@latest"},
+	{"hakrawler", "Crawl", "Fast web crawler for endpoint & asset discovery", false, "github.com/hakluke/hakrawler@latest"},
 
 	// Fuzzing & Scanning
 	{"ffuf", "Fuzz", "Web fuzzer & directory brute-force", false, "github.com/ffuf/ffuf/v2@latest"},
 	{"nuclei", "Vuln", "Template-based vulnerability scanner", true, "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"},
-	{"subjack", "Vuln", "Subdomain takeover detection", false, "github.com/haccer/subjack@latest"},
 	{"dalfox", "Vuln", "XSS vulnerability scanner", false, "github.com/hahwul/dalfox/v2@latest"},
 
 	// Recon

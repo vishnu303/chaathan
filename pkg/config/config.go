@@ -63,6 +63,9 @@ type GeneralConfig struct {
 
 	// Wordlist paths
 	Wordlists WordlistsConfig `yaml:"wordlists"`
+
+	// JS Download Limit for Secret Scanning
+	JSLimit int `yaml:"js_limit"`
 }
 
 type WordlistsConfig struct {
@@ -301,6 +304,7 @@ func DefaultConfig() *Config {
 				Directories: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
 				Parameters:  "/usr/share/wordlists/seclists/Discovery/Web-Content/burp-parameter-names.txt",
 			},
+			JSLimit: 2000,
 		},
 		APIKeys: APIKeysConfig{
 			GitHub: os.Getenv("GITHUB_TOKEN"),
@@ -358,6 +362,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.General.Mode == "" {
 		cfg.General.Mode = "native"
+	}
+	if cfg.General.JSLimit == 0 {
+		cfg.General.JSLimit = 2000
 	}
 	if cfg.Tools.Nuclei.Concurrency == 0 {
 		cfg.Tools.Nuclei.Concurrency = 25

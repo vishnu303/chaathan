@@ -14,8 +14,8 @@ Activate this skill for any normal development work in this repository.
 ```
 main.go              → paths.Init(), defer database.Close(), cli.Execute()
 cli/                 → Cobra commands, flag parsing, delegates to pkg/
-pkg/wildcard_flow/   → 21-step domain recon (4 files: asset_discovery, validation,
-                       content_discovery, vulnerability_scanning)
+pkg/wildcard_flow/   → 22-step domain recon (5 files: asset_discovery, validation,
+                       content_discovery, vulnerability_scanning, fingerprinting)
 pkg/company_flow/    → 3-step company recon (asn_discovery, domain_discovery, cloud_enum)
 pkg/orchestrate/     → signal handling, infra bootstrap (runner + toolbox + notifier)
 pkg/database/        → SQLite persistence, queries, ROI ranking, metadata storage
@@ -58,7 +58,7 @@ pkg/utils/           → file I/O, parsers, export helpers, validation, formatti
 - Extend `RunConfig`, `Ctx`, or `Files` structs — never thread long parameter lists.
 - Keep CLI → workflow → storage separation strict.
 - External tools are host dependencies; do not replace with in-process logic.
-- Keep user-visible counts accurate: 21 steps across 4 phases for wildcard, 3 steps for company.
+- Keep user-visible counts accurate: 22 steps across 5 phases for wildcard, 3 steps for company.
 - Every step function must return `c.cancelled()`, never `return false`.
 - Never call `MarkStepComplete` after `MarkStepFailed` in the same error path.
 - `WildcardSteps` in `pkg/scan/scan.go` must match execution order in `flow.go`.

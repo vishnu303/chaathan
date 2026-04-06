@@ -49,13 +49,14 @@ type Step struct {
 //	Phase 3 (Content Discovery): url_discovery, web_crawling, js_analysis,
 //	                             param_discovery, url_consolidation, js_secret_scan, dir_fuzzing
 //	Phase 4 (Vuln Scanning):     vuln_scanning, vuln_scanning_urls, takeover_detection, xss_scanning
+//	Phase 5 (Fingerprinting):    tech_waf_fingerprinting
 var WildcardSteps = []Step{
 	// Phase 1 — Asset Discovery
 	{Name: "passive_enum", Description: "Passive Subdomain Enumeration", Required: true, Tool: "subfinder,assetfinder,sublist3r"},
 	{Name: "active_enum", Description: "Active Subdomain Enumeration", Required: false, Tool: "amass"},
 	{Name: "github_recon", Description: "GitHub Subdomain Discovery", Required: false, Tool: "github-subdomains"},
 	{Name: "search_engine_recon", Description: "Search Engine Dorking", Required: false, Tool: "uncover"},
-	{Name: "js_subdomain_discovery", Description: "JavaScript Subdomain Extraction", Required: false, Tool: "subdomainizer"},
+	{Name: "js_subdomain_discovery", Description: "JavaScript Crawling (Hakrawler)", Required: false, Tool: "hakrawler"},
 
 	// Phase 2 — Validation & Fingerprint
 	{Name: "dns_resolution", Description: "Consolidation & DNS Resolution", Required: true, Tool: "dnsx"},
@@ -66,7 +67,7 @@ var WildcardSteps = []Step{
 	// Phase 3 — Content Discovery
 	{Name: "url_discovery", Description: "Historical URL Discovery", Required: false, Tool: "waybackurls,gau"},
 	{Name: "web_crawling", Description: "Web Crawling", Required: false, Tool: "katana,gospider"},
-	{Name: "js_analysis", Description: "JavaScript Analysis", Required: false, Tool: "linkfinder"},
+	{Name: "js_analysis", Description: "JavaScript Analysis (GoLinkFinder)", Required: false, Tool: "GoLinkFinder"},
 	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
 	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
 	{Name: "js_secret_scan", Description: "JS File Secret Scan (gf)", Required: false, Tool: "httpx,gf"},
@@ -74,8 +75,10 @@ var WildcardSteps = []Step{
 	// Phase 4 — Vulnerability Scanning
 	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},
 	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},
-	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "subjack"},
+	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "nuclei"},
 	{Name: "xss_scanning", Description: "XSS Scanning", Required: false, Tool: "dalfox"},
+	// Phase 5 — Fingerprinting
+	{Name: "tech_waf_fingerprinting", Description: "Technology & WAF Fingerprinting", Required: false, Tool: "httpx,nuclei"},
 }
 
 // CompanySteps defines the steps in the company workflow.

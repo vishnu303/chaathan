@@ -333,7 +333,7 @@ func ExportSummary(scanID int64, resultDir string, target string) error {
 	fmt.Fprintln(f, "gf_secrets_findings.txt           - JS secret and JS sink matches from downloaded JS")
 	fmt.Fprintln(f, "nuclei_vulns.json                 - Nuclei infra scan raw output")
 	fmt.Fprintln(f, "nuclei_url_vulns.json             - Nuclei URL scan raw output")
-	fmt.Fprintln(f, "dalfox_xss.json                   - Dalfox XSS scan raw output")
+	fmt.Fprintln(f, "dalfox_xss.jsonl                  - Dalfox XSS scan structured JSONL output")
 	fmt.Fprintln(f, "")
 	fmt.Fprintln(f, "Raw tool outputs are in intermediate_files/ (subfinder, gau, httpx, etc.)")
 

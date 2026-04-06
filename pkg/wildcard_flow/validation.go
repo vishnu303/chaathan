@@ -40,7 +40,7 @@ func stepDNSConsolidation(c *Ctx) bool {
 		c.F.Sublist3rOut,
 		c.F.AmassOut,
 		c.F.GithubSubsOut,
-		c.F.SubdomainizerOut,
+		c.F.HakrawlerOut,
 		c.F.UncoverHostsOut, // hostnames extracted from uncover.json in Step 4
 	)
 	if err := utils.MergeAndDeduplicate(passiveSources, c.F.ConsolidatedSubs); err != nil {
@@ -48,7 +48,8 @@ func stepDNSConsolidation(c *Ctx) bool {
 		logger.Error("Failed to consolidate: %v", err)
 		return c.cancelled()
 	}
-	logger.Success("Consolidated list saved to %s", c.F.ConsolidatedSubs)
+	subCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
+	logger.Success("Consolidated %d unique subdomains", subCount)
 
 	logger.SubStep("Running DNSx for resolution...")
 	if err := runWithSkip(c, "dnsx", func(sCtx context.Context) error {
@@ -60,6 +61,9 @@ func stepDNSConsolidation(c *Ctx) bool {
 			c.StateMgr.MarkStepFailed(c.State, "dns_resolution", err)
 			logger.Error("DNSx failed: %v", err)
 		}
+	} else {
+		resolvedCount, _ := utils.CountFileLines(c.F.DnsxOut)
+		logger.Info("  Resolved %d subdomains via DNS", resolvedCount)
 	}
 	c.StateMgr.MarkStepComplete(c.State, "dns_resolution")
 	return c.cancelled()
@@ -133,9 +137,11 @@ func stepHTTPProbing(c *Ctx) bool {
 			c.StateMgr.MarkStepFailed(c.State, "http_probing", err)
 			logger.Error("Httpx failed: %v", err)
 		}
-	} else {
-		if c.ScanID > 0 {
-			count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
+	}
+	// Parse and log results regardless of skip/success — partial output may exist
+	if c.ScanID > 0 && utils.FileExists(c.F.HttpxOut) {
+		count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
+		if count > 0 {
 			logger.Info("  Found %d live hosts", count)
 		}
 	}
@@ -232,9 +238,11 @@ func stepPortScanning(c *Ctx) bool {
 				c.StateMgr.MarkStepFailed(c.State, "port_scanning", err)
 				logger.Error("Naabu failed: %v", err)
 			}
-		} else {
-			if c.ScanID > 0 {
-				count, _ := utils.ParseNaabuOutput(c.ScanID, c.F.NaabuOut)
+		}
+		// Parse and log results regardless of skip/success — partial output may exist
+		if c.ScanID > 0 && utils.FileExists(c.F.NaabuOut) {
+			count, _ := utils.ParseNaabuOutput(c.ScanID, c.F.NaabuOut)
+			if count > 0 {
 				logger.Info("  Found %d open ports", count)
 			}
 		}

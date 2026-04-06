@@ -45,13 +45,14 @@ type RunConfig struct {
 	SkipNuclei        bool
 	SkipNaabu         bool
 	SkipCrawl         bool
-	SkipSubjack       bool
+	SkipTakeovers     bool
 	SkipDalfox        bool
 	SkipUncover       bool
 	SkipTlsx          bool
 	SkipArjun         bool
 	SkipShuffleDNS    bool
-	SkipSubdomainizer bool
+	SkipHakrawler     bool
+	SkipFingerprint   bool
 
 	// Paths / tokens
 	WordlistPath    string
@@ -59,8 +60,8 @@ type RunConfig struct {
 	ResolversPath   string
 	GitHubToken     string
 
-	// Resume
-	ResumeScanID int64
+	// Control parameters
+	ResumeScanID   int64
 
 	// Post-scan
 	GenerateReport bool
@@ -90,8 +91,8 @@ type Files struct {
 	NaabuOut           string
 	KatanaOut          string
 	GospiderOut        string
-	LinkfinderOut      string
-	SubdomainizerOut   string
+	GoLinkFinderOut    string
+	HakrawlerOut       string
 	ArjunOut           string
 	ArjunURLsOut       string
 	AllURLsRaw         string
@@ -111,6 +112,8 @@ type Files struct {
 	SubjackOut         string
 	ParamURLsFile      string
 	DalfoxOut          string
+	HttpxTechOut       string
+	NucleiWafOut       string
 }
 
 // newFiles builds all output paths from the result directory.
@@ -142,8 +145,8 @@ func newFiles(dir string) Files {
 		NaabuOut:           j("naabu_ports.txt"),
 		KatanaOut:          j("katana_urls.txt"),
 		GospiderOut:        j("gospider_urls.txt"),
-		LinkfinderOut:      j("linkfinder_endpoints.txt"),
-		SubdomainizerOut:   j("subdomainizer_subs.txt"),
+		GoLinkFinderOut:    j("golinkfinder_endpoints.txt"),
+		HakrawlerOut:       j("hakrawler_crawl.txt"),
 		ArjunOut:           j("arjun_params.json"),
 		ArjunURLsOut:       j("arjun_urls.txt"),
 		AllURLsRaw:         j("all_urls_raw.txt"),
@@ -159,12 +162,14 @@ func newFiles(dir string) Files {
 		// Nuclei JSON outputs go to final_files/ — they are product files
 		NucleiOut:        jf("nuclei_vulns.json"),
 		NucleiURLOut:     jf("nuclei_url_vulns.json"),
-		DalfoxOut:        jf("dalfox_xss.json"),
+		DalfoxOut:        jf("dalfox_xss.jsonl"),
 		// Nuclei working files (URL target lists) stay in intermediate_files/
 		NucleiURLTargets: j("nuclei_url_targets.txt"),
 		NucleiGFMatches:  j("nuclei_url_targets_gf.txt"),
 		SubjackOut:       j("subjack_takeovers.txt"),
 		ParamURLsFile:    j("param_urls_live.txt"),
+		HttpxTechOut:     jf("httpx_tech.json"),
+		NucleiWafOut:     jf("nuclei_waf.json"),
 	}
 }
 
@@ -216,7 +221,7 @@ func (c *Ctx) urlSources() []string {
 		c.F.GauOut,
 		c.F.KatanaOut,
 		c.F.GospiderOut,
-		c.F.LinkfinderOut,
+		c.F.GoLinkFinderOut,
 		c.F.ArjunURLsOut,
 	}
 }
@@ -265,13 +270,14 @@ func Run(cfg RunConfig) error {
 		"skip_nuclei":        cfg.SkipNuclei,
 		"skip_naabu":         cfg.SkipNaabu,
 		"skip_crawl":         cfg.SkipCrawl,
-		"skip_subjack":       cfg.SkipSubjack,
+		"skip_takeovers":     cfg.SkipTakeovers,
 		"skip_dalfox":        cfg.SkipDalfox,
 		"skip_uncover":       cfg.SkipUncover,
 		"skip_tlsx":          cfg.SkipTlsx,
 		"skip_arjun":         cfg.SkipArjun,
 		"skip_shuffledns":    cfg.SkipShuffleDNS,
-		"skip_subdomainizer": cfg.SkipSubdomainizer,
+		"skip_hakrawler":     cfg.SkipHakrawler,
+		"skip_fingerprint":   cfg.SkipFingerprint,
 		"wordlist":           cfg.WordlistPath,
 		"dns_wordlist":       cfg.DNSWordlistPath,
 		"github":             cfg.GitHubToken != "",
@@ -377,6 +383,9 @@ func Run(cfg RunConfig) error {
 		{"vuln_scanning_urls", stepVulnScanningURLs},
 		{"takeover_detection", stepTakeoverDetection},
 		{"xss_scanning", stepXSSScanning},
+
+		// Phase 5 — Fingerprinting (Step 22)
+		{"tech_waf_fingerprinting", stepFingerprinting},
 	}
 
 	for _, step := range steps {
@@ -467,9 +476,9 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "web_crawling":
 		return countLines(c.F.KatanaOut, c.F.GospiderOut)
 	case "js_analysis":
-		return countLines(c.F.LinkfinderOut)
+		return countLines(c.F.GoLinkFinderOut)
 	case "js_subdomain_discovery":
-		return countLines(c.F.SubdomainizerOut)
+		return countLines(c.F.HakrawlerOut)
 	case "param_discovery":
 		return countLines(c.F.ArjunURLsOut)
 	case "url_consolidation":
@@ -486,6 +495,8 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 		return countLines(c.F.SubjackOut)
 	case "xss_scanning":
 		return countLines(c.F.DalfoxOut)
+	case "tech_waf_fingerprinting":
+		return countLines(c.F.NucleiWafOut)
 	default:
 		return 0
 	}
@@ -516,7 +527,11 @@ func finalizeScan(c *Ctx, status string) {
 			stats["URLs"] = fmt.Sprintf("%d", dbStats.TotalURLs)
 			stats["Endpoints"] = fmt.Sprintf("%d", dbStats.TotalEndpoints)
 			for sev, count := range dbStats.Vulnerabilities {
-				stats["Vuln ("+sev+")"] = fmt.Sprintf("%d", count)
+				label := sev
+				if label == "" {
+					label = "unknown"
+				}
+				stats["Vuln ("+label+")"] = fmt.Sprintf("%d", count)
 			}
 
 			if c.Notifier != nil {
