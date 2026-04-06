@@ -42,7 +42,7 @@ var rootCmd = &cobra.Command{
   Automated bug bounty recon — 28 tools, 2 workflows, 1 binary.
 
 Workflows:
-  wildcard  21-step domain recon & vulnerability assessment
+  wildcard  22-step domain recon & vulnerability assessment
   company   3-step org discovery (ASN, root domains, cloud assets)
 
 Key capabilities:
@@ -63,7 +63,7 @@ Modes:
 
 Getting started:
   chaathan setup                     Install all tools
-  chaathan wildcard -d target.com    Run full 21-step recon
+  chaathan wildcard -d target.com    Run full 22-step recon
   chaathan company -n "Company Inc"  Run company discovery
   chaathan status                    View scan dashboard
   chaathan query vulns 1             Query vulnerabilities
@@ -146,7 +146,7 @@ var versionCmd = &cobra.Command{
 		fmt.Printf("%s%sChaathan%s %s\n", logger.BrightCyan, logger.Bold, logger.Reset, Version)
 		fmt.Printf("%sBuilt: %s%s\n", logger.Dim, BuildTime, logger.Reset)
 		fmt.Printf("%sPentesting Recon Framework%s\n", logger.Dim, logger.Reset)
-		fmt.Printf("%s28 tools • 21-step wildcard • 3-step company%s\n", logger.Dim, logger.Reset)
+		fmt.Printf("%s28 tools • 22-step wildcard • 3-step company%s\n", logger.Dim, logger.Reset)
 		fmt.Printf("%shttps://github.com/vishnu303/chaathan-flow%s\n", logger.Dim, logger.Reset)
 	},
 }

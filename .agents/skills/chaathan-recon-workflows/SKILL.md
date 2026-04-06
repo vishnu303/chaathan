@@ -22,13 +22,14 @@ Activate this skill when the task touches recon pipeline behavior rather than ge
 
 Same pattern, simpler: 3 steps, each in its own file (`asn_discovery.go`, `domain_discovery.go`, `cloud_enum.go`).
 
-## 4-Phase wildcard workflow (21 steps)
+## 5-Phase wildcard workflow (22 steps)
 
 ```
 Phase 1 — Asset Discovery     (Steps 1–5)   in: domain         out: all_subdomains.txt
 Phase 2 — Validation           (Steps 6–10)  in: subdomains     out: live_hosts.txt
 Phase 3 — Content Discovery    (Steps 11–17) in: live hosts     out: all_urls_live.txt
 Phase 4 — Vulnerability Scan   (Steps 18–21) in: hosts + URLs   out: DB findings
+Phase 5 — Fingerprinting       (Step 22)     in: live hosts     out: Tech/WAF JSON
 ```
 
 ### Phase 1 — Asset Discovery (`asset_discovery.go`)
@@ -71,6 +72,12 @@ Phase 4 — Vulnerability Scan   (Steps 18–21) in: hosts + URLs   out: DB find
 | 19 | `vuln_scanning_urls` | Nuclei (URLs + gf) | `--skip-nuclei` |
 | 20 | `takeover_detection` | Subjack | `--skip-subjack` |
 | 21 | `xss_scanning` | Dalfox | `--skip-dalfox` |
+
+### Phase 5 — Fingerprinting (`fingerprinting.go`)
+
+| Step | Name | Tool(s) | Notes |
+|------|------|---------|-------|
+| 22 | `tech_waf_fingerprinting` | Httpx, Nuclei | `--skip-fingerprint`; runs last to avoid early WAF blocks |
 
 ### Company flow (3 steps)
 

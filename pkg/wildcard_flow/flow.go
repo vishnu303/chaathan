@@ -51,7 +51,8 @@ type RunConfig struct {
 	SkipTlsx          bool
 	SkipArjun         bool
 	SkipShuffleDNS    bool
-	SkipHakrawler bool
+	SkipHakrawler     bool
+	SkipFingerprint   bool
 
 	// Paths / tokens
 	WordlistPath    string
@@ -111,6 +112,8 @@ type Files struct {
 	SubjackOut         string
 	ParamURLsFile      string
 	DalfoxOut          string
+	HttpxTechOut       string
+	NucleiWafOut       string
 }
 
 // newFiles builds all output paths from the result directory.
@@ -165,6 +168,8 @@ func newFiles(dir string) Files {
 		NucleiGFMatches:  j("nuclei_url_targets_gf.txt"),
 		SubjackOut:       j("subjack_takeovers.txt"),
 		ParamURLsFile:    j("param_urls_live.txt"),
+		HttpxTechOut:     jf("httpx_tech.json"),
+		NucleiWafOut:     jf("nuclei_waf.json"),
 	}
 }
 
@@ -272,6 +277,7 @@ func Run(cfg RunConfig) error {
 		"skip_arjun":         cfg.SkipArjun,
 		"skip_shuffledns":    cfg.SkipShuffleDNS,
 		"skip_hakrawler":     cfg.SkipHakrawler,
+		"skip_fingerprint":   cfg.SkipFingerprint,
 		"wordlist":           cfg.WordlistPath,
 		"dns_wordlist":       cfg.DNSWordlistPath,
 		"github":             cfg.GitHubToken != "",
@@ -377,6 +383,9 @@ func Run(cfg RunConfig) error {
 		{"vuln_scanning_urls", stepVulnScanningURLs},
 		{"takeover_detection", stepTakeoverDetection},
 		{"xss_scanning", stepXSSScanning},
+
+		// Phase 5 — Fingerprinting (Step 22)
+		{"tech_waf_fingerprinting", stepFingerprinting},
 	}
 
 	for _, step := range steps {
@@ -486,6 +495,8 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 		return countLines(c.F.SubjackOut)
 	case "xss_scanning":
 		return countLines(c.F.DalfoxOut)
+	case "tech_waf_fingerprinting":
+		return countLines(c.F.NucleiWafOut)
 	default:
 		return 0
 	}
@@ -516,7 +527,11 @@ func finalizeScan(c *Ctx, status string) {
 			stats["URLs"] = fmt.Sprintf("%d", dbStats.TotalURLs)
 			stats["Endpoints"] = fmt.Sprintf("%d", dbStats.TotalEndpoints)
 			for sev, count := range dbStats.Vulnerabilities {
-				stats["Vuln ("+sev+")"] = fmt.Sprintf("%d", count)
+				label := sev
+				if label == "" {
+					label = "unknown"
+				}
+				stats["Vuln ("+label+")"] = fmt.Sprintf("%d", count)
 			}
 
 			if c.Notifier != nil {

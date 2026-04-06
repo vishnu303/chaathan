@@ -102,17 +102,23 @@ func ParseHttpxOutput(scanID int64, filePath string) (int, error) {
 	return count, scanner.Err()
 }
 
-// NucleiResult represents a line from nuclei JSON output
+// NucleiResult represents a line from nuclei JSON output.
+// Nuclei puts name, severity, and description inside a nested "info" object.
 type NucleiResult struct {
-	TemplateID    string   `json:"template-id"`
-	TemplateName  string   `json:"name"`
-	Severity      string   `json:"severity"`
-	Host          string   `json:"host"`
-	MatchedAt     string   `json:"matched-at"`
-	ExtractorName string   `json:"extractor-name"`
-	Matcher       string   `json:"matcher-name"`
-	Description   string   `json:"description"`
-	Extracted     []string `json:"extracted-results"`
+	TemplateID    string          `json:"template-id"`
+	Info          NucleiResultInfo `json:"info"`
+	Host          string          `json:"host"`
+	MatchedAt     string          `json:"matched-at"`
+	ExtractorName string          `json:"extractor-name"`
+	Matcher       string          `json:"matcher-name"`
+	Extracted     []string        `json:"extracted-results"`
+}
+
+// NucleiResultInfo holds the nested info fields from Nuclei's JSONL output.
+type NucleiResultInfo struct {
+	Name        string `json:"name"`
+	Severity    string `json:"severity"`
+	Description string `json:"description"`
 }
 
 // ParseNucleiOutput parses nuclei JSON output and stores in database
@@ -145,7 +151,7 @@ func ParseNucleiOutput(scanID int64, filePath string) (int, error) {
 			evidence = strings.Join(result.Extracted, "\n")
 		}
 
-		name := result.TemplateName
+		name := result.Info.Name
 		if name == "" {
 			name = result.TemplateID
 		}
@@ -156,8 +162,8 @@ func ParseNucleiOutput(scanID int64, filePath string) (int, error) {
 			result.MatchedAt,
 			result.TemplateID,
 			name,
-			strings.ToLower(result.Severity),
-			result.Description,
+			strings.ToLower(result.Info.Severity),
+			result.Info.Description,
 			result.Matcher,
 			evidence,
 		)

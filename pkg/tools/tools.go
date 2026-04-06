@@ -946,6 +946,47 @@ func (t *ToolBox) uncoverEngines() []string {
 	return engines
 }
 
+// --- Fingerprinting & WAF ---
+
+// RunHttpxFingerprint runs HTTPX purely for tech detection, gathering technologies used by live hosts.
+func (t *ToolBox) RunHttpxFingerprint(ctx context.Context, inputFile string, outputFile string) error {
+	args := []string{
+		"-l", inputFile,
+		"-threads", strconv.Itoa(t.httpxThreads()),
+		"-timeout", strconv.Itoa(t.httpxTimeout()),
+		"-tech-detect", "-json",
+		"-o", outputFile,
+	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-http-proxy")
+	if rps := t.globalRPS(); rps > 0 {
+		args = append(args, "-rl", strconv.Itoa(rps))
+	}
+	_, err := t.Runner.Run(ctx, "httpx", args)
+	return err
+}
+
+// RunNucleiWAF runs Nuclei specifically for WAF detection with a conservative rate limit.
+func (t *ToolBox) RunNucleiWAF(ctx context.Context, inputFile string, outputFile string) error {
+	// WAF detection needs a gentler rate limit as sending malicious tags will quickly trigger blocks.
+	rateLimit := t.effectiveRate(50) 
+	concurrency := 10
+
+	args := []string{
+		"-l", inputFile,
+		"-c", strconv.Itoa(concurrency),
+		"-rl", strconv.Itoa(rateLimit),
+		"-tags", "waf",
+		"-jsonl",
+		"-o", outputFile,
+	}
+
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	_, err := t.Runner.Run(ctx, "nuclei", args)
+	return err
+}
+
 // Helper
 func writeToFile(path string, content string) error {
 	f, err := os.Create(path)

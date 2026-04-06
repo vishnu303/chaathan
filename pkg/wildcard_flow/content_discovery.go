@@ -96,7 +96,19 @@ func stepURLDiscovery(c *Ctx) bool {
 	})
 
 	if err == ErrToolSkipped {
-		// Skipped by user — mark complete so resume skips this step
+		// Skipped by user — log partial results from any tool that wrote output before the skip
+		if c.ScanID > 0 {
+			if utils.FileExists(c.F.WaybackOut) {
+				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls"); count > 0 {
+					logger.Info("  Waybackurls partial: %d URLs", count)
+				}
+			}
+			if utils.FileExists(c.F.GauOut) {
+				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau"); count > 0 {
+					logger.Info("  GAU partial: %d URLs", count)
+				}
+			}
+		}
 		c.StateMgr.MarkStepComplete(c.State, "url_discovery")
 	} else if !waybackOK && !gauOK {
 		c.StateMgr.MarkStepFailed(c.State, "url_discovery", fmt.Errorf("both Waybackurls and GAU failed"))
@@ -178,6 +190,19 @@ func stepWebCrawling(c *Ctx) bool {
 	if err != nil && err != ErrToolSkipped {
 		c.StateMgr.MarkStepFailed(c.State, "web_crawling", err)
 	} else {
+		// Log partial results when skipped — tools may have written output before cancel
+		if err == ErrToolSkipped && c.ScanID > 0 {
+			if utils.FileExists(c.F.KatanaOut) {
+				if count, _ := utils.CountFileLines(c.F.KatanaOut); count > 0 {
+					logger.Info("  Katana partial: %d URLs", count)
+				}
+			}
+			if utils.FileExists(c.F.GospiderOut) {
+				if count, _ := utils.CountFileLines(c.F.GospiderOut); count > 0 {
+					logger.Info("  GoSpider partial: %d URLs", count)
+				}
+			}
+		}
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 	}
 	return c.cancelled()
@@ -286,6 +311,11 @@ func stepURLConsolidation(c *Ctx) bool {
 		c.StateMgr.MarkStepFailed(c.State, "url_consolidation", err)
 		logger.Warning("URL merge failed: %v", err)
 	} else {
+		// Sanitize: unescape \uXXXX sequences, strip non-URL lines (GoSpider tags,
+		// relative paths from GoLinkFinder), and re-deduplicate.
+		if err := utils.SanitizeURLFile(c.F.AllURLsRaw); err != nil {
+			logger.Warning("URL sanitization failed: %v", err)
+		}
 		rawCount, _ := utils.CountFileLines(c.F.AllURLsRaw)
 		logger.Info("  Merged %d unique URLs", rawCount)
 	}
@@ -367,7 +397,6 @@ func stepJSSecretScan(c *Ctx) bool {
 		logger.Warning("Failed to reset JS download directory: %v", err)
 	}
 	if err := os.MkdirAll(c.F.JSDownloadsDir, 0755); err != nil {
-		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
 		logger.Warning("Could not create JS download directory: %v", err)
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
 		return c.cancelled()
@@ -386,7 +415,6 @@ func stepJSSecretScan(c *Ctx) bool {
 
 	downloadedFiles, combinedBytes, err := concatenateDownloadedFiles(c.F.JSDownloadsDir, c.F.JSCombinedFile)
 	if err != nil {
-		c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", err)
 		logger.Warning("Failed to combine downloaded JS content: %v", err)
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
 		return c.cancelled()
@@ -422,12 +450,6 @@ func stepJSSecretScan(c *Ctx) bool {
 		writeEmptyFile(c.F.GFSecretsFinal)
 	}
 
-	// Prepend the size of the combined file to the top of the secrets file
-	if content, err := os.ReadFile(c.F.GFSecretsFinal); err == nil {
-		header := fmt.Sprintf("// Scan Metadata | JS Combined File Size: %.4f GB\n", float64(combinedBytes)/(1024*1024*1024))
-		_ = os.WriteFile(c.F.GFSecretsFinal, append([]byte(header), content...), 0644)
-	}
-
 	totalFindings, _ := utils.CountFileLines(c.F.GFSecretsFinal)
 	if totalFindings > 0 {
 		logger.Info("  Found %d JS/secret findings (%d JS matches, %d secret matches)", totalFindings, jsMatchCount, secretMatchCount)
@@ -445,6 +467,15 @@ func stepJSSecretScan(c *Ctx) bool {
 		}
 	} else {
 		logger.Info("  No JS or secret findings matched installed gf patterns")
+	}
+
+	// Prepend the size of the combined file to the top of the secrets file
+	// (only when there are actual findings — avoids a comment-only file in final_files/)
+	if totalFindings > 0 {
+		if content, err := os.ReadFile(c.F.GFSecretsFinal); err == nil {
+			header := fmt.Sprintf("// Scan Metadata | JS Combined File Size: %.4f GB\n", float64(combinedBytes)/(1024*1024*1024))
+			_ = os.WriteFile(c.F.GFSecretsFinal, append([]byte(header), content...), 0644)
+		}
 	}
 
 	// Free up massive amounts of storage by deleting the combined file after the scan finishes

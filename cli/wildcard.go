@@ -30,6 +30,7 @@ var (
 	skipArjun         bool
 	skipShuffleDNS    bool
 	skipHakrawler     bool
+	skipFingerprint   bool
 	wordlistPath      string
 	dnsWordlistPath   string
 	resolversPath     string
@@ -49,8 +50,8 @@ var wildcardCmd = &cobra.Command{
 	Aliases: []string{"scan"},
 	Short:   "Run the Wildcard Reconnaissance Workflow",
 Long: `
-Runs a comprehensive 21-step recon & vulnerability scanning workflow
-organised into 4 clean phases:
+Runs a comprehensive 22-step recon & vulnerability scanning workflow
+organised into 5 clean phases:
 
   PHASE 1 — ASSET DISCOVERY (Steps 1–5)
   1. Passive Enumeration (Subfinder, Assetfinder, Sublist3r) [Parallel]
@@ -81,6 +82,9 @@ organised into 4 clean phases:
  20. Subdomain Takeover Detection (Nuclei) [Optional, --skip-takeovers]
  21. XSS Scanning (Dalfox) [Optional, --skip-dalfox]
 
+ PHASE 5 — FINGERPRINTING (Step 22)
+ 22. Technology & WAF Fingerprinting (Httpx, Nuclei) [Optional, --skip-fingerprint]
+
 Press 's' at any time during scanning to skip the current tool.
 All results are stored in a SQLite database for querying and reporting.
 `,
@@ -100,6 +104,7 @@ func init() {
 	wildcardCmd.Flags().BoolVar(&skipArjun, "skip-arjun", false, "Skip Arjun parameter discovery")
 	wildcardCmd.Flags().BoolVar(&skipShuffleDNS, "skip-shuffledns", false, "Skip ShuffleDNS brute-force")
 	wildcardCmd.Flags().BoolVar(&skipHakrawler, "skip-hakrawler", false, "Skip Hakrawler JS crawling")
+	wildcardCmd.Flags().BoolVar(&skipFingerprint, "skip-fingerprint", false, "Skip Technology & WAF Fingerprinting step")
 	wildcardCmd.Flags().StringVarP(&wordlistPath, "wordlist", "w", "", "Wordlist for directory fuzzing (enables ffuf)")
 	wildcardCmd.Flags().StringVar(&dnsWordlistPath, "dns-wordlist", "", "Wordlist for DNS brute-force with ShuffleDNS")
 	wildcardCmd.Flags().StringVar(&resolversPath, "resolvers", "", "Custom DNS resolvers file for ShuffleDNS")
@@ -169,6 +174,7 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		SkipArjun:         skipArjun,
 		SkipShuffleDNS:    skipShuffleDNS,
 		SkipHakrawler:     skipHakrawler,
+		SkipFingerprint:   skipFingerprint,
 		WordlistPath:      wordlistPath,
 		DNSWordlistPath:   dnsWordlistPath,
 		ResolversPath:     resolversPath,

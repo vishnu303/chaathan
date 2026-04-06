@@ -49,6 +49,7 @@ type Step struct {
 //	Phase 3 (Content Discovery): url_discovery, web_crawling, js_analysis,
 //	                             param_discovery, url_consolidation, js_secret_scan, dir_fuzzing
 //	Phase 4 (Vuln Scanning):     vuln_scanning, vuln_scanning_urls, takeover_detection, xss_scanning
+//	Phase 5 (Fingerprinting):    tech_waf_fingerprinting
 var WildcardSteps = []Step{
 	// Phase 1 — Asset Discovery
 	{Name: "passive_enum", Description: "Passive Subdomain Enumeration", Required: true, Tool: "subfinder,assetfinder,sublist3r"},
@@ -76,6 +77,8 @@ var WildcardSteps = []Step{
 	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},
 	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "nuclei"},
 	{Name: "xss_scanning", Description: "XSS Scanning", Required: false, Tool: "dalfox"},
+	// Phase 5 — Fingerprinting
+	{Name: "tech_waf_fingerprinting", Description: "Technology & WAF Fingerprinting", Required: false, Tool: "httpx,nuclei"},
 }
 
 // CompanySteps defines the steps in the company workflow.

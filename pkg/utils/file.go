@@ -96,3 +96,111 @@ func CountFileLines(filePath string) (int, error) {
 	}
 	return count, scanner.Err()
 }
+
+// SanitizeURLFile reads a URL file, cleans each line (unescaping unicode,
+// stripping non-URL lines), and writes the result back in place.
+// This prevents downstream tools (Nuclei, Dalfox, httpx) from receiving
+// malformed URLs that contain literal \uXXXX sequences or GoSpider tags.
+func SanitizeURLFile(filePath string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+
+	var cleaned []string
+	seen := make(map[string]bool)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		// Unescape \\uXXXX → \uXXXX → actual character
+		line = unescapeUnicodeURL(line)
+
+		// Strip trailing backslashes left over from JS string extraction
+		line = strings.TrimRight(line, "\\")
+
+		// Skip non-URL lines (GoSpider tags, relative paths, bare words)
+		if !strings.HasPrefix(line, "http://") && !strings.HasPrefix(line, "https://") {
+			continue
+		}
+
+		if !seen[line] {
+			seen[line] = true
+			cleaned = append(cleaned, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		file.Close()
+		return err
+	}
+	file.Close()
+
+	sort.Strings(cleaned)
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for _, line := range cleaned {
+		w.WriteString(line)
+		w.WriteByte('\n')
+	}
+	return w.Flush()
+}
+
+// unescapeUnicodeURL replaces literal \uXXXX sequences with their
+// actual characters. GoLinkFinder extracts URLs from JavaScript source
+// where & is encoded as \u0026, producing URLs like:
+//   http://example.com/?a=1\u0026b=2
+// Tools like Nuclei and Dalfox need the real & character.
+func unescapeUnicodeURL(s string) string {
+	// Handle double-escaped \\u first
+	s = strings.ReplaceAll(s, "\\\\u", "\\u")
+
+	// Fast path: no unicode escapes
+	if !strings.Contains(s, "\\u") {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if i+5 < len(s) && s[i] == '\\' && s[i+1] == 'u' {
+			// Try to parse 4 hex digits after \u
+			hex := s[i+2 : i+6]
+			if r, ok := parseHex4(hex); ok {
+				b.WriteRune(r)
+				i += 5 // skip \uXXXX (loop adds 1)
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// parseHex4 parses exactly 4 hex digits into a rune.
+func parseHex4(s string) (rune, bool) {
+	if len(s) != 4 {
+		return 0, false
+	}
+	var r rune
+	for _, c := range []byte(s) {
+		r <<= 4
+		switch {
+		case c >= '0' && c <= '9':
+			r |= rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			r |= rune(c - 'a' + 10)
+		case c >= 'A' && c <= 'F':
+			r |= rune(c - 'A' + 10)
+		default:
+			return 0, false
+		}
+	}
+	return r, true
+}
