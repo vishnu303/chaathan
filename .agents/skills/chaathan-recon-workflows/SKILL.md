@@ -14,6 +14,7 @@ Activate this skill when the task touches recon pipeline behavior rather than ge
 ### Wildcard flow (`pkg/wildcard_flow/`)
 
 - `RunConfig` — boundary from CLI into workflow code (all CLI options).
+  - Includes `SaveLog bool` — when true, mirrors full scan output to `~/.chaathan/logs/<domain>_<scanID>_<timestamp>.log` (plain text, ANSI stripped). File path stored in `Ctx.LogFilePath` and shown in next-steps hints after the scan.
 - `Files` — canonical artifact paths for the run (`intermediate_files/` and `final_files/`).
 - `Ctx` — shared execution state embedding `RunConfig`: tools, scan state, notifier, paths.
 - Each step lives in a phase-aligned file.
@@ -40,7 +41,7 @@ Phase 5 — Fingerprinting       (Step 22)     in: live hosts     out: Tech/WAF 
 | 2 | `active_enum` | Amass | `--skip-amass` |
 | 3 | `github_recon` | github-subdomains | needs `--github-token` |
 | 4 | `search_engine_recon` | Uncover | `--skip-uncover` |
-| 5 | `js_subdomain_discovery` | SubDomainizer | `--skip-subdomainizer` |
+| 5 | `js_subdomain_discovery` | Hakrawler | `--skip-hakrawler` |
 
 ### Phase 2 — Validation (`validation.go`)
 
@@ -70,7 +71,7 @@ Phase 5 — Fingerprinting       (Step 22)     in: live hosts     out: Tech/WAF 
 |------|------|---------|-------|
 | 18 | `vuln_scanning` | Nuclei (infra) | `--skip-nuclei` |
 | 19 | `vuln_scanning_urls` | Nuclei (URLs + gf) | `--skip-nuclei` |
-| 20 | `takeover_detection` | Subjack | `--skip-subjack` |
+| 20 | `takeover_detection` | Nuclei (takeover templates) | `--skip-takeovers` |
 | 21 | `xss_scanning` | Dalfox | `--skip-dalfox` |
 
 ### Phase 5 — Fingerprinting (`fingerprinting.go`)

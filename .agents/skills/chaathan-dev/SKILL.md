@@ -62,6 +62,7 @@ pkg/utils/           → file I/O, parsers, export helpers, validation, formatti
 - Every step function must return `c.cancelled()`, never `return false`.
 - Never call `MarkStepComplete` after `MarkStepFailed` in the same error path.
 - `WildcardSteps` in `pkg/scan/scan.go` must match execution order in `flow.go`.
+- `SaveLog` (`--log` flag) mirrors scan output to `~/.chaathan/logs/<domain>_<scanID>_<timestamp>.log`. The log path is stored on `Ctx.LogFilePath` and shown in next-steps hints. Any new logging option follows the same pattern: add to `RunConfig`, open file in `Run()`, store path on `Ctx`.
 
 ## Validation
 

@@ -40,7 +40,7 @@ Review for breakage in this order:
 - Report field added in one format but missing from others
 - ROI score changed without updating `Reasons`
 - Setup installs a tool but `tools check` or runtime still disagrees
-- Step counts/help text drift from actual workflow (21 steps, 4 phases)
+- Step counts/help text drift from actual workflow (22 steps, 5 phases)
 - Step function returns hard-coded `false` instead of `c.cancelled()`
 - `MarkStepComplete` called after `MarkStepFailed` in same error path
 - Resume path (`IsStepCompleted` early return) returns `false` instead of `c.cancelled()`

@@ -112,6 +112,12 @@ chaathan wildcard -d target.com --proxy socks5://127.0.0.1:9050 --rate-limit 10
 chaathan wildcard -d target.com --resume <scan_id>
 ```
 
+**Save scan output to a log file:**
+```bash
+chaathan wildcard -d target.com --log
+```
+Writes a plain-text, ANSI-stripped copy of the full scan output to `~/.chaathan/logs/<domain>_<scanID>_<timestamp>.log`. Useful for debugging or archiving scan sessions.
+
 Press **`s`** during scanning to skip the current tool without aborting.
 
 ### Company Scan (3 Steps)
@@ -137,6 +143,7 @@ chaathan company -n "Company Inc"
 | `chaathan wildcard -d <domain>` | 22-step domain recon workflow |
 | `chaathan wildcard -d <domain> --proxy <url>` | Scan through a proxy |
 | `chaathan wildcard -d <domain> --rate-limit <n>` | Cap all tools to N req/sec |
+| `chaathan wildcard -d <domain> --log` | Mirror scan output to `~/.chaathan/logs/` |
 | `chaathan company -n <name>` | 3-step company discovery workflow |
 
 ### Data & Results
@@ -404,7 +411,7 @@ chaathan setup --update       # reinstall all tools (force update to latest)
 │       ├── final_files/         # Consolidated product files
 │       │   ├── nuclei_vulns.json
 │       │   ├── gf_secrets_findings.txt
-│       │   └── dalfox_xss.json
+│       │   └── dalfox_xss.jsonl
 │       ├── SUMMARY.txt
 │       └── REPORT.md
 ├── reports/
