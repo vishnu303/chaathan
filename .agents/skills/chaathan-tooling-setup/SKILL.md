@@ -36,10 +36,10 @@ Activate this skill for tasks involving external binary installation, setup beha
 | DNS | dnsx, shuffledns, massdns |
 | Probe | httpx, tlsx, naabu |
 | URLs | waybackurls, gau, arjun |
-| Crawl | katana, gospider |
-| Analysis | linkfinder, subdomainizer |
+| Crawl | katana, gospider, hakrawler |
+| Analysis | GoLinkFinder |
 | Fuzz | ffuf |
-| Vuln | nuclei, subjack, dalfox |
+| Vuln | nuclei, dalfox |
 | Recon | uncover, metabigor, github-subdomains |
 | Cloud | cloud_enum |
 | Util | anew, gf |
