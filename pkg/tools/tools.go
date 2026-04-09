@@ -260,11 +260,12 @@ func (t *ToolBox) nucleiSeverity() []string {
 }
 
 func (t *ToolBox) nucleiInfraTags() []string {
-	return []string{"cve", "exposure", "misconfig", "takeover", "ssl"}
+	return []string{"cve", "rce", "sqli", "ssrf", "lfi", "exposure", "default-login", "misconfig"}
 }
 
 func (t *ToolBox) nucleiURLTags() []string {
-	return []string{"xss", "sqli", "ssrf", "lfi", "rce", "redirect", "exposure"}
+	// xss is handled by Dalfox (Step 21) — no duplication needed here
+	return []string{"sqli", "ssrf", "lfi", "rce", "ssti", "idor"}
 }
 
 func (t *ToolBox) ffufThreads() int {
@@ -345,7 +346,13 @@ func (t *ToolBox) RunGau(ctx context.Context, domain string, outputFile string) 
 // --- DNS & Brute Force ---
 
 func (t *ToolBox) RunDnsx(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-l", inputFile, "-a", "-aaaa", "-cname", "-mx", "-txt", "-resp", "-json", "-o", outputFile}
+	args := []string{
+		"-l", inputFile,
+		"-a", "-aaaa", "-cname", "-mx", "-txt", "-resp", "-json",
+		"-timeout", "3", // seconds per DNS query
+		"-retry", "2",  // retry failed queries twice before giving up
+		"-o", outputFile,
+	}
 	_, err := t.Runner.Run(ctx, "dnsx", args)
 	return err
 }
@@ -379,6 +386,7 @@ func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) 
 		"-host", host,
 		"-rate", strconv.Itoa(t.effectiveRate(t.naabuRate())),
 		"-c", strconv.Itoa(t.naabuThreads()),
+		"-timeout", "3", // seconds per probe; prevents hanging on filtered ports
 		"-o", outputFile,
 	}
 	// Use explicit port list if configured, otherwise use -top-ports
@@ -406,6 +414,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 		"-l", inputFile,
 		"-rate", strconv.Itoa(t.effectiveRate(t.naabuRate())),
 		"-c", strconv.Itoa(t.naabuThreads()),
+		"-timeout", "3", // seconds per probe; prevents hanging on filtered ports
 		"-o", outputFile,
 	}
 	// Use explicit port list if configured, otherwise use -top-ports
@@ -430,7 +439,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 // --- Web Crawling & Fuzzing ---
 
 func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3"}
+	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-t", "10"} // -t = per-request timeout (seconds)
 	args = t.appendGoSpiderUA(args)
 	args = t.appendProxy(args, "--proxy")
 	output, err := t.Runner.Run(ctx, "gospider", args)
@@ -443,7 +452,12 @@ func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile 
 }
 
 func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-list", inputFile, "-o", outputFile, "-jc"}
+	args := []string{
+		"-list", inputFile,
+		"-o", outputFile,
+		"-jc",
+		"-timeout", "10", // seconds per request
+	}
 	args = t.appendUAHeader(args)
 	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
@@ -511,6 +525,8 @@ func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile 
 		"-l", targetsFile,
 		"-c", strconv.Itoa(t.nucleiConcurrency()),
 		"-rl", strconv.Itoa(rateLimit),
+		"-timeout", "5",        // per-request timeout (seconds)
+		"-max-host-error", "5", // bail out of a host after 5 consecutive errors
 		"-tags", strings.Join(t.nucleiInfraTags(), ","),
 		"-jsonl",
 		"-o", outputFile,
@@ -522,10 +538,13 @@ func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile 
 		args = append(args, "-etags", strings.Join(excludeTags, ","))
 	}
 
-	// Apply severity filter from config
+	// Apply severity filter: use config value if set, else default to critical,high
+	// (never inject both — nuclei uses the last -severity flag, silently discarding the first)
 	severity := t.nucleiSeverity()
 	if len(severity) > 0 {
 		args = append(args, "-severity", strings.Join(severity, ","))
+	} else {
+		args = append(args, "-severity", "critical,high") // skip info/low/medium on infra — too noisy
 	}
 
 	args = t.appendUAHeader(args)
@@ -689,6 +708,9 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 		"-l", urlsFile,
 		"-c", strconv.Itoa(concurrency),
 		"-rl", strconv.Itoa(rateLimit),
+		"-timeout", "5",          // per-request timeout (seconds)
+		"-max-host-error", "3",   // bail out of a host after 3 consecutive errors (blocked IPs don't stall the scan)
+		"-bulk-size", "25",       // process 25 URLs at a time so progress is visible
 		"-tags", strings.Join(t.nucleiURLTags(), ","),
 		"-severity", "critical,high,medium",
 		"-jsonl",
@@ -815,6 +837,8 @@ func (t *ToolBox) RunNucleiTakeovers(ctx context.Context, targetsFile string, ou
 		"-tags", "takeover",
 		"-c", strconv.Itoa(t.nucleiConcurrency()),
 		"-rl", strconv.Itoa(rateLimit),
+		"-timeout", "5",        // per-request timeout (seconds)
+		"-max-host-error", "3", // bail out of unresponsive hosts quickly
 		"-jsonl",
 		"-o", outputFile,
 	}
@@ -836,27 +860,7 @@ func (t *ToolBox) RunDalfox(ctx context.Context, inputFile string, outputFile st
 		"-o", outputFile,
 		"--silence",
 		"--no-color",
-	}
-	args = t.appendDalfoxUA(args)
-	args = t.appendProxy(args, "--proxy")
-	if rps := t.globalRPS(); rps > 0 {
-		delayMs := 1000 / rps
-		if delayMs < 1 {
-			delayMs = 1
-		}
-		args = append(args, "--delay", strconv.Itoa(delayMs))
-	}
-	_, err := t.Runner.Run(ctx, "dalfox", args)
-	return err
-}
-
-// RunDalfoxURL scans a single URL for XSS.
-func (t *ToolBox) RunDalfoxURL(ctx context.Context, targetURL string, outputFile string) error {
-	args := []string{
-		"url", targetURL,
-		"-o", outputFile,
-		"--silence",
-		"--no-color",
+		"--timeout", "10", // seconds per request; prevents hanging on blocked IPs
 	}
 	args = t.appendDalfoxUA(args)
 	args = t.appendProxy(args, "--proxy")
@@ -885,6 +889,7 @@ func (t *ToolBox) RunTlsx(ctx context.Context, inputFile string, outputFile stri
 		"-nc",
 		"-duc",
 		"-c", "50",
+		"-timeout", "5", // seconds per TLS handshake; prevents hanging on blocked hosts
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err
@@ -969,13 +974,15 @@ func (t *ToolBox) RunHttpxFingerprint(ctx context.Context, inputFile string, out
 // RunNucleiWAF runs Nuclei specifically for WAF detection with a conservative rate limit.
 func (t *ToolBox) RunNucleiWAF(ctx context.Context, inputFile string, outputFile string) error {
 	// WAF detection needs a gentler rate limit as sending malicious tags will quickly trigger blocks.
-	rateLimit := t.effectiveRate(50) 
+	rateLimit := t.effectiveRate(50)
 	concurrency := 10
 
 	args := []string{
 		"-l", inputFile,
 		"-c", strconv.Itoa(concurrency),
 		"-rl", strconv.Itoa(rateLimit),
+		"-timeout", "5",        // per-request timeout (seconds)
+		"-max-host-error", "3", // bail out of unresponsive hosts quickly
 		"-tags", "waf",
 		"-jsonl",
 		"-o", outputFile,

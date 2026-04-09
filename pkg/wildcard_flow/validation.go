@@ -43,6 +43,7 @@ func stepDNSConsolidation(c *Ctx) bool {
 		c.F.HakrawlerOut,
 		c.F.UncoverHostsOut, // hostnames extracted from uncover.json in Step 4
 	)
+	logger.FileDebug("dns_consolidation: %d passive source files available (subfinder, assetfinder, sublist3r, amass, github, hakrawler, uncover_hosts)", len(passiveSources))
 	if err := utils.MergeAndDeduplicate(passiveSources, c.F.ConsolidatedSubs); err != nil {
 		c.StateMgr.MarkStepFailed(c.State, "dns_resolution", err)
 		logger.Error("Failed to consolidate: %v", err)
@@ -50,8 +51,10 @@ func stepDNSConsolidation(c *Ctx) bool {
 	}
 	subCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
 	logger.Success("Consolidated %d unique subdomains", subCount)
+	logger.FileDebug("consolidated subs total: %d -> %s", subCount, c.F.ConsolidatedSubs)
 
 	logger.SubStep("Running DNSx for resolution...")
+	logger.FileDebug("dnsx input: %s (%d lines) out=%s", c.F.ConsolidatedSubs, subCount, c.F.DnsxOut)
 	if err := runWithSkip(c, "dnsx", func(sCtx context.Context) error {
 		return c.Tb.RunDnsx(sCtx, c.F.ConsolidatedSubs, c.F.DnsxOut)
 	}); err != nil {
@@ -64,6 +67,7 @@ func stepDNSConsolidation(c *Ctx) bool {
 	} else {
 		resolvedCount, _ := utils.CountFileLines(c.F.DnsxOut)
 		logger.Info("  Resolved %d subdomains via DNS", resolvedCount)
+		logger.FileDebug("dnsx output: %d resolved records -> %s", resolvedCount, c.F.DnsxOut)
 	}
 	c.StateMgr.MarkStepComplete(c.State, "dns_resolution")
 	return c.cancelled()
@@ -81,6 +85,8 @@ func stepDNSBruteforce(c *Ctx) bool {
 	} else if !c.SkipShuffleDNS && c.DNSWordlistPath != "" {
 		logger.StepHeader("Step 7: DNS Brute-force (ShuffleDNS)")
 		logger.SubStep("Running ShuffleDNS with wordlist: %s", c.DNSWordlistPath)
+		logger.FileDebug("shuffledns input: domain=%s wordlist=%s resolvers=%s out=%s",
+			c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
 
 		if err := runWithSkip(c, "shuffledns", func(sCtx context.Context) error {
 			return c.Tb.RunShuffleDNS(sCtx, c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
@@ -95,20 +101,26 @@ func stepDNSBruteforce(c *Ctx) bool {
 			if c.ScanID > 0 {
 				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.ShufflednsOut, "shuffledns")
 				logger.Info("  Found %d subdomains via DNS brute-force", count)
+				logger.FileDebug("shuffledns output: %d subdomains -> %s", count, c.F.ShufflednsOut)
 			}
 			// Merge brute-forced subs back into the consolidated list
 			utils.MergeAndDeduplicate(
 				[]string{c.F.ConsolidatedSubs, c.F.ShufflednsOut},
 				c.F.ConsolidatedSubs,
 			)
+			if merged, _ := utils.CountFileLines(c.F.ConsolidatedSubs); merged > 0 {
+				logger.FileDebug("consolidated subs after shuffledns merge: %d", merged)
+			}
 		}
 		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 	} else if c.SkipShuffleDNS {
 		logger.StepHeader("Step 7: Skipping ShuffleDNS (--skip-shuffledns)")
+		logger.FileDebug("shuffledns skipped via --skip-shuffledns flag")
 		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 	} else {
 		logger.StepHeader("Step 7: Skipping ShuffleDNS (no --dns-wordlist provided)")
 		logger.Info("Use --dns-wordlist to enable DNS brute-force")
+		logger.FileDebug("shuffledns skipped: no --dns-wordlist provided")
 		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 	}
 	return c.cancelled()
@@ -127,6 +139,8 @@ func stepHTTPProbing(c *Ctx) bool {
 	}
 	logger.StepHeader("Step 8: Live Web Server Probing")
 	logger.SubStep("Running Httpx...")
+	hostInputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
+	logger.FileDebug("httpx input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, hostInputCount, c.F.HttpxOut)
 
 	if err := runWithSkip(c, "httpx", func(sCtx context.Context) error {
 		return c.Tb.RunHttpx(sCtx, c.F.ConsolidatedSubs, c.F.HttpxOut)
@@ -144,6 +158,7 @@ func stepHTTPProbing(c *Ctx) bool {
 		if count > 0 {
 			logger.Info("  Found %d live hosts", count)
 		}
+		logger.FileDebug("httpx output: %d live hosts -> %s", count, c.F.HttpxOut)
 	}
 	c.StateMgr.MarkStepComplete(c.State, "http_probing")
 	return c.cancelled()
@@ -161,6 +176,8 @@ func stepTLSAnalysis(c *Ctx) bool {
 	} else if !c.SkipTlsx {
 		logger.StepHeader("Step 9: TLS Certificate Analysis (tlsx)")
 		logger.SubStep("Running tlsx — extracting SANs and checking cert issues...")
+		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
+		logger.FileDebug("tlsx input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, inputCount, c.F.TlsxOut)
 
 		if err := runWithSkip(c, "tlsx", func(sCtx context.Context) error {
 			return c.Tb.RunTlsx(sCtx, c.F.ConsolidatedSubs, c.F.TlsxOut)
@@ -228,6 +245,8 @@ func stepPortScanning(c *Ctx) bool {
 	} else if !c.SkipNaabu {
 		logger.StepHeader("Step 10: Port Scanning")
 		logger.SubStep("Running Naabu on all discovered subdomains...")
+		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
+		logger.FileDebug("naabu input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, inputCount, c.F.NaabuOut)
 
 		if err := runWithSkip(c, "naabu", func(sCtx context.Context) error {
 			return c.Tb.RunNaabuList(sCtx, c.F.ConsolidatedSubs, c.F.NaabuOut)
