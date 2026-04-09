@@ -39,6 +39,7 @@ func stepPassiveEnum(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Subfinder")
+			logger.FileDebug("subfinder input: domain=%s out=%s", c.Domain, c.F.SubfinderOut)
 			if err := c.Tb.RunSubfinder(sCtx, c.Domain, c.F.SubfinderOut); err != nil {
 				if sCtx.Err() == nil {
 					logger.Error("Subfinder failed: %v", err)
@@ -48,6 +49,7 @@ func stepPassiveEnum(c *Ctx) bool {
 				if c.ScanID > 0 {
 					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.SubfinderOut, "subfinder")
 					logger.Info("  Found %d subdomains", count)
+					logger.FileDebug("subfinder raw lines in output: %d", count)
 				}
 			}
 		}()
@@ -55,6 +57,7 @@ func stepPassiveEnum(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Assetfinder")
+			logger.FileDebug("assetfinder input: domain=%s out=%s", c.Domain, c.F.AssetfinderOut)
 			if err := c.Tb.RunAssetfinder(sCtx, c.Domain, c.F.AssetfinderOut); err != nil {
 				if sCtx.Err() == nil {
 					logger.Error("Assetfinder failed: %v", err)
@@ -64,6 +67,7 @@ func stepPassiveEnum(c *Ctx) bool {
 				if c.ScanID > 0 {
 					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AssetfinderOut, "assetfinder")
 					logger.Info("  Found %d subdomains", count)
+					logger.FileDebug("assetfinder raw lines in output: %d", count)
 				}
 			}
 		}()
@@ -71,15 +75,18 @@ func stepPassiveEnum(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Sublist3r")
+			logger.FileDebug("sublist3r input: domain=%s out=%s", c.Domain, c.F.Sublist3rOut)
 			if err := c.Tb.RunSublist3r(sCtx, c.Domain, c.F.Sublist3rOut); err != nil {
 				if c.Verbose && sCtx.Err() == nil {
 					logger.Warning("Sublist3r failed: %v", err)
 				}
+				logger.FileDebug("sublist3r failed: %v", err)
 			} else {
 				logger.SubStep("[Done] Sublist3r")
 				if c.ScanID > 0 {
 					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.Sublist3rOut, "sublist3r")
 					logger.Info("  Found %d subdomains", count)
+					logger.FileDebug("sublist3r raw lines in output: %d", count)
 				}
 			}
 		}()
@@ -108,6 +115,7 @@ func stepActiveEnum(c *Ctx) bool {
 	} else if !c.SkipAmass {
 		logger.StepHeader("Step 2: Active Subdomain Enumeration (Amass)")
 		logger.SubStep("Running Amass (this may take a while)...")
+		logger.FileDebug("amass input: domain=%s out=%s", c.Domain, c.F.AmassOut)
 		if err := runWithSkip(c, "amass", func(sCtx context.Context) error {
 			return c.Tb.RunAmass(sCtx, c.Domain, c.F.AmassOut)
 		}); err != nil {
@@ -122,11 +130,13 @@ func stepActiveEnum(c *Ctx) bool {
 			if c.ScanID > 0 {
 				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AmassOut, "amass")
 				logger.Info("  Found %d subdomains", count)
+				logger.FileDebug("amass raw lines in output: %d", count)
 			}
 			c.StateMgr.MarkStepComplete(c.State, "active_enum")
 		}
 	} else {
 		logger.StepHeader("Step 2: Skipping Amass (--skip-amass)")
+		logger.FileDebug("amass skipped via --skip-amass flag")
 		c.StateMgr.MarkStepComplete(c.State, "active_enum")
 	}
 	return c.cancelled()
@@ -144,6 +154,7 @@ func stepGitHubRecon(c *Ctx) bool {
 	} else if c.GitHubToken != "" {
 		logger.StepHeader("Step 3: GitHub Subdomain Discovery")
 		logger.SubStep("Running github-subdomains...")
+		logger.FileDebug("github-subdomains input: domain=%s token_len=%d out=%s", c.Domain, len(c.GitHubToken), c.F.GithubSubsOut)
 		if err := runWithSkip(c, "github-subdomains", func(sCtx context.Context) error {
 			return c.Tb.RunGithubSubdomains(sCtx, c.Domain, c.GitHubToken, c.F.GithubSubsOut)
 		}); err != nil {
@@ -157,12 +168,14 @@ func stepGitHubRecon(c *Ctx) bool {
 			if c.ScanID > 0 {
 				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.GithubSubsOut, "github")
 				logger.Info("  Found %d subdomains", count)
+				logger.FileDebug("github-subdomains raw lines in output: %d", count)
 			}
 			logger.SubStep("[Done] GitHub Subdomains")
 		}
 	} else {
 		logger.StepHeader("Step 3: Skipping GitHub Recon (no token provided)")
 		logger.Warning("Set GITHUB_TOKEN env var or use --github-token for GitHub recon")
+		logger.FileDebug("github_recon skipped: no token provided")
 	}
 	c.StateMgr.MarkStepComplete(c.State, "github_recon")
 	return c.cancelled()

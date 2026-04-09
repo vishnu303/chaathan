@@ -2,12 +2,143 @@ package logger
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
 
-// ── ANSI codes ───────────────────────────────────────────────────────────────
+// ── File-log tee ─────────────────────────────────────────────────────────────
+
+var (
+	logFileMu sync.Mutex
+	logFile   *os.File
+)
+
+// ansiRE strips ANSI escape sequences so log files are readable plain text.
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// InitFileLog opens (or creates) the file at path and begins mirroring all
+// logger output to it with ANSI codes stripped. Call CloseFileLog() to flush
+// and close when the scan ends.
+func InitFileLog(path string) error {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile != nil {
+		logFile.Close()
+		logFile = nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("cannot open log file %q: %w", path, err)
+	}
+	logFile = f
+	return nil
+}
+
+// CloseFileLog flushes and closes the active log file.
+func CloseFileLog() {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile != nil {
+		logFile.Close()
+		logFile = nil
+	}
+}
+
+// logWrite writes to stdout and, if a log file is open, to the file with
+// ANSI codes stripped and a [HH:MM:SS] timestamp prefixed to each non-empty line.
+func logWrite(w io.Writer, s string) {
+	fmt.Fprint(w, s)
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile != nil {
+		clean := ansiRE.ReplaceAllString(s, "")
+		ts := time.Now().Format("15:04:05")
+		lines := strings.Split(clean, "\n")
+		for i, line := range lines {
+			if line != "" {
+				lines[i] = "[" + ts + "] " + line
+			}
+		}
+		fmt.Fprint(logFile, strings.Join(lines, "\n"))
+	}
+}
+
+// WriteLogHeader writes a structured header to the open log file.
+// Call this immediately after InitFileLog. It writes directly to the file
+// (not through logWrite) so the header is not timestamped as a regular line.
+func WriteLogHeader(domain string, scanID int64, logFilePath string) {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile == nil {
+		return
+	}
+	now := time.Now().Format(time.RFC3339)
+	fmt.Fprintf(logFile, "=== Chaathan Wildcard Scan Log ===\n")
+	fmt.Fprintf(logFile, "Domain:   %s\n", domain)
+	if scanID > 0 {
+		fmt.Fprintf(logFile, "Scan ID:  %d\n", scanID)
+	}
+	fmt.Fprintf(logFile, "Started:  %s\n", now)
+	fmt.Fprintf(logFile, "Log file: %s\n", logFilePath)
+	fmt.Fprintf(logFile, "===================================\n\n")
+}
+
+// LogCommand writes the exact command invocation to the log file only.
+// Call this from the runner regardless of verbose mode so the log always
+// captures what was run. The terminal is not affected.
+func LogCommand(cmd string) {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile == nil {
+		return
+	}
+	ts := time.Now().Format("15:04:05")
+	fmt.Fprintf(logFile, "[%s]   $ %s\n", ts, cmd)
+}
+
+// LogToolFailure writes a structured tool failure block to the log file only.
+// Call this from the runner when a tool exits with an error. The terminal
+// still shows only the existing logger.Warning/Error messages.
+func LogToolFailure(tool, command, stderr string, exitErr error) {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile == nil {
+		return
+	}
+	ts := time.Now().Format("15:04:05")
+	fmt.Fprintf(logFile, "[%s] TOOL ERROR: %s\n", ts, tool)
+	fmt.Fprintf(logFile, "[%s]   Command: %s\n", ts, command)
+	if exitErr != nil {
+		fmt.Fprintf(logFile, "[%s]   Exit:    %v\n", ts, exitErr)
+	}
+	if stderr != "" {
+		fmt.Fprintf(logFile, "[%s]   Stderr:\n", ts)
+		for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+			fmt.Fprintf(logFile, "[%s]     %s\n", ts, line)
+		}
+	}
+	fmt.Fprintf(logFile, "\n")
+}
+// FileDebug writes a debug-level line to the log file only.
+// It never prints to the terminal, making it safe to use for verbose internal
+// state (file sizes, skip decisions, pipeline counts) without adding noise.
+func FileDebug(format string, args ...interface{}) {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile == nil {
+		return
+	}
+	ts := time.Now().Format("15:04:05")
+	msg := fmt.Sprintf(format, args...)
+	fmt.Fprintf(logFile, "[%s] DEBUG %s\n", ts, msg)
+}
+
+
 
 var (
 	Reset     = "\033[0m"
@@ -62,31 +193,31 @@ func InitScanUI(total int) {
 // Info prints a styled info message
 func Info(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("  %s│%s %s\n", Dim, Reset, msg)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s\n", Dim, Reset, msg))
 }
 
 // Success prints a styled success message
 func Success(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("  %s│%s %s✓%s %s\n", Dim, Reset, BrightGreen, Reset, msg)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s✓%s %s\n", Dim, Reset, BrightGreen, Reset, msg))
 }
 
 // Warning prints a styled warning message
 func Warning(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("  %s│%s %s⚠%s %s\n", Dim, Reset, BrightYellow, Reset, msg)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s⚠%s %s\n", Dim, Reset, BrightYellow, Reset, msg))
 }
 
 // Error prints a styled error message
 func Error(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("  %s│%s %s✗%s %s%s%s\n", Dim, Reset, BrightRed, Reset, Red, msg, Reset)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s✗%s %s%s%s\n", Dim, Reset, BrightRed, Reset, Red, msg, Reset))
 }
 
 // Debug prints a styled debug message (only visible contextually)
 func Debug(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("  %s│  %s%s\n", Dim, msg, Reset)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│  %s%s\n", Dim, msg, Reset))
 }
 
 // Section prints a generic section heading without incrementing the step counter.
@@ -94,7 +225,7 @@ func Debug(format string, args ...interface{}) {
 // that don't participate in the step-tracking workflow.
 func Section(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("\n  %s┌─%s %s%s%s%s\n", Cyan, Reset, BrightCyan+Bold, msg, Reset, "")
+	logWrite(os.Stdout, fmt.Sprintf("\n  %s┌─%s %s%s%s%s\n", Cyan, Reset, BrightCyan+Bold, msg, Reset, ""))
 }
 
 // StepHeader prints a scan-step heading that increments the step counter
@@ -113,7 +244,7 @@ func StepHeader(format string, args ...interface{}) {
 		stepIndicator = fmt.Sprintf("%s[%d/%d]%s ", Dim, currentStep, totalSteps, Reset)
 	}
 
-	fmt.Printf("\n  %s┌─%s %s%s%s%s%s%s\n", Cyan, Reset, stepIndicator, BrightCyan+Bold, msg, Reset, elapsed, "")
+	logWrite(os.Stdout, fmt.Sprintf("\n  %s┌─%s %s%s%s%s%s%s\n", Cyan, Reset, stepIndicator, BrightCyan+Bold, msg, Reset, elapsed, ""))
 }
 
 // ScanHeader prints the main scan workflow header
@@ -121,29 +252,29 @@ func ScanHeader(scanType string, target string, scanID int64) {
 	w := 52
 	line := strings.Repeat("─", w)
 
-	fmt.Printf("\n")
-	fmt.Printf("  %s╭%s╮%s\n", Cyan+Bold, line, Reset)
+	logWrite(os.Stdout, "\n")
+	logWrite(os.Stdout, fmt.Sprintf("  %s╭%s╮%s\n", Cyan+Bold, line, Reset))
 	// '  ' (2) + '🔍 ' (3) + 46 + ' ' (1) = 52
-	fmt.Printf("  %s│%s  🔍 %s%-46s%s %s│%s\n", Cyan+Bold, Reset, White+Bold, scanType+" Scan", Reset, Cyan+Bold, Reset)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s  🔍 %s%-46s%s %s│%s\n", Cyan+Bold, Reset, White+Bold, scanType+" Scan", Reset, Cyan+Bold, Reset))
 	// '  ' (2) + '🎯 ' (3) + 'Target:' (7) + ' ' (1) + 38 + ' ' (1) = 52
-	fmt.Printf("  %s│%s  %s🎯 Target:%s %-38s %s│%s\n", Cyan+Bold, Reset, Dim, Reset, target, Cyan+Bold, Reset)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s🎯 Target:%s %-38s %s│%s\n", Cyan+Bold, Reset, Dim, Reset, target, Cyan+Bold, Reset))
 	if scanID > 0 {
 		// '  ' (2) + '🆔 ' (3) + 'Scan ID:' (8) + ' ' (1) + 37 + ' ' (1) = 52
-		fmt.Printf("  %s│%s  %s🆔 Scan ID:%s %-37d %s│%s\n", Cyan+Bold, Reset, Dim, Reset, scanID, Cyan+Bold, Reset)
+		logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s🆔 Scan ID:%s %-37d %s│%s\n", Cyan+Bold, Reset, Dim, Reset, scanID, Cyan+Bold, Reset))
 	}
-	fmt.Printf("  %s╰%s╯%s\n", Cyan+Bold, line, Reset)
-	fmt.Printf("\n")
+	logWrite(os.Stdout, fmt.Sprintf("  %s╰%s╯%s\n", Cyan+Bold, line, Reset))
+	logWrite(os.Stdout, "\n")
 }
 
 // SubStep prints an indented sub-step with arrow
 func SubStep(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("  %s│%s   %s▸%s %s\n", Dim, Reset, Purple, Reset, msg)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s   %s▸%s %s\n", Dim, Reset, Purple, Reset, msg))
 }
 
 // Command prints the command being executed
 func Command(cmd string) {
-	fmt.Printf("  %s│     $ %s%s\n", Dim, cmd, Reset)
+	logWrite(os.Stdout, fmt.Sprintf("  %s│     $ %s%s\n", Dim, cmd, Reset))
 }
 
 // ── Summary helpers ─────────────────────────────────────────────────────────
@@ -164,44 +295,51 @@ func ScanSummary(status string, target string, scanID int64, duration time.Durat
 		statusColor = BrightRed
 	}
 
-	fmt.Printf("\n")
-	fmt.Printf("  %s╭%s╮%s\n", Cyan+Bold, line, Reset)
-	
+	logWrite(os.Stdout, "\n")
+	logWrite(os.Stdout, fmt.Sprintf("  %s╭%s╮%s\n", Cyan+Bold, line, Reset))
+
 	statusStr := capitalize(status)
 	pad1 := w - 2 - 1 - 6 - len(statusStr) // '  ' (2), statusIcon (1), ' Scan ' (6)
-	if pad1 < 0 { pad1 = 0 }
-	fmt.Printf("  %s│%s  %s%s%s %sScan %s%s%s%s│%s\n",
+	if pad1 < 0 {
+		pad1 = 0
+	}
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s%s%s %sScan %s%s%s%s│%s\n",
 		Cyan+Bold, Reset, statusColor+Bold, statusIcon, Reset,
 		White+Bold, statusStr, Reset,
-		strings.Repeat(" ", pad1), Cyan+Bold, Reset)
+		strings.Repeat(" ", pad1), Cyan+Bold, Reset))
 
-	pad2 := w - 2 - 2 - len(target) - 1 // '  ' (2), '🎯' (1/2), len(target), extra space. Assume '🎯 ' is 3 columns.
-	pad2 = w - 5 - len(target)
-	if pad2 < 0 { pad2 = 0 }
-	fmt.Printf("  %s│%s  %s🎯 %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, target, Reset, strings.Repeat(" ", pad2), Cyan+Bold, Reset)
+	pad2 := w - 5 - len(target)
+	if pad2 < 0 {
+		pad2 = 0
+	}
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s🎯 %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, target, Reset, strings.Repeat(" ", pad2), Cyan+Bold, Reset))
 
 	durStr := fmtDuration(duration)
 	pad3 := w - 6 - len(durStr) // '  ' (2) + '⏱  ' (4)
-	if pad3 < 0 { pad3 = 0 }
-	fmt.Printf("  %s│%s  %s⏱  %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, durStr, Reset, strings.Repeat(" ", pad3), Cyan+Bold, Reset)
+	if pad3 < 0 {
+		pad3 = 0
+	}
+	logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s⏱  %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, durStr, Reset, strings.Repeat(" ", pad3), Cyan+Bold, Reset))
 
 	if len(stats) > 0 {
-		fmt.Printf("  %s│%s  %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, strings.Repeat("╌", w-2), Reset, Cyan+Bold, Reset)
+		logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, strings.Repeat("╌", w-2), Reset, Cyan+Bold, Reset))
 		for label, value := range stats {
 			// '  ' (2) + len(label) + 1 + len(value)
 			used := 2 + len(label) + 1 + len(value)
 			padding := w - used
-			if padding < 1 { padding = 1 }
-			fmt.Printf("  %s│%s  %s%s%s %s%s%s%s %s│%s\n",
+			if padding < 1 {
+				padding = 1
+			}
+			logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s%s%s %s%s%s%s %s│%s\n",
 				Cyan+Bold, Reset,
 				Dim, label+":", Reset,
 				BrightCyan+Bold, value, Reset,
 				strings.Repeat(" ", padding-1),
-				Cyan+Bold, Reset)
+				Cyan+Bold, Reset))
 		}
 	}
 
-	fmt.Printf("  %s╰%s╯%s\n", Cyan+Bold, line, Reset)
+	logWrite(os.Stdout, fmt.Sprintf("  %s╰%s╯%s\n", Cyan+Bold, line, Reset))
 }
 
 // NextSteps prints styled next step hints
@@ -209,11 +347,11 @@ func NextSteps(hints []string) {
 	if len(hints) == 0 {
 		return
 	}
-	fmt.Printf("\n  %s💡 Next steps:%s\n", Dim, Reset)
+	logWrite(os.Stdout, fmt.Sprintf("\n  %s💡 Next steps:%s\n", Dim, Reset))
 	for _, h := range hints {
-		fmt.Printf("     %s▸%s %s%s%s\n", Purple, Reset, Dim, h, Reset)
+		logWrite(os.Stdout, fmt.Sprintf("     %s▸%s %s%s%s\n", Purple, Reset, Dim, h, Reset))
 	}
-	fmt.Println()
+	logWrite(os.Stdout, "\n")
 }
 
 // ── Utility ─────────────────────────────────────────────────────────────────

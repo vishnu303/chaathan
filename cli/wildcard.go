@@ -39,6 +39,7 @@ var (
 	generateReport    bool
 	proxyURL          string
 	rateLimitRPS      int
+	saveLog           bool
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -113,6 +114,7 @@ func init() {
 	wildcardCmd.Flags().BoolVar(&generateReport, "report", true, "Generate report after scan")
 	wildcardCmd.Flags().StringVar(&proxyURL, "proxy", "", "Proxy URL for target-facing tools (e.g., socks5://127.0.0.1:9050)")
 	wildcardCmd.Flags().IntVar(&rateLimitRPS, "rate-limit", 0, "Global rate limit (requests/sec) for all tools (0 = per-tool defaults)")
+	wildcardCmd.Flags().BoolVar(&saveLog, "log", false, "Save scan output to ~/.chaathan/logs/ (plain text, ANSI stripped)")
 	wildcardCmd.MarkFlagRequired("domain")
 	rootCmd.AddCommand(wildcardCmd)
 }
@@ -181,6 +183,7 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		GitHubToken:       token,
 		ResumeScanID:      resumeScanID,
 		GenerateReport:    generateReport,
+		SaveLog:           saveLog,
 	}
 
 	if err := wf.Run(cfg); err != nil {

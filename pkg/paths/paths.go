@@ -70,3 +70,8 @@ func DatabasePath() string {
 func ConfigPath() string {
 	return filepath.Join(ChaathanHome(), "config.yaml")
 }
+
+// LogsDir returns the scan log directory (~/.chaathan/logs).
+func LogsDir() string {
+	return filepath.Join(ChaathanHome(), "logs")
+}

@@ -131,8 +131,11 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
+	cmdStr := fmt.Sprintf("%s %s", command, strings.Join(args, " "))
+	// Always write command to log file (file-only, no terminal noise)
+	logger.LogCommand(cmdStr)
 	if r.Verbose {
-		logger.Command(fmt.Sprintf("%s %s", command, strings.Join(args, " ")))
+		logger.Command(cmdStr)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -141,6 +144,8 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 
 	err := startAndWait(ctx, cmd)
 	if err != nil {
+		// Write full stderr to log file for debugging
+		logger.LogToolFailure(command, cmdStr, stderr.String(), err)
 		if r.Verbose {
 			logger.Debug("CMD Error: %v | Stderr: %s", err, stderr.String())
 		}
@@ -207,8 +212,11 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 
 	dockerArgs = append(dockerArgs, args...)
 
+	cmdStr := fmt.Sprintf("DOCKER %s", strings.Join(dockerArgs, " "))
+	// Always write command to log file (file-only, no terminal noise)
+	logger.LogCommand(cmdStr)
 	if r.Verbose {
-		logger.Command(fmt.Sprintf("DOCKER %s", strings.Join(dockerArgs, " ")))
+		logger.Command(cmdStr)
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
@@ -219,6 +227,8 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 
 	err := startAndWait(ctx, cmd)
 	if err != nil {
+		// Write full stderr to log file for debugging
+		logger.LogToolFailure(command, cmdStr, stderr.String(), err)
 		if stderr.Len() > 0 {
 			return stdout.String(), fmt.Errorf("%v: %s", err, stderr.String())
 		}

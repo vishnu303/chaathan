@@ -56,10 +56,12 @@ func stepURLDiscovery(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Waybackurls")
+			logger.FileDebug("waybackurls input: domain=%s out=%s", c.Domain, c.F.WaybackOut)
 			if err := c.Tb.RunWaybackurls(sCtx, c.Domain, c.F.WaybackOut); err != nil {
 				if c.Verbose && sCtx.Err() == nil {
 					logger.Warning("Waybackurls failed: %v", err)
 				}
+				logger.FileDebug("waybackurls failed: %v", err)
 			} else {
 				resultMu.Lock()
 				waybackOK = true
@@ -68,6 +70,7 @@ func stepURLDiscovery(c *Ctx) bool {
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls")
 					logger.Info("  Found %d URLs", count)
+					logger.FileDebug("waybackurls output: %d URLs -> %s", count, c.F.WaybackOut)
 				}
 			}
 		}()
@@ -75,10 +78,12 @@ func stepURLDiscovery(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] GAU")
+			logger.FileDebug("gau input: domain=%s out=%s", c.Domain, c.F.GauOut)
 			if err := c.Tb.RunGau(sCtx, c.Domain, c.F.GauOut); err != nil {
 				if c.Verbose && sCtx.Err() == nil {
 					logger.Warning("GAU failed: %v", err)
 				}
+				logger.FileDebug("gau failed: %v", err)
 			} else {
 				resultMu.Lock()
 				gauOK = true
@@ -87,6 +92,7 @@ func stepURLDiscovery(c *Ctx) bool {
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau")
 					logger.Info("  Found %d URLs", count)
+					logger.FileDebug("gau output: %d URLs -> %s", count, c.F.GauOut)
 				}
 			}
 		}()
@@ -138,6 +144,9 @@ func stepWebCrawling(c *Ctx) bool {
 	crawlFailed := false
 	var crawlFailMu sync.Mutex
 
+	liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
+	logger.FileDebug("web_crawling input: %s (%d live hosts)", c.F.HttpxLiveHosts, liveHostCount)
+
 	err := runWithSkip(c, "web crawling", func(sCtx context.Context) error {
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -145,6 +154,7 @@ func stepWebCrawling(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] Katana")
+			logger.FileDebug("katana input: %s out=%s", c.F.HttpxLiveHosts, c.F.KatanaOut)
 			if err := c.Tb.RunKatana(sCtx, c.F.HttpxLiveHosts, c.F.KatanaOut); err != nil {
 				if sCtx.Err() == nil {
 					crawlFailMu.Lock()
@@ -157,6 +167,7 @@ func stepWebCrawling(c *Ctx) bool {
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.KatanaOut, "katana")
 					logger.Info("  Katana found %d URLs", count)
+					logger.FileDebug("katana output: %d URLs -> %s", count, c.F.KatanaOut)
 				}
 			}
 		}()
@@ -164,6 +175,7 @@ func stepWebCrawling(c *Ctx) bool {
 		go func() {
 			defer wg.Done()
 			logger.SubStep("[Start] GoSpider")
+			logger.FileDebug("gospider input: %s out=%s", c.F.HttpxLiveHosts, c.F.GospiderOut)
 			if err := c.Tb.RunGoSpider(sCtx, c.F.HttpxLiveHosts, c.F.GospiderOut); err != nil {
 				if sCtx.Err() == nil {
 					crawlFailMu.Lock()
@@ -176,6 +188,7 @@ func stepWebCrawling(c *Ctx) bool {
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GospiderOut, "gospider")
 					logger.Info("  GoSpider found %d URLs", count)
+					logger.FileDebug("gospider output: %d URLs -> %s", count, c.F.GospiderOut)
 				}
 			}
 		}()
@@ -307,6 +320,7 @@ func stepURLConsolidation(c *Ctx) bool {
 
 	sources := c.urlSources()
 	logger.SubStep("Merging URLs from %d sources...", len(sources))
+	logger.FileDebug("url_consolidation sources: %v", sources)
 	if err := utils.MergeAndDeduplicate(sources, c.F.AllURLsRaw); err != nil {
 		c.StateMgr.MarkStepFailed(c.State, "url_consolidation", err)
 		logger.Warning("URL merge failed: %v", err)
@@ -318,10 +332,13 @@ func stepURLConsolidation(c *Ctx) bool {
 		}
 		rawCount, _ := utils.CountFileLines(c.F.AllURLsRaw)
 		logger.Info("  Merged %d unique URLs", rawCount)
+		logger.FileDebug("url_consolidation merged %d raw URLs -> %s", rawCount, c.F.AllURLsRaw)
 	}
 
 	// Live-check all URLs with httpx
 	logger.SubStep("Running httpx to live-check all URLs...")
+	rawCount2, _ := utils.CountFileLines(c.F.AllURLsRaw)
+	logger.FileDebug("httpx_url_check input: %s (%d URLs) out=%s", c.F.AllURLsRaw, rawCount2, c.F.AllURLsLive)
 	if err := runWithSkip(c, "httpx (URL check)", func(sCtx context.Context) error {
 		return c.Tb.RunHttpxURLCheck(sCtx, c.F.AllURLsRaw, c.F.AllURLsLive)
 	}); err != nil {
@@ -337,6 +354,7 @@ func stepURLConsolidation(c *Ctx) bool {
 	} else {
 		liveCount, _ := utils.CountFileLines(c.F.AllURLsLive)
 		logger.Success("  %d live URLs confirmed", liveCount)
+		logger.FileDebug("httpx_url_check output: %d live URLs -> %s", liveCount, c.F.AllURLsLive)
 	}
 
 	// Persist live URLs into DB so GetScanStats / query commands reflect reality.
@@ -532,6 +550,7 @@ func stepDirFuzzing(c *Ctx) bool {
 		logger.StepHeader("Step 17: Directory Fuzzing (ffuf)")
 		targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
 		logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
+		logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
 
 		if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
 			return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)

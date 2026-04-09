@@ -61,10 +61,16 @@ type RunConfig struct {
 	GitHubToken     string
 
 	// Control parameters
-	ResumeScanID   int64
+	ResumeScanID int64
 
 	// Post-scan
 	GenerateReport bool
+
+	// Logging
+	// SaveLog controls whether scan output is mirrored to a log file in
+	// ~/.chaathan/logs/ (plain text, ANSI stripped). The filename is
+	// generated automatically as <domain>_<scanID>_<timestamp>.log.
+	SaveLog bool
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -207,6 +213,9 @@ type Ctx struct {
 
 	// WAF evasion
 	Proxy string // proxy URL for collector.go (from config or CLI override)
+
+	// Log file path (set when SaveLog is true and file opened successfully)
+	LogFilePath string
 }
 
 // cancelled returns true when the parent context has been cancelled.
@@ -292,6 +301,24 @@ func Run(cfg RunConfig) error {
 		scanID = dbScan.ID
 	}
 
+	// ── File logging ──────────────────────────────────────
+	// logFilePath is declared here so it outlives the if-block and can be
+	// stored on Ctx for display in next-steps at scan end.
+	var logFilePath string
+	if cfg.SaveLog {
+		timestamp := startTime.Format("20060102_150405")
+		logFileName := fmt.Sprintf("%s_%d_%s.log", cfg.Domain, scanID, timestamp)
+		logFilePath = filepath.Join(paths.LogsDir(), logFileName)
+		if err := logger.InitFileLog(logFilePath); err != nil {
+			logger.Warning("Could not open log file: %v", err)
+			logFilePath = "" // clear so Ctx doesn't show a broken path
+		} else {
+			logger.WriteLogHeader(cfg.Domain, scanID, logFilePath)
+			logger.Info("Scan log: %s", logFilePath)
+			defer logger.CloseFileLog()
+		}
+	}
+
 	// ── Scan header & state ──────────────────────────────────
 	logger.ScanHeader("Wildcard", cfg.Domain, scanID)
 	logger.InitScanUI(len(scan.WildcardSteps))
@@ -337,6 +364,7 @@ func Run(cfg RunConfig) error {
 		Notifier:           infra.Notifier,
 		F:                  newFiles(cfg.ResultDir),
 		NotifyStepComplete: cfg.Cfg != nil && cfg.Cfg.Notifications.StepComplete,
+		LogFilePath:        logFilePath,
 	}
 
 	// Wire proxy from config
@@ -583,10 +611,14 @@ func finalizeScan(c *Ctx, status string) {
 	}
 
 	if c.ScanID > 0 {
-		logger.NextSteps([]string{
+		hints := []string{
 			fmt.Sprintf("chaathan scans show %d       # View scan details", c.ScanID),
 			fmt.Sprintf("chaathan query vulns %d      # List vulnerabilities", c.ScanID),
 			fmt.Sprintf("chaathan report generate %d  # Generate full report", c.ScanID),
-		})
+		}
+		if c.LogFilePath != "" {
+			hints = append([]string{fmt.Sprintf("cat %s  # full scan log", c.LogFilePath)}, hints...)
+		}
+		logger.NextSteps(hints)
 	}
 }
