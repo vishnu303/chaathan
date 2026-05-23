@@ -23,6 +23,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/report"
 	"github.com/vishnu303/chaathan-flow/pkg/scan"
+	"github.com/vishnu303/chaathan-flow/pkg/scope"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
 	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
@@ -204,6 +205,7 @@ type Ctx struct {
 	StateMgr *scan.Manager
 	State    *scan.State
 	Notifier *notify.Notifier
+	ScopeFilter *scope.Scope // compiled scope rules from config (nil = no filtering)
 
 	// All file paths
 	F Files
@@ -374,6 +376,19 @@ func Run(cfg RunConfig) error {
 
 	logger.Info("💡 Press 's' at any time to skip the current tool")
 	logger.Info("Mode: %s", cfg.Mode)
+
+	// Wire scope from config
+	if cfg.Cfg != nil {
+		sc, err := scope.New(&cfg.Cfg.Scope)
+		if err != nil {
+			logger.Warning("Failed to compile scope rules: %v", err)
+		} else {
+			c.ScopeFilter = sc
+			if summary := sc.Summary(); summary != "All domains in scope" {
+				logger.Info("Scope: %s", summary)
+			}
+		}
+	}
 
 	// ── Step registry ───────────────────────────────────────
 	// Each entry maps a scan.WildcardSteps name to its implementation.
