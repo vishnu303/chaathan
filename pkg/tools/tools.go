@@ -303,7 +303,23 @@ func (t *ToolBox) RunSubfinder(ctx context.Context, domain string, outputFile st
 		"-timeout", strconv.Itoa(t.subfinderTimeout()),
 		"-o", outputFile,
 	}
-	_, err := t.Runner.Run(ctx, "subfinder", args)
+
+	// Pass API keys as env vars so subfinder picks them up as provider keys.
+	var opts []runner.Option
+	if t.APIKeys != nil {
+		var envVars []string
+		if t.APIKeys.VirusTotal != "" {
+			envVars = append(envVars, "VT_API_KEY="+t.APIKeys.VirusTotal)
+		}
+		if t.APIKeys.Chaos != "" {
+			envVars = append(envVars, "PDCP_API_KEY="+t.APIKeys.Chaos)
+		}
+		if len(envVars) > 0 {
+			opts = append(opts, runner.WithEnv(envVars...))
+		}
+	}
+
+	_, err := t.Runner.Run(ctx, "subfinder", args, opts...)
 	return err
 }
 
@@ -625,6 +641,10 @@ func (t *ToolBox) RunGoLinkFinder(ctx context.Context, url string, outputFile st
 // RunArjun discovers hidden HTTP parameters from a file of URLs (replaces single URL version)
 func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
+	// Use configured parameters wordlist if available
+	if t.General != nil && t.General.Wordlists.Parameters != "" {
+		args = append(args, "-w", t.General.Wordlists.Parameters)
+	}
 	args = t.appendArjunUA(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
@@ -633,6 +653,10 @@ func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile str
 // RunArjunFromFile discovers hidden HTTP parameters from a file of URLs
 func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
+	// Use configured parameters wordlist if available
+	if t.General != nil && t.General.Wordlists.Parameters != "" {
+		args = append(args, "-w", t.General.Wordlists.Parameters)
+	}
 	args = t.appendArjunUA(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err

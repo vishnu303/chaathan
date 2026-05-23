@@ -38,9 +38,6 @@ type GeneralConfig struct {
 	// Enable verbose logging
 	Verbose bool `yaml:"verbose"`
 
-	// Number of concurrent tools to run
-	Concurrency int `yaml:"concurrency"`
-
 	// Retry configuration
 	MaxRetries    int `yaml:"max_retries"`     // number of retries for failed tools (default: 1)
 	RetryDelaySec int `yaml:"retry_delay_sec"` // seconds between retries (default: 3)
@@ -98,18 +95,11 @@ type APIKeysConfig struct {
 	// SecurityTrails API key
 	SecurityTrails string `yaml:"securitytrails"`
 
-	// VirusTotal API key
+	// VirusTotal API key (also passed to subfinder as provider key)
 	VirusTotal string `yaml:"virustotal"`
 
-	// Chaos API key (ProjectDiscovery)
+	// Chaos API key (ProjectDiscovery; also passed to subfinder as provider key)
 	Chaos string `yaml:"chaos"`
-
-	// Hunter.io API key
-	Hunter string `yaml:"hunter"`
-
-	// PassiveTotal API credentials
-	PassiveTotalUser string `yaml:"passivetotal_user"`
-	PassiveTotalKey  string `yaml:"passivetotal_key"`
 }
 
 type ToolsConfig struct {
@@ -189,19 +179,6 @@ type NotificationConfig struct {
 
 	// Generic webhook URL
 	WebhookURL string `yaml:"webhook_url"`
-
-	// Email settings
-	Email EmailConfig `yaml:"email"`
-}
-
-type EmailConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	SMTPHost string `yaml:"smtp_host"`
-	SMTPPort int    `yaml:"smtp_port"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	From     string `yaml:"from"`
-	To       string `yaml:"to"`
 }
 
 type ScopeConfig struct {
@@ -298,7 +275,6 @@ func DefaultConfig() *Config {
 			DatabasePath: filepath.Join(chaathanDir, "chaathan.db"),
 			Mode:         "native",
 			Verbose:      false,
-			Concurrency:  5,
 			Wordlists: WordlistsConfig{
 				Subdomains:  "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
 				Directories: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
@@ -357,9 +333,6 @@ func DefaultConfig() *Config {
 }
 
 func applyDefaults(cfg *Config) {
-	if cfg.General.Concurrency == 0 {
-		cfg.General.Concurrency = 5
-	}
 	if cfg.General.Mode == "" {
 		cfg.General.Mode = "native"
 	}

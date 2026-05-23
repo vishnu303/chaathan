@@ -53,6 +53,19 @@ func stepDNSConsolidation(c *Ctx) bool {
 	logger.Success("Consolidated %d unique subdomains", subCount)
 	logger.FileDebug("consolidated subs total: %d -> %s", subCount, c.F.ConsolidatedSubs)
 
+	// Apply scope filtering (removes out-of-scope subdomains before DNS resolution)
+	if c.ScopeFilter != nil {
+		if err := utils.FilterFileLines(c.F.ConsolidatedSubs, func(line string) bool {
+			return c.ScopeFilter.IsInScope(line) && !c.ScopeFilter.IsOutOfScope(line)
+		}); err == nil {
+			afterCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
+			if filtered := subCount - afterCount; filtered > 0 {
+				logger.Info("  Filtered %d out-of-scope subdomains", filtered)
+				logger.FileDebug("scope filter: %d -> %d subdomains", subCount, afterCount)
+			}
+		}
+	}
+
 	logger.SubStep("Running DNSx for resolution...")
 	logger.FileDebug("dnsx input: %s (%d lines) out=%s", c.F.ConsolidatedSubs, subCount, c.F.DnsxOut)
 	if err := runWithSkip(c, "dnsx", func(sCtx context.Context) error {

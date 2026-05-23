@@ -158,6 +158,22 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		Cfg.RateLimits.GlobalRPS = rateLimitRPS
 	}
 
+	// Resolve wordlist/resolver paths: CLI flag > config > empty (step skips)
+	wl := wordlistPath
+	if wl == "" && Cfg != nil && Cfg.General.Wordlists.Directories != "" {
+		wl = Cfg.General.Wordlists.Directories
+	}
+
+	dnsWl := dnsWordlistPath
+	if dnsWl == "" && Cfg != nil && Cfg.General.Wordlists.Subdomains != "" {
+		dnsWl = Cfg.General.Wordlists.Subdomains
+	}
+
+	resolvers := resolversPath
+	if resolvers == "" && Cfg != nil && Cfg.General.ResolversFile != "" {
+		resolvers = Cfg.General.ResolversFile
+	}
+
 	// Build configuration and delegate to the wildcard_flow package
 	cfg := wf.RunConfig{
 		Domain:            targetDomain,
@@ -177,9 +193,9 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		SkipShuffleDNS:    skipShuffleDNS,
 		SkipHakrawler:     skipHakrawler,
 		SkipFingerprint:   skipFingerprint,
-		WordlistPath:      wordlistPath,
-		DNSWordlistPath:   dnsWordlistPath,
-		ResolversPath:     resolversPath,
+		WordlistPath:      wl,
+		DNSWordlistPath:   dnsWl,
+		ResolversPath:     resolvers,
 		GitHubToken:       token,
 		ResumeScanID:      resumeScanID,
 		GenerateReport:    generateReport,

@@ -97,6 +97,41 @@ func CountFileLines(filePath string) (int, error) {
 	return count, scanner.Err()
 }
 
+// FilterFileLines reads a file, keeps only lines where keep() returns true,
+// and writes the result back in place. Empty lines are always dropped.
+func FilterFileLines(filePath string, keep func(string) bool) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+
+	var kept []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && keep(line) {
+			kept = append(kept, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		file.Close()
+		return err
+	}
+	file.Close()
+
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for _, line := range kept {
+		w.WriteString(line)
+		w.WriteByte('\n')
+	}
+	return w.Flush()
+}
+
 // SanitizeURLFile reads a URL file, cleans each line (unescaping unicode,
 // stripping non-URL lines), and writes the result back in place.
 // This prevents downstream tools (Nuclei, Dalfox, httpx) from receiving
