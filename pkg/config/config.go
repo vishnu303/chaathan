@@ -120,41 +120,52 @@ type ToolsConfig struct {
 
 	// Ffuf specific settings
 	Ffuf FfufConfig `yaml:"ffuf"`
+
+	// Dalfox specific settings
+	Dalfox DalfoxConfig `yaml:"dalfox"`
 }
 
 type SubfinderConfig struct {
-	Threads int `yaml:"threads"`
-	Timeout int `yaml:"timeout"`
+	Threads int `yaml:"threads"` // concurrent threads for passive enumeration (default: 30)
+	Timeout int `yaml:"timeout"` // timeout in seconds per source (default: 30)
 }
 
 type AmassConfig struct {
-	Timeout int `yaml:"timeout"`
+	Timeout int `yaml:"timeout"` // max runtime in minutes for Amass (default: 60)
 }
 
 type NucleiConfig struct {
-	Concurrency int      `yaml:"concurrency"`
-	RateLimit   int      `yaml:"rate_limit"`
-	ExcludeTags []string `yaml:"exclude_tags"`
-	Severity    []string `yaml:"severity"`
+	Concurrency    int      `yaml:"concurrency"`     // concurrent template executions (default: 25)
+	RateLimit      int      `yaml:"rate_limit"`      // max requests per second (default: 150)
+	ExcludeTags    []string `yaml:"exclude_tags"`    // template tags to exclude (default: [dos, fuzz])
+	Severity       []string `yaml:"severity"`        // severities to scan (default: [low, medium, high, critical])
+	DisableOOB     bool     `yaml:"disable_oob"`     // disable Interactsh OOB checks — prevents hangs (default: true)
+	MaxTimeout     int      `yaml:"max_timeout_min"` // hard process timeout per Nuclei run in minutes (default: 300)
+	DASTAggression string   `yaml:"dast_aggression"` // DAST fuzzing payload count: low/medium/high (default: low)
+}
+
+type DalfoxConfig struct {
+	MaxURLs        int  `yaml:"max_urls"`         // cap parameterized URLs (default: 500)
+	SkipThirdParty bool `yaml:"skip_third_party"` // filter non-target domains (default: true)
 }
 
 type HttpxConfig struct {
-	Threads         int      `yaml:"threads"`
-	Timeout         int      `yaml:"timeout"`
-	Ports           []string `yaml:"ports"`
-	FollowRedirects bool     `yaml:"follow_redirects"`
+	Threads         int      `yaml:"threads"`          // concurrent probing threads (default: 50)
+	Timeout         int      `yaml:"timeout"`          // per-request timeout in seconds (default: 10)
+	Ports           []string `yaml:"ports"`            // ports to probe (default: [80, 443, 8080, 8443, 8000, 8888])
+	FollowRedirects bool     `yaml:"follow_redirects"` // follow HTTP redirects (default: true)
 }
 
 type NaabuConfig struct {
-	Threads int    `yaml:"threads"`
-	Rate    int    `yaml:"rate"`
-	Ports   string `yaml:"ports"` // e.g., "top-1000" or "80,443,8080"
+	Threads int    `yaml:"threads"` // concurrent scanning threads (default: 25)
+	Rate    int    `yaml:"rate"`    // packets per second (default: 1000)
+	Ports   string `yaml:"ports"`   // port spec: "top-1000", "80,443,8080", or range (default: top-1000)
 }
 
 type FfufConfig struct {
-	Threads    int   `yaml:"threads"`
-	Timeout    int   `yaml:"timeout"`
-	MatchCodes []int `yaml:"match_codes"`
+	Threads    int   `yaml:"threads"`     // concurrent fuzzing threads (default: 50)
+	Timeout    int   `yaml:"timeout"`     // per-request timeout in seconds (default: 10)
+	MatchCodes []int `yaml:"match_codes"` // HTTP status codes to report as findings (default: 200,201,204,301,...)
 }
 
 type NotificationConfig struct {
@@ -275,6 +286,7 @@ func DefaultConfig() *Config {
 			DatabasePath: filepath.Join(chaathanDir, "chaathan.db"),
 			Mode:         "native",
 			Verbose:      false,
+			UARotation:   true,
 			Wordlists: WordlistsConfig{
 				Subdomains:  "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
 				Directories: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
@@ -295,10 +307,13 @@ func DefaultConfig() *Config {
 				Timeout: 60,
 			},
 			Nuclei: NucleiConfig{
-				Concurrency: 25,
-				RateLimit:   150,
-				Severity:    []string{"low", "medium", "high", "critical"},
-				ExcludeTags: []string{"dos", "fuzz"},
+				Concurrency:    25,
+				RateLimit:      150,
+				Severity:       []string{"low", "medium", "high", "critical"},
+				ExcludeTags:    []string{"dos", "fuzz"},
+				DisableOOB:     true,
+				MaxTimeout:     300,
+				DASTAggression: "low",
 			},
 			Httpx: HttpxConfig{
 				Threads:         50,
@@ -314,6 +329,10 @@ func DefaultConfig() *Config {
 				Threads:    50,
 				Timeout:    10,
 				MatchCodes: []int{200, 201, 204, 301, 302, 307, 401, 403, 405, 500},
+			},
+			Dalfox: DalfoxConfig{
+				MaxURLs:        500,
+				SkipThirdParty: true,
 			},
 		},
 		Notifications: NotificationConfig{
@@ -344,6 +363,15 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Tools.Nuclei.RateLimit == 0 {
 		cfg.Tools.Nuclei.RateLimit = 150
+	}
+	if cfg.Tools.Nuclei.MaxTimeout == 0 {
+		cfg.Tools.Nuclei.MaxTimeout = 300
+	}
+	if cfg.Tools.Nuclei.DASTAggression == "" {
+		cfg.Tools.Nuclei.DASTAggression = "low"
+	}
+	if cfg.Tools.Dalfox.MaxURLs == 0 {
+		cfg.Tools.Dalfox.MaxURLs = 500
 	}
 	if cfg.Notifications.MinSeverity == "" {
 		cfg.Notifications.MinSeverity = "high"

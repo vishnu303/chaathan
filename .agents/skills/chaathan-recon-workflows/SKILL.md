@@ -69,10 +69,10 @@ Phase 5 — Fingerprinting       (Step 22)     in: live hosts     out: Tech/WAF 
 
 | Step | Name | Tool(s) | Notes |
 |------|------|---------|-------|
-| 18 | `vuln_scanning` | Nuclei (infra) | `--skip-nuclei` |
-| 19 | `vuln_scanning_urls` | Nuclei (URLs + gf) | `--skip-nuclei` |
-| 20 | `takeover_detection` | Nuclei (takeover templates) | `--skip-takeovers` |
-| 21 | `xss_scanning` | Dalfox | `--skip-dalfox` |
+| 18 | `vuln_scanning` | Nuclei (two passes) | `--skip-nuclei`; Pass A: `-as` automatic scan (tech-targeted CVEs via Wappalyzer), Pass B: misconfig/exposure templates (tech-agnostic) |
+| 19 | `vuln_scanning_urls` | Nuclei (DAST) | `--skip-nuclei`; uses `-dast` fuzzing mode with real attack payloads; input scope-filtered + deduped |
+| 20 | `takeover_detection` | Nuclei (takeover templates) | `--skip-takeovers`; input CNAME-filtered from DNSx output (falls back to all subs) |
+| 21 | `xss_scanning` | Dalfox | `--skip-dalfox`; input scope-filtered, deduped by path, capped at `dalfox.max_urls` (default 500) |
 
 ### Phase 5 — Fingerprinting (`fingerprinting.go`)
 
@@ -116,6 +116,35 @@ Resume state uses **string-based** keys (e.g. `"url_discovery"`, `"web_crawling"
 
 **New workflow artifact:**
 1. Add path to `Files` → 2. Write in one step only → 3. Update downstream readers → 4. Verify report/export/query when file is missing or empty.
+
+## Phase 4 tool methods and output files
+
+| Method | Nuclei Mode | Output File | Used By Step |
+|--------|-------------|-------------|------|
+| `RunNucleiSmartCVE` | `-as` (automatic scan) | `nuclei_vulns.json` | Step 18 Pass A |
+| `RunNucleiMisconfig` | tags: exposure,default-login,misconfig,unauth | `nuclei_misconfig.json` | Step 18 Pass B |
+| `RunNucleiDAST` | `-dast` (fuzzing) | `nuclei_dast.json` | Step 19 |
+| `RunNucleiTakeovers` | tags: takeover | `subjack_out.json` | Step 20 |
+| `RunDalfox` | — | `dalfox_xss.jsonl` | Step 21 |
+
+All Nuclei methods include anti-hang flags: `-retries 0`, `-interactsh-disable` (when `disable_oob` config is true), `-stats -stats-interval 30`, `-max-host-error 3`, and `runner.WithTimeout(nuclei.max_timeout_min)`.
+
+### Config fields for Phase 4
+
+| Config path | Type | Default | Effect |
+|---|---|---|---|
+| `tools.nuclei.disable_oob` | bool | `true` | Disables Interactsh OOB checks (prevents hangs) |
+| `tools.nuclei.max_timeout_min` | int | `300` | Hard process timeout per Nuclei run (minutes) |
+| `tools.nuclei.dast_aggression` | string | `"low"` | DAST fuzzing payload count (low/medium/high) |
+| `tools.dalfox.max_urls` | int | `500` | Cap parameterized URLs fed to Dalfox |
+| `tools.dalfox.skip_third_party` | bool | `true` | Filter 3rd-party domains from Dalfox/DAST input |
+| `general.ua_rotation` | bool | `true` | Rotate real browser UAs (default on to bypass WAFs) |
+
+### Input filtering helpers (in `helpers.go`)
+
+- `filterCNAMESubdomains` — reads DNSx JSONL, extracts CNAME-bearing subs for takeover scanning
+- `collectScopedURLs` — filters URLs by scope, static extension, junk domains, deduplicates by path, caps at limit
+- `collectScopedParamURLs` — wraps `collectScopedURLs` with Dalfox config cap
 
 ## Validation
 

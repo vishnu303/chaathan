@@ -23,9 +23,9 @@ Activate this skill for tasks involving external binary installation, setup beha
 | `pkg/setup/prereqs.go` | System prerequisite checks |
 | `pkg/setup/log.go` | Setup log file management |
 | `pkg/tools/registry.go` | Canonical tool catalogue (28 tools) |
-| `pkg/tools/tools.go` | Runtime tool wrappers and ToolBox |
+| `pkg/tools/tools.go` | Runtime tool wrappers and ToolBox (includes `RunNucleiSmartCVE`, `RunNucleiMisconfig`, `RunNucleiDAST`, `RunNucleiTakeovers`) |
 | `pkg/runner/runner.go` | Command execution, retry, docker, UA/proxy |
-| `pkg/config/config.go` | Per-tool config parameters |
+| `pkg/config/config.go` | Per-tool config parameters (NucleiConfig, DalfoxConfig, etc.) |
 | `Makefile` | `make setup`, `make tools-check` targets |
 
 ## Tool categories (from registry)

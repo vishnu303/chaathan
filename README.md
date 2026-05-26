@@ -64,7 +64,7 @@ chaathan wildcard -d target.com
 | **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, Hakrawler | `all_subdomains.txt` |
 | **2 — Validation** | 6–10 | DNSx, ShuffleDNS, Httpx, tlsx, Naabu | `live_hosts.txt` |
 | **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, GoLinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
-| **4 — Vulnerability Scan** | 18–21 | Nuclei (infra + URLs + takeovers), Dalfox| DB findings |
+| **4 — Vulnerability Scan** | 18–21 | Nuclei (smart CVE + misconfig + DAST), Dalfox | DB findings |
 | **5 — Fingerprinting** | 22 | Httpx, Nuclei | Tech/WAF JSON |
 
 <details>
@@ -89,10 +89,10 @@ chaathan wildcard -d target.com
 | 15 | Httpx | URL consolidation + live check | — |
 | 16 | Httpx, gf | JS file secret scan | — |
 | 17 | ffuf | Directory fuzzing | needs `--wordlist` |
-| 18 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
-| 19 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
-| 20 | Nuclei (Takeovers) | Subdomain takeover detection | `--skip-takeovers` |
-| 21 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
+| 18 | Nuclei | Vuln scanning — infra (smart CVE + misconfig) | `--skip-nuclei` |
+| 19 | Nuclei | Vuln scanning — URLs (DAST fuzzing) | `--skip-nuclei` |
+| 20 | Nuclei (Takeovers) | Subdomain takeover detection (CNAME-filtered) | `--skip-takeovers` |
+| 21 | Dalfox | XSS scanning (scoped, deduped, capped URLs) | `--skip-dalfox` |
 | 22 | Httpx, Nuclei | Technology & WAF Fingerprinting | `--skip-fingerprint` |
 
 </details>
@@ -249,7 +249,7 @@ general:
   retry_delay_sec: 3
   mode: native
   concurrency: 5
-  ua_rotation: false
+  ua_rotation: true
   user_agent: ""
   proxy: ""
 
@@ -266,6 +266,12 @@ tools:
     rate_limit: 150
     severity: [low, medium, high, critical]
     exclude_tags: [dos, fuzz]
+    disable_oob: true            # disable Interactsh OOB checks (prevents hangs)
+    max_timeout_min: 300         # hard process timeout per Nuclei run (5 hours)
+    dast_aggression: low         # DAST fuzzing payload count: low/medium/high
+  dalfox:
+    max_urls: 500                # cap parameterized URLs for XSS scanning
+    skip_third_party: true       # filter CDN/analytics/font domains from input
   httpx:
     threads: 50
     timeout: 10
@@ -325,11 +331,12 @@ All features are opt-in — disabled by default, zero behavior change unless ena
 
 ### User-Agent Rotation
 
-Rotate using real browser UAs (Chrome, Firefox, Edge, Safari) instead of tool-identifiable strings:
+UA rotation is **enabled by default** (`ua_rotation: true`). Real browser UAs (Chrome, Firefox, Edge, Safari) are rotated on every request, preventing WAF fingerprinting from static tool UAs like `"Nuclei - Open-source project"`.
 
+To disable:
 ```yaml
 general:
-  ua_rotation: true
+  ua_rotation: false
 ```
 
 Or set a fixed UA:
@@ -409,7 +416,9 @@ chaathan setup --update       # reinstall all tools (force update to latest)
 │   └── target.com/
 │       ├── intermediate_files/  # Raw outputs from individual tools
 │       ├── final_files/         # Consolidated product files
-│       │   ├── nuclei_vulns.json
+│       │   ├── nuclei_vulns.json      # Smart CVE findings
+│       │   ├── nuclei_misconfig.json  # Misconfig/exposure findings
+│       │   ├── nuclei_dast.json       # DAST injection findings
 │       │   ├── gf_secrets_findings.txt
 │       │   └── dalfox_xss.jsonl
 │       ├── SUMMARY.txt

@@ -121,6 +121,9 @@ type Files struct {
 	DalfoxOut          string
 	HttpxTechOut       string
 	NucleiWafOut       string
+	NucleiMisconfigOut string
+	NucleiDASTOut      string
+	TakeoverCandidates string
 }
 
 // newFiles builds all output paths from the result directory.
@@ -177,6 +180,9 @@ func newFiles(dir string) Files {
 		ParamURLsFile:    j("param_urls_live.txt"),
 		HttpxTechOut:     jf("httpx_tech.json"),
 		NucleiWafOut:     jf("nuclei_waf.json"),
+		NucleiMisconfigOut: jf("nuclei_misconfig.json"),
+		NucleiDASTOut:    jf("nuclei_dast.json"),
+		TakeoverCandidates: j("takeover_candidates.txt"),
 	}
 }
 
@@ -531,9 +537,9 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "dir_fuzzing":
 		return countLines(c.F.FfufOut)
 	case "vuln_scanning":
-		return countLines(c.F.NucleiOut)
+		return countLines(c.F.NucleiOut, c.F.NucleiMisconfigOut)
 	case "vuln_scanning_urls":
-		return countLines(c.F.NucleiURLOut)
+		return countLines(c.F.NucleiDASTOut)
 	case "takeover_detection":
 		return countLines(c.F.SubjackOut)
 	case "xss_scanning":

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/config"
 	"github.com/vishnu303/chaathan-flow/pkg/runner"
@@ -81,6 +82,7 @@ func randomUA() string {
 }
 
 // uaEnabled returns true when UA rotation is active.
+// Controlled by the ua_rotation config field (default: true in DefaultConfig).
 func (t *ToolBox) uaEnabled() bool {
 	return t.General != nil && (t.General.UARotation || t.General.UserAgent != "")
 }
@@ -251,6 +253,28 @@ func (t *ToolBox) nucleiExcludeTags() []string {
 	}
 	return []string{"dos", "fuzz"}
 }
+
+func (t *ToolBox) nucleiDisableOOB() bool {
+	if t.Config != nil {
+		return t.Config.Nuclei.DisableOOB
+	}
+	return true // disabled by default — Interactsh hangs are a major stuck source
+}
+
+func (t *ToolBox) nucleiMaxTimeout() time.Duration {
+	if t.Config != nil && t.Config.Nuclei.MaxTimeout > 0 {
+		return time.Duration(t.Config.Nuclei.MaxTimeout) * time.Minute
+	}
+	return 300 * time.Minute
+}
+
+func (t *ToolBox) dastAggression() string {
+	if t.Config != nil && t.Config.Nuclei.DASTAggression != "" {
+		return t.Config.Nuclei.DASTAggression
+	}
+	return "low"
+}
+
 
 func (t *ToolBox) nucleiSeverity() []string {
 	if t.Config != nil && len(t.Config.Nuclei.Severity) > 0 {
@@ -569,6 +593,95 @@ func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile 
 	return err
 }
 
+// RunNucleiSmartCVE runs tech-targeted CVE scanning using Nuclei's -as (automatic scan).
+// Wappalyzer fingerprints each host and selects only templates matching detected technologies.
+// This reduces effective template count from ~3,800 to ~100-400 per host.
+func (t *ToolBox) RunNucleiSmartCVE(ctx context.Context, targetsFile string, outputFile string) error {
+	rateLimit := t.effectiveRate(t.nucleiRateLimit())
+	args := []string{
+		"-l", targetsFile,
+		"-as",                          // automatic scan — Wappalyzer tech → template mapping
+		"-severity", "critical,high",
+		"-etags", "dos,fuzz,exposure,default-login,misconfig,unauth", // covered by misconfig pass
+		"-c", strconv.Itoa(t.nucleiConcurrency()),
+		"-rl", strconv.Itoa(rateLimit),
+		"-timeout", "5",
+		"-max-host-error", "3",
+		"-retries", "0",
+		"-stats", "-stats-interval", "30",
+		"-jsonl",
+		"-o", outputFile,
+	}
+	if t.nucleiDisableOOB() {
+		args = append(args, "-interactsh-disable")
+	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
+	return err
+}
+
+// RunNucleiMisconfig runs generic misconfig/exposure scanning (tech-agnostic).
+// These templates catch exposed .env files, default credentials, open debug panels,
+// etc. — relevant regardless of the target's technology stack.
+func (t *ToolBox) RunNucleiMisconfig(ctx context.Context, targetsFile string, outputFile string) error {
+	rateLimit := t.effectiveRate(t.nucleiRateLimit())
+	args := []string{
+		"-l", targetsFile,
+		"-tags", "exposure,default-login,misconfig,unauth",
+		"-severity", "critical,high,medium",
+		"-etags", "dos,fuzz",
+		"-pt", "http",
+		"-c", strconv.Itoa(t.nucleiConcurrency()),
+		"-rl", strconv.Itoa(rateLimit),
+		"-timeout", "5",
+		"-max-host-error", "3",
+		"-retries", "0",
+		"-stats", "-stats-interval", "30",
+		"-jsonl",
+		"-o", outputFile,
+	}
+	if t.nucleiDisableOOB() {
+		args = append(args, "-interactsh-disable")
+	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
+	return err
+}
+
+// RunNucleiDAST runs Nuclei in DAST fuzzing mode against parameterized URLs.
+// Unlike detection-only scanning, DAST sends actual attack payloads (SQLi probes,
+// XSS vectors, SSRF callbacks) and validates exploitation evidence.
+func (t *ToolBox) RunNucleiDAST(ctx context.Context, urlsFile string, outputFile string) error {
+	rateLimit := t.effectiveRate(t.nucleiRateLimit() / 2)
+	if rateLimit < 25 {
+		rateLimit = 25
+	}
+	concurrency := t.nucleiConcurrency() / 2
+	if concurrency < 5 {
+		concurrency = 5
+	}
+	args := []string{
+		"-l", urlsFile,
+		"-dast",
+		"-severity", "critical,high,medium",
+		"-fa", t.dastAggression(),
+		"-c", strconv.Itoa(concurrency),
+		"-rl", strconv.Itoa(rateLimit),
+		"-timeout", "10",       // longer for fuzzing payloads
+		"-max-host-error", "3",
+		"-retries", "0",
+		"-stats", "-stats-interval", "30",
+		"-jsonl",
+		"-o", outputFile,
+	}
+	args = t.appendUAHeader(args)
+	args = t.appendProxy(args, "-proxy")
+	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
+	return err
+}
+
 // --- Cloud & Org ---
 
 func (t *ToolBox) RunMetabigorNet(ctx context.Context, org string, outputFile string) error {
@@ -863,13 +976,17 @@ func (t *ToolBox) RunNucleiTakeovers(ctx context.Context, targetsFile string, ou
 		"-rl", strconv.Itoa(rateLimit),
 		"-timeout", "5",        // per-request timeout (seconds)
 		"-max-host-error", "3", // bail out of unresponsive hosts quickly
+		"-retries", "0",
+		"-stats", "-stats-interval", "30",
 		"-jsonl",
 		"-o", outputFile,
 	}
-
+	if t.nucleiDisableOOB() {
+		args = append(args, "-interactsh-disable")
+	}
 	args = t.appendUAHeader(args)
 	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "nuclei", args)
+	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
 	return err
 }
 
