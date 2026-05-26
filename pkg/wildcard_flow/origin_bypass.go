@@ -12,7 +12,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/notify"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan-flow/utils"
 )
 
 // wafCIDRs lists standard public IPv4 network blocks for major WAFs/CDNs (Cloudflare, Fastly, Incapsula, Sucuri, CloudFront).

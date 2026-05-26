@@ -25,7 +25,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/scan"
 	"github.com/vishnu303/chaathan-flow/pkg/scope"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan-flow/utils"
 )
 
 // ─────────────────────────────────────────────────────────────

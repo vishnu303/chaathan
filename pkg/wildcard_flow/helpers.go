@@ -13,11 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan-flow/utils"
 )
 
 var jsGFPatterns = map[string]bool{
@@ -446,39 +445,13 @@ func filterCNAMESubdomains(dnsxJSONFile, outputFile string) int {
 
 // junkDomainSuffixes are 3rd-party domains that should never be scanned.
 func getJunkDomains() []string {
-	if config.Cfg != nil && len(config.Cfg.Heuristics.JunkDomains) > 0 {
-		return config.Cfg.Heuristics.JunkDomains
-	}
-	return []string{
-		"googleapis.com", "gstatic.com", "google-analytics.com",
-		"googletagmanager.com", "doubleclick.net", "googlesyndication.com",
-		"facebook.com", "fbcdn.net", "twitter.com", "twimg.com",
-		"cloudflare.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
-		"unpkg.com", "maxcdn.bootstrapcdn.com", "bootstrapcdn.com",
-		"jquery.com", "fontawesome.com", "fonts.googleapis.com",
-		"gravatar.com", "wp.com", "amazon-adsystem.com",
-		"hotjar.com", "clarity.ms", "segment.io", "segment.com",
-		"intercom.io", "sentry.io", "newrelic.com", "nr-data.net",
-		"akamaihd.net", "akamai.net", "fastly.net", "edgecastcdn.net",
-		"cloudfront.net", "azureedge.net", "azurewebsites.net",
-		"herokuapp.com", "github.io", "gitlab.io",
-		"recaptcha.net", "hcaptcha.com",
-	}
+	return utils.JunkDomains
 }
 
 // staticExtensions are file extensions that can't have injection points.
 func getStaticExtensions() map[string]bool {
-	exts := []string{
-		".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
-		".woff", ".woff2", ".ttf", ".eot", ".otf", ".mp4", ".webm",
-		".mp3", ".pdf", ".zip", ".gz", ".tar", ".map", ".webp",
-		".avif", ".bmp", ".tif",
-	}
-	if config.Cfg != nil && len(config.Cfg.Heuristics.StaticExtensions) > 0 {
-		exts = config.Cfg.Heuristics.StaticExtensions
-	}
-	res := make(map[string]bool, len(exts))
-	for _, ext := range exts {
+	res := make(map[string]bool, len(utils.StaticExtensions))
+	for _, ext := range utils.StaticExtensions {
 		res[strings.ToLower(ext)] = true
 	}
 	return res
@@ -486,29 +459,12 @@ func getStaticExtensions() map[string]bool {
 
 // getHighValueMarkers returns path markers that identify high-value/sensitive components.
 func getHighValueMarkers() []string {
-	if config.Cfg != nil && len(config.Cfg.Heuristics.HighValueMarkers) > 0 {
-		return config.Cfg.Heuristics.HighValueMarkers
-	}
-	return []string{
-		"/admin", "/login", "/signin", "/signup", "/auth",
-		"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
-		"/rest/", "/debug", "/console", "/actuator", "/swagger",
-		"/openapi", "/health", "/metrics", "/config", "/upload",
-		"/callback", "/redirect", "/reset", "/password", "/search",
-		"/export", "/import", "/webhook",
-	}
+	return utils.HighValueMarkers
 }
 
 // getInterestingParameters returns parameters names that often contain security vulnerabilities.
 func getInterestingParameters() []string {
-	if config.Cfg != nil && len(config.Cfg.Heuristics.InterestingParameters) > 0 {
-		return config.Cfg.Heuristics.InterestingParameters
-	}
-	return []string{
-		"url", "uri", "path", "redirect", "return", "next", "goto",
-		"file", "page", "template", "include", "cmd", "exec",
-		"query", "search", "id", "user", "email", "callback",
-	}
+	return utils.InterestingParameters
 }
 
 // isJunkDomain returns true if the host belongs to a known 3rd-party service.
@@ -600,7 +556,6 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 	}
 
 	scanner := bufio.NewScanner(file)
-	target := strings.ToLower(c.Domain)
 
 	if maxURLs > 0 {
 		// Bounded pipeline space: use a min-heap of size N to keep memory O(1)
@@ -634,10 +589,7 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 			if filterJunk && isJunkDomain(host) {
 				continue
 			}
-			// Must be in-scope for target domain
-			if host != target && !strings.HasSuffix(host, "."+target) {
-				continue
-			}
+
 
 			// Score this URL for ROI ordering
 			score := urlROIScore(line)
@@ -717,9 +669,7 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 			if filterJunk && isJunkDomain(host) {
 				continue
 			}
-			if host != target && !strings.HasSuffix(host, "."+target) {
-				continue
-			}
+
 
 			score := urlROIScore(line)
 			pk := pathKey(line)

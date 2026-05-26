@@ -31,7 +31,7 @@ pkg/notify/          → Discord, Slack, Telegram, webhook notifications
 pkg/logger/          → styled terminal output, colors, scan UI headers
 pkg/progress/        → spinners and progress bars
 pkg/paths/           → centralised ~/.chaathan directory paths
-pkg/utils/           → file I/O, parsers, export helpers, validation, formatting
+utils/               → file I/O, parsers, export helpers, validation, formatting
 ```
 
 ## Default working pattern
@@ -48,7 +48,7 @@ pkg/utils/           → file I/O, parsers, export helpers, validation, formatti
 | New flag or command | `cli/*.go` | owning `pkg/` package |
 | Wildcard scan change | `cli/wildcard.go` | `pkg/wildcard_flow/flow.go` → phase file |
 | Company scan change | `cli/company.go` | `pkg/company_flow/flow.go` |
-| Query/report/export | `cli/query.go`, `cli/report.go` | `pkg/database/`, `pkg/report/`, `pkg/utils/` |
+| Query/report/export | `cli/query.go`, `cli/report.go` | `pkg/database/`, `pkg/report/`, `utils/` |
 | Tool install/setup | `cli/setup.go` | `pkg/setup/`, `pkg/tools/registry.go` |
 | Notification change | — | `pkg/notify/`, `pkg/wildcard_flow/flow.go` |
 | Config change | `cli/config.go` | `pkg/config/config.go` |

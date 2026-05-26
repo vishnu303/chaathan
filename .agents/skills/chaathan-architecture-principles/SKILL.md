@@ -30,7 +30,7 @@ Activate this skill when deciding where code should live, how to introduce new b
 | Terminal output, colors | `pkg/logger/` | — |
 | Spinners, progress bars | `pkg/progress/` | — |
 | `~/.chaathan` directory paths | `pkg/paths/` | hardcoded paths elsewhere |
-| File I/O, parsers, helpers | `pkg/utils/` | — |
+| File I/O, parsers, helpers | `utils/` | — |
 
 ## Core principles
 

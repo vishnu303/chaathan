@@ -13,7 +13,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/scan"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan-flow/utils"
 	wf "github.com/vishnu303/chaathan-flow/pkg/wildcard_flow"
 )
 
@@ -292,6 +292,3 @@ func runScansDelete(cmd *cobra.Command, args []string) {
 
 	logger.Success("Scan #%d deleted", scanID)
 }
-
-// truncate and colorStatus/colorSeverity have been moved to
-// pkg/utils.Truncate and pkg/logger.ColorStatus / pkg/logger.ColorSeverity.

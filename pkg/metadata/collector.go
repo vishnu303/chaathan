@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan-flow/utils"
 )
 
 const (

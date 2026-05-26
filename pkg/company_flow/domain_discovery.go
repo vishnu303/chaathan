@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan-flow/utils"
 )
 
 // ─────────────────────────────────────────────────────────────

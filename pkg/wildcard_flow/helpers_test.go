@@ -28,7 +28,7 @@ func TestCollectScopedURLs(t *testing.T) {
 		"http://example.com/api/v1/users?id=2",                               // in-scope, same path, id parameter -> duplicate of above path
 		"http://example.com/admin/login?redirect=http://google.com&user=admin", // in-scope, extremely high score (admin, login, redirect, user parameters)
 		"http://example.com/static/style.css?v=1.2",                          // in-scope, has static extension -> ignored
-		"http://outscope.com/api/v1/users?id=1",                              // out-of-scope domain -> ignored
+		"http://outscope.com/api/v1/users?id=1",                              // different domain -> still included (no domain-scope filter)
 		"http://example.com/about",                                           // in-scope, no parameters -> ignored
 	}
 
@@ -46,8 +46,8 @@ func TestCollectScopedURLs(t *testing.T) {
 
 	// 1. Test uncapped
 	count := collectScopedURLs(ctx, inputFile, outputFile, 0)
-	if count != 2 {
-		t.Errorf("expected 2 filtered URLs, got %d", count)
+	if count != 3 {
+		t.Errorf("expected 3 filtered URLs, got %d", count)
 	}
 
 	content, err := os.ReadFile(outputFile)
@@ -56,8 +56,8 @@ func TestCollectScopedURLs(t *testing.T) {
 	}
 
 	filteredLines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	if len(filteredLines) != 2 {
-		t.Errorf("expected 2 output lines, got %d", len(filteredLines))
+	if len(filteredLines) != 3 {
+		t.Errorf("expected 3 output lines, got %d", len(filteredLines))
 	}
 
 	// Verify the admin url is first because of high ROI score

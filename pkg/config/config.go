@@ -29,9 +29,6 @@ type Config struct {
 
 	// Rate limiting
 	RateLimits RateLimitConfig `yaml:"rate_limits"`
-
-	// Heuristics for vulnerability scanning and target prioritization
-	Heuristics HeuristicsConfig `yaml:"heuristics"`
 }
 
 type GeneralConfig struct {
@@ -215,12 +212,6 @@ type RateLimitConfig struct {
 	GlobalRPS int `yaml:"global_rps"`
 }
 
-type HeuristicsConfig struct {
-	JunkDomains           []string `yaml:"junk_domains"`
-	StaticExtensions      []string `yaml:"static_extensions"`
-	HighValueMarkers      []string `yaml:"high_value_markers"`
-	InterestingParameters []string `yaml:"interesting_parameters"`
-}
 
 // Global config instance
 var Cfg *Config
@@ -358,42 +349,6 @@ func DefaultConfig() *Config {
 		RateLimits: RateLimitConfig{
 			GlobalRPS: 0, // disabled by default; set to cap all tools
 		},
-		Heuristics: HeuristicsConfig{
-			JunkDomains: []string{
-				"googleapis.com", "gstatic.com", "google-analytics.com",
-				"googletagmanager.com", "doubleclick.net", "googlesyndication.com",
-				"facebook.com", "fbcdn.net", "twitter.com", "twimg.com",
-				"cloudflare.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
-				"unpkg.com", "maxcdn.bootstrapcdn.com", "bootstrapcdn.com",
-				"jquery.com", "fontawesome.com", "fonts.googleapis.com",
-				"gravatar.com", "wp.com", "amazon-adsystem.com",
-				"hotjar.com", "clarity.ms", "segment.io", "segment.com",
-				"intercom.io", "sentry.io", "newrelic.com", "nr-data.net",
-				"akamaihd.net", "akamai.net", "fastly.net", "edgecastcdn.net",
-				"cloudfront.net", "azureedge.net", "azurewebsites.net",
-				"herokuapp.com", "github.io", "gitlab.io",
-				"recaptcha.net", "hcaptcha.com",
-			},
-			StaticExtensions: []string{
-				".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
-				".woff", ".woff2", ".ttf", ".eot", ".otf", ".mp4", ".webm",
-				".mp3", ".pdf", ".zip", ".gz", ".tar", ".map", ".webp",
-				".avif", ".bmp", ".tif",
-			},
-			HighValueMarkers: []string{
-				"/admin", "/login", "/signin", "/signup", "/auth",
-				"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
-				"/rest/", "/debug", "/console", "/actuator", "/swagger",
-				"/openapi", "/health", "/metrics", "/config", "/upload",
-				"/callback", "/redirect", "/reset", "/password", "/search",
-				"/export", "/import", "/webhook",
-			},
-			InterestingParameters: []string{
-				"url", "uri", "path", "redirect", "return", "next", "goto",
-				"file", "page", "template", "include", "cmd", "exec",
-				"query", "search", "id", "user", "email", "callback",
-			},
-		},
 	}
 }
 
@@ -431,48 +386,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Notifications.MinSeverity == "" {
 		cfg.Notifications.MinSeverity = "high"
-	}
-	if len(cfg.Heuristics.JunkDomains) == 0 {
-		cfg.Heuristics.JunkDomains = []string{
-			"googleapis.com", "gstatic.com", "google-analytics.com",
-			"googletagmanager.com", "doubleclick.net", "googlesyndication.com",
-			"facebook.com", "fbcdn.net", "twitter.com", "twimg.com",
-			"cloudflare.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
-			"unpkg.com", "maxcdn.bootstrapcdn.com", "bootstrapcdn.com",
-			"jquery.com", "fontawesome.com", "fonts.googleapis.com",
-			"gravatar.com", "wp.com", "amazon-adsystem.com",
-			"hotjar.com", "clarity.ms", "segment.io", "segment.com",
-			"intercom.io", "sentry.io", "newrelic.com", "nr-data.net",
-			"akamaihd.net", "akamai.net", "fastly.net", "edgecastcdn.net",
-			"cloudfront.net", "azureedge.net", "azurewebsites.net",
-			"herokuapp.com", "github.io", "gitlab.io",
-			"recaptcha.net", "hcaptcha.com",
-		}
-	}
-	if len(cfg.Heuristics.StaticExtensions) == 0 {
-		cfg.Heuristics.StaticExtensions = []string{
-			".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
-			".woff", ".woff2", ".ttf", ".eot", ".otf", ".mp4", ".webm",
-			".mp3", ".pdf", ".zip", ".gz", ".tar", ".map", ".webp",
-			".avif", ".bmp", ".tif",
-		}
-	}
-	if len(cfg.Heuristics.HighValueMarkers) == 0 {
-		cfg.Heuristics.HighValueMarkers = []string{
-			"/admin", "/login", "/signin", "/signup", "/auth",
-			"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
-			"/rest/", "/debug", "/console", "/actuator", "/swagger",
-			"/openapi", "/health", "/metrics", "/config", "/upload",
-			"/callback", "/redirect", "/reset", "/password", "/search",
-			"/export", "/import", "/webhook",
-		}
-	}
-	if len(cfg.Heuristics.InterestingParameters) == 0 {
-		cfg.Heuristics.InterestingParameters = []string{
-			"url", "uri", "path", "redirect", "return", "next", "goto",
-			"file", "page", "template", "include", "cmd", "exec",
-			"query", "search", "id", "user", "email", "callback",
-		}
 	}
 }
 

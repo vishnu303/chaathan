@@ -11,7 +11,7 @@ import (
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/paths"
 	"github.com/vishnu303/chaathan-flow/pkg/report"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan-flow/utils"
 )
 
 var reportCmd = &cobra.Command{
