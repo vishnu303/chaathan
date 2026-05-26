@@ -67,6 +67,14 @@ Before editing, ask:
 - **New scan artifact:** `Files` path → producing step → downstream DB/report/query consumers
 - **New ranking signal:** persisted metadata → ROI computation → query/report output
 - **New setup dependency:** `pkg/setup/` install/check → `pkg/tools/` invocation → workflow usage
+- **New vulnerability scanner:** implement `VulnScanner` interface in `pkg/tools/vulnerability_engine.go` → register in `scanners` map → fetch via `GetScanner(name)` in `tools.go`
+
+### Interface-driven Scanner Decoupling (Factory Pattern)
+
+Vulnerability scanners (Nuclei, Dalfox, etc.) are decoupled from the monolithic `pkg/tools/tools.go` structure:
+- Define new scanning engines by implementing the `VulnScanner` interface.
+- Scan execution, command parameters formulation, and custom option parsing are isolated within modular scanner-specific structs (e.g., `NucleiScanner`, `DalfoxScanner` in `pkg/tools/vulnerability_engine.go`).
+- Do not write raw tool arguments directly in the `tools.go` wrapper methods; instead, leverage `GetScanner(name)` to fetch the registered implementation and delegate to its `Scan` method.
 
 ## Wrong-place signals
 

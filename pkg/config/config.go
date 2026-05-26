@@ -29,6 +29,9 @@ type Config struct {
 
 	// Rate limiting
 	RateLimits RateLimitConfig `yaml:"rate_limits"`
+
+	// Heuristics for vulnerability scanning and target prioritization
+	Heuristics HeuristicsConfig `yaml:"heuristics"`
 }
 
 type GeneralConfig struct {
@@ -139,14 +142,14 @@ type NucleiConfig struct {
 	RateLimit      int      `yaml:"rate_limit"`      // max requests per second (default: 150)
 	ExcludeTags    []string `yaml:"exclude_tags"`    // template tags to exclude (default: [dos, fuzz])
 	Severity       []string `yaml:"severity"`        // severities to scan (default: [low, medium, high, critical])
-	DisableOOB     bool     `yaml:"disable_oob"`     // disable Interactsh OOB checks — prevents hangs (default: true)
+	DisableOOB     *bool    `yaml:"disable_oob"`     // disable Interactsh OOB checks — prevents hangs (default: true)
 	MaxTimeout     int      `yaml:"max_timeout_min"` // hard process timeout per Nuclei run in minutes (default: 300)
 	DASTAggression string   `yaml:"dast_aggression"` // DAST fuzzing payload count: low/medium/high (default: low)
 }
 
 type DalfoxConfig struct {
 	MaxURLs        int  `yaml:"max_urls"`         // cap parameterized URLs (default: 500)
-	SkipThirdParty bool `yaml:"skip_third_party"` // filter non-target domains (default: true)
+	SkipThirdParty *bool `yaml:"skip_third_party"` // filter non-target domains (default: true)
 }
 
 type HttpxConfig struct {
@@ -210,6 +213,13 @@ type RateLimitConfig struct {
 	// Global requests per second limit — acts as a ceiling across all tools.
 	// Per-tool rates are configured in their respective tools.* sections.
 	GlobalRPS int `yaml:"global_rps"`
+}
+
+type HeuristicsConfig struct {
+	JunkDomains           []string `yaml:"junk_domains"`
+	StaticExtensions      []string `yaml:"static_extensions"`
+	HighValueMarkers      []string `yaml:"high_value_markers"`
+	InterestingParameters []string `yaml:"interesting_parameters"`
 }
 
 // Global config instance
@@ -311,7 +321,7 @@ func DefaultConfig() *Config {
 				RateLimit:      150,
 				Severity:       []string{"low", "medium", "high", "critical"},
 				ExcludeTags:    []string{"dos", "fuzz"},
-				DisableOOB:     true,
+				DisableOOB:     boolPtr(true),
 				MaxTimeout:     300,
 				DASTAggression: "low",
 			},
@@ -332,7 +342,7 @@ func DefaultConfig() *Config {
 			},
 			Dalfox: DalfoxConfig{
 				MaxURLs:        500,
-				SkipThirdParty: true,
+				SkipThirdParty: boolPtr(true),
 			},
 		},
 		Notifications: NotificationConfig{
@@ -348,8 +358,48 @@ func DefaultConfig() *Config {
 		RateLimits: RateLimitConfig{
 			GlobalRPS: 0, // disabled by default; set to cap all tools
 		},
+		Heuristics: HeuristicsConfig{
+			JunkDomains: []string{
+				"googleapis.com", "gstatic.com", "google-analytics.com",
+				"googletagmanager.com", "doubleclick.net", "googlesyndication.com",
+				"facebook.com", "fbcdn.net", "twitter.com", "twimg.com",
+				"cloudflare.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
+				"unpkg.com", "maxcdn.bootstrapcdn.com", "bootstrapcdn.com",
+				"jquery.com", "fontawesome.com", "fonts.googleapis.com",
+				"gravatar.com", "wp.com", "amazon-adsystem.com",
+				"hotjar.com", "clarity.ms", "segment.io", "segment.com",
+				"intercom.io", "sentry.io", "newrelic.com", "nr-data.net",
+				"akamaihd.net", "akamai.net", "fastly.net", "edgecastcdn.net",
+				"cloudfront.net", "azureedge.net", "azurewebsites.net",
+				"herokuapp.com", "github.io", "gitlab.io",
+				"recaptcha.net", "hcaptcha.com",
+			},
+			StaticExtensions: []string{
+				".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+				".woff", ".woff2", ".ttf", ".eot", ".otf", ".mp4", ".webm",
+				".mp3", ".pdf", ".zip", ".gz", ".tar", ".map", ".webp",
+				".avif", ".bmp", ".tif",
+			},
+			HighValueMarkers: []string{
+				"/admin", "/login", "/signin", "/signup", "/auth",
+				"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
+				"/rest/", "/debug", "/console", "/actuator", "/swagger",
+				"/openapi", "/health", "/metrics", "/config", "/upload",
+				"/callback", "/redirect", "/reset", "/password", "/search",
+				"/export", "/import", "/webhook",
+			},
+			InterestingParameters: []string{
+				"url", "uri", "path", "redirect", "return", "next", "goto",
+				"file", "page", "template", "include", "cmd", "exec",
+				"query", "search", "id", "user", "email", "callback",
+			},
+		},
 	}
 }
+
+// boolPtr returns a pointer to the given bool value.
+// Used for *bool config fields where nil means "not set by user".
+func boolPtr(v bool) *bool { return &v }
 
 func applyDefaults(cfg *Config) {
 	if cfg.General.Mode == "" {
@@ -367,14 +417,62 @@ func applyDefaults(cfg *Config) {
 	if cfg.Tools.Nuclei.MaxTimeout == 0 {
 		cfg.Tools.Nuclei.MaxTimeout = 300
 	}
+	if cfg.Tools.Nuclei.DisableOOB == nil {
+		cfg.Tools.Nuclei.DisableOOB = boolPtr(true)
+	}
 	if cfg.Tools.Nuclei.DASTAggression == "" {
 		cfg.Tools.Nuclei.DASTAggression = "low"
 	}
 	if cfg.Tools.Dalfox.MaxURLs == 0 {
 		cfg.Tools.Dalfox.MaxURLs = 500
 	}
+	if cfg.Tools.Dalfox.SkipThirdParty == nil {
+		cfg.Tools.Dalfox.SkipThirdParty = boolPtr(true)
+	}
 	if cfg.Notifications.MinSeverity == "" {
 		cfg.Notifications.MinSeverity = "high"
+	}
+	if len(cfg.Heuristics.JunkDomains) == 0 {
+		cfg.Heuristics.JunkDomains = []string{
+			"googleapis.com", "gstatic.com", "google-analytics.com",
+			"googletagmanager.com", "doubleclick.net", "googlesyndication.com",
+			"facebook.com", "fbcdn.net", "twitter.com", "twimg.com",
+			"cloudflare.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
+			"unpkg.com", "maxcdn.bootstrapcdn.com", "bootstrapcdn.com",
+			"jquery.com", "fontawesome.com", "fonts.googleapis.com",
+			"gravatar.com", "wp.com", "amazon-adsystem.com",
+			"hotjar.com", "clarity.ms", "segment.io", "segment.com",
+			"intercom.io", "sentry.io", "newrelic.com", "nr-data.net",
+			"akamaihd.net", "akamai.net", "fastly.net", "edgecastcdn.net",
+			"cloudfront.net", "azureedge.net", "azurewebsites.net",
+			"herokuapp.com", "github.io", "gitlab.io",
+			"recaptcha.net", "hcaptcha.com",
+		}
+	}
+	if len(cfg.Heuristics.StaticExtensions) == 0 {
+		cfg.Heuristics.StaticExtensions = []string{
+			".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+			".woff", ".woff2", ".ttf", ".eot", ".otf", ".mp4", ".webm",
+			".mp3", ".pdf", ".zip", ".gz", ".tar", ".map", ".webp",
+			".avif", ".bmp", ".tif",
+		}
+	}
+	if len(cfg.Heuristics.HighValueMarkers) == 0 {
+		cfg.Heuristics.HighValueMarkers = []string{
+			"/admin", "/login", "/signin", "/signup", "/auth",
+			"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
+			"/rest/", "/debug", "/console", "/actuator", "/swagger",
+			"/openapi", "/health", "/metrics", "/config", "/upload",
+			"/callback", "/redirect", "/reset", "/password", "/search",
+			"/export", "/import", "/webhook",
+		}
+	}
+	if len(cfg.Heuristics.InterestingParameters) == 0 {
+		cfg.Heuristics.InterestingParameters = []string{
+			"url", "uri", "path", "redirect", "return", "next", "goto",
+			"file", "page", "template", "include", "cmd", "exec",
+			"query", "search", "id", "user", "email", "callback",
+		}
 	}
 }
 

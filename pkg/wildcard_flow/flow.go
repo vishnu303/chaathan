@@ -72,6 +72,12 @@ type RunConfig struct {
 	// ~/.chaathan/logs/ (plain text, ANSI stripped). The filename is
 	// generated automatically as <domain>_<scanID>_<timestamp>.log.
 	SaveLog bool
+
+	// Playbook - Evasion & Auth Coverage
+	CustomCookie       string
+	CustomHeaders      []string
+	CustomToken        string
+	EnableOriginBypass bool
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -349,6 +355,13 @@ func Run(cfg RunConfig) error {
 
 	// ── Runner, ToolBox & Notifier ──────────────────────────
 	infra := orchestrate.NewInfra(cfg.Mode, cfg.Verbose, cfg.Cfg)
+
+	var authHeaders []string
+	if cfg.CustomToken != "" {
+		authHeaders = append(authHeaders, "Authorization: Bearer "+cfg.CustomToken)
+	}
+	authHeaders = append(authHeaders, cfg.CustomHeaders...)
+	infra.ToolBox.WithCustomAuth(cfg.CustomCookie, authHeaders)
 
 	// ── Ensure output subdirectories exist ───────────────────
 	if err := os.MkdirAll(filepath.Join(cfg.ResultDir, "intermediate_files"), 0755); err != nil {

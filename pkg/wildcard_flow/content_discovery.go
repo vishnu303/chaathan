@@ -141,8 +141,8 @@ func stepWebCrawling(c *Ctx) bool {
 	}
 
 	logger.StepHeader("Step 12: Web Crawling")
-	crawlFailed := false
-	var crawlFailMu sync.Mutex
+	var katanaOK, gospiderOK bool
+	var crawlMu sync.Mutex
 
 	liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
 	logger.FileDebug("web_crawling input: %s (%d live hosts)", c.F.HttpxLiveHosts, liveHostCount)
@@ -157,12 +157,12 @@ func stepWebCrawling(c *Ctx) bool {
 			logger.FileDebug("katana input: %s out=%s", c.F.HttpxLiveHosts, c.F.KatanaOut)
 			if err := c.Tb.RunKatana(sCtx, c.F.HttpxLiveHosts, c.F.KatanaOut); err != nil {
 				if sCtx.Err() == nil {
-					crawlFailMu.Lock()
-					crawlFailed = true
-					crawlFailMu.Unlock()
 					logger.Warning("Katana failed: %v", err)
 				}
 			} else {
+				crawlMu.Lock()
+				katanaOK = true
+				crawlMu.Unlock()
 				logger.SubStep("[Done] Katana")
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.KatanaOut, "katana")
@@ -178,12 +178,12 @@ func stepWebCrawling(c *Ctx) bool {
 			logger.FileDebug("gospider input: %s out=%s", c.F.HttpxLiveHosts, c.F.GospiderOut)
 			if err := c.Tb.RunGoSpider(sCtx, c.F.HttpxLiveHosts, c.F.GospiderOut); err != nil {
 				if sCtx.Err() == nil {
-					crawlFailMu.Lock()
-					crawlFailed = true
-					crawlFailMu.Unlock()
 					logger.Warning("GoSpider failed: %v", err)
 				}
 			} else {
+				crawlMu.Lock()
+				gospiderOK = true
+				crawlMu.Unlock()
 				logger.SubStep("[Done] GoSpider")
 				if c.ScanID > 0 {
 					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GospiderOut, "gospider")
@@ -194,29 +194,29 @@ func stepWebCrawling(c *Ctx) bool {
 		}()
 
 		wg.Wait()
-		if crawlFailed {
-			return fmt.Errorf("one or more crawlers failed")
-		}
 		return nil
 	})
 
-	if err != nil && err != ErrToolSkipped {
-		c.StateMgr.MarkStepFailed(c.State, "web_crawling", err)
-	} else {
-		// Log partial results when skipped — tools may have written output before cancel
-		if err == ErrToolSkipped && c.ScanID > 0 {
-			if utils.FileExists(c.F.KatanaOut) {
-				if count, _ := utils.CountFileLines(c.F.KatanaOut); count > 0 {
-					logger.Info("  Katana partial: %d URLs", count)
-				}
-			}
-			if utils.FileExists(c.F.GospiderOut) {
-				if count, _ := utils.CountFileLines(c.F.GospiderOut); count > 0 {
-					logger.Info("  GoSpider partial: %d URLs", count)
-				}
+	// Log partial results when skipped — tools may have written output before cancel
+	if err == ErrToolSkipped && c.ScanID > 0 {
+		if utils.FileExists(c.F.KatanaOut) {
+			if count, _ := utils.CountFileLines(c.F.KatanaOut); count > 0 {
+				logger.Info("  Katana partial: %d URLs", count)
 			}
 		}
+		if utils.FileExists(c.F.GospiderOut) {
+			if count, _ := utils.CountFileLines(c.F.GospiderOut); count > 0 {
+				logger.Info("  GoSpider partial: %d URLs", count)
+			}
+		}
+	}
+
+	// Mark step based on outcome: complete if at least one crawler succeeded
+	// or the step was skipped; failed only if both crawlers failed.
+	if err == ErrToolSkipped || katanaOK || gospiderOK {
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
+	} else {
+		c.StateMgr.MarkStepFailed(c.State, "web_crawling", fmt.Errorf("both Katana and GoSpider failed"))
 	}
 	return c.cancelled()
 }
@@ -403,7 +403,11 @@ func stepJSSecretScan(c *Ctx) bool {
 	writeEmptyFile(c.F.GFSecretsMatches)
 	writeEmptyFile(c.F.GFSecretsFinal)
 
-	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, c.Cfg.General.JSLimit)
+	jsLimit := 0
+	if c.Cfg != nil {
+		jsLimit = c.Cfg.General.JSLimit
+	}
+	jsCount := collectJSURLsFromFile(c.F.AllURLsLive, c.F.JSURLsFile, jsLimit)
 	if jsCount == 0 {
 		logger.Info("  No JavaScript URLs found in live URL set")
 		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
@@ -548,27 +552,36 @@ func stepDirFuzzing(c *Ctx) bool {
 
 	if c.WordlistPath != "" {
 		logger.StepHeader("Step 17: Directory Fuzzing (ffuf)")
-		targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
-		logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
-		logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
 
-		if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
-			return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				// Logged internally by runWithSkip
-			} else {
-				c.StateMgr.MarkStepFailed(c.State, "dir_fuzzing", err)
-				logger.Warning("ffuf failed: %v", err)
-			}
+		// Validate wordlist file exists before invoking ffuf.
+		// The path may come from config defaults (e.g. seclists) that aren't installed.
+		if !utils.FileExists(c.WordlistPath) {
+			logger.Warning("ffuf wordlist not found: %s", c.WordlistPath)
+			logger.Info("  Install seclists (apt install seclists) or provide a valid --wordlist path")
+			logger.FileDebug("ffuf skipped: wordlist does not exist at %s", c.WordlistPath)
 		} else {
-			logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
-			if c.ScanID > 0 {
-				count, err := utils.ParseFfufOutput(c.ScanID, c.F.FfufOut)
-				if err != nil {
-					logger.Warning("Failed to parse ffuf results: %v", err)
-				} else if count > 0 {
-					logger.Info("  Stored %d ffuf discoveries for ROI ranking", count)
+			targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
+			logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
+			logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
+
+			if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
+				return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
+			}); err != nil {
+				if err == ErrToolSkipped {
+					// Logged internally by runWithSkip
+				} else {
+					c.StateMgr.MarkStepFailed(c.State, "dir_fuzzing", err)
+					logger.Warning("ffuf failed: %v", err)
+				}
+			} else {
+				logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
+				if c.ScanID > 0 {
+					count, err := utils.ParseFfufOutput(c.ScanID, c.F.FfufOut)
+					if err != nil {
+						logger.Warning("Failed to parse ffuf results: %v", err)
+					} else if count > 0 {
+						logger.Info("  Stored %d ffuf discoveries for ROI ranking", count)
+					}
 				}
 			}
 		}

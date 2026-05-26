@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/config"
@@ -21,10 +22,12 @@ import (
 // so users can tune behavior via config.yaml instead of recompiling.
 type ToolBox struct {
 	Runner     runner.Runner
-	Config     *config.ToolsConfig
-	General    *config.GeneralConfig   // WAF evasion settings (UA rotation, proxy, etc.)
-	RateLimits *config.RateLimitConfig // Global rate-limit override
-	APIKeys    *config.APIKeysConfig
+	Config        *config.ToolsConfig
+	General       *config.GeneralConfig   // WAF evasion settings (UA rotation, proxy, etc.)
+	RateLimits    *config.RateLimitConfig // Global rate-limit override
+	APIKeys       *config.APIKeysConfig
+	CustomCookie  string
+	CustomHeaders []string
 }
 
 // New creates a ToolBox. If cfg is nil, sensible defaults are used.
@@ -34,6 +37,29 @@ func New(r runner.Runner, cfg ...*config.ToolsConfig) *ToolBox {
 		tb.Config = cfg[0]
 	}
 	return tb
+}
+
+// WithCustomAuth attaches custom session headers and cookies to the ToolBox.
+func (t *ToolBox) WithCustomAuth(cookie string, headers []string) *ToolBox {
+	t.CustomCookie = cookie
+	t.CustomHeaders = headers
+	return t
+}
+
+// appendCustomHeaders appends custom headers (e.g. -H "Authorization: ...") to the argument slice.
+func (t *ToolBox) appendCustomHeaders(args []string, flagName string) []string {
+	for _, h := range t.CustomHeaders {
+		args = append(args, flagName, h)
+	}
+	return args
+}
+
+// appendCustomCookies appends custom cookies using the requested tool flag.
+func (t *ToolBox) appendCustomCookies(args []string, flagName string) []string {
+	if t.CustomCookie != "" {
+		args = append(args, flagName, t.CustomCookie)
+	}
+	return args
 }
 
 // WithGeneral attaches general config to the ToolBox (WAF evasion, etc.).
@@ -102,6 +128,12 @@ func (t *ToolBox) appendUAHeader(args []string) []string {
 		return args
 	}
 	return append(args, "-H", "User-Agent: "+t.getUA())
+}
+
+// appendTLSOpSec appends the "-tls-impersonate" flag to the arguments
+// to enable browser-like JA3/JA4 TLS fingerprint spoofing for supported tools.
+func (t *ToolBox) appendTLSOpSec(args []string) []string {
+	return append(args, "-tls-impersonate")
 }
 
 // appendDalfoxUA appends --header "User-Agent: ..." for dalfox.
@@ -255,8 +287,8 @@ func (t *ToolBox) nucleiExcludeTags() []string {
 }
 
 func (t *ToolBox) nucleiDisableOOB() bool {
-	if t.Config != nil {
-		return t.Config.Nuclei.DisableOOB
+	if t.Config != nil && t.Config.Nuclei.DisableOOB != nil {
+		return *t.Config.Nuclei.DisableOOB
 	}
 	return true // disabled by default — Interactsh hangs are a major stuck source
 }
@@ -412,6 +444,9 @@ func (t *ToolBox) RunHttpx(ctx context.Context, domainsFile string, outputFile s
 		args = append(args, "-follow-redirects")
 	}
 	args = t.appendUAHeader(args)
+	args = t.appendTLSOpSec(args)
+	args = t.appendCustomHeaders(args, "-H")
+	args = t.appendCustomCookies(args, "-cookie")
 	args = t.appendProxy(args, "-http-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
@@ -499,6 +534,11 @@ func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile st
 		"-timeout", "10", // seconds per request
 	}
 	args = t.appendUAHeader(args)
+	args = t.appendTLSOpSec(args)
+	args = t.appendCustomHeaders(args, "-H")
+	if t.CustomCookie != "" {
+		args = append(args, "-H", "Cookie: "+t.CustomCookie)
+	}
 	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate-limit", strconv.Itoa(rps))
@@ -521,6 +561,8 @@ func (t *ToolBox) RunFfuf(ctx context.Context, url string, wordlist string, outp
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
 	args = t.appendUAHeader(args)
+	args = t.appendCustomHeaders(args, "-H")
+	args = t.appendCustomCookies(args, "-b")
 	args = t.appendProxy(args, "-x")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
@@ -549,6 +591,8 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
 	args = t.appendUAHeader(args)
+	args = t.appendCustomHeaders(args, "-H")
+	args = t.appendCustomCookies(args, "-b")
 	args = t.appendProxy(args, "-x")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
@@ -560,94 +604,51 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 // --- Vulnerability Scanning ---
 
 func (t *ToolBox) RunNuclei(ctx context.Context, targetsFile string, outputFile string) error {
-	rateLimit := t.effectiveRate(t.nucleiRateLimit())
-	args := []string{
-		"-l", targetsFile,
-		"-c", strconv.Itoa(t.nucleiConcurrency()),
-		"-rl", strconv.Itoa(rateLimit),
-		"-timeout", "5",        // per-request timeout (seconds)
-		"-max-host-error", "5", // bail out of a host after 5 consecutive errors
-		"-tags", strings.Join(t.nucleiInfraTags(), ","),
-		"-jsonl",
-		"-o", outputFile,
+	s, err := t.GetScanner("nuclei")
+	if err != nil {
+		return err
 	}
-
-	// Apply exclude tags from config
-	excludeTags := t.nucleiExcludeTags()
-	if len(excludeTags) > 0 {
-		args = append(args, "-etags", strings.Join(excludeTags, ","))
-	}
-
-	// Apply severity filter: use config value if set, else default to critical,high
-	// (never inject both — nuclei uses the last -severity flag, silently discarding the first)
-	severity := t.nucleiSeverity()
-	if len(severity) > 0 {
-		args = append(args, "-severity", strings.Join(severity, ","))
-	} else {
-		args = append(args, "-severity", "critical,high") // skip info/low/medium on infra — too noisy
-	}
-
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "nuclei", args)
-	return err
+	return s.Scan(ctx, targetsFile, outputFile, ScanOptions{
+		Mode:        "standard",
+		Concurrency: t.nucleiConcurrency(),
+		RateLimit:   t.effectiveRate(t.nucleiRateLimit()),
+		Severity:    t.nucleiSeverity(),
+		ExcludeTags: t.nucleiExcludeTags(),
+	})
 }
 
 // RunNucleiSmartCVE runs tech-targeted CVE scanning using Nuclei's -as (automatic scan).
 // Wappalyzer fingerprints each host and selects only templates matching detected technologies.
 // This reduces effective template count from ~3,800 to ~100-400 per host.
 func (t *ToolBox) RunNucleiSmartCVE(ctx context.Context, targetsFile string, outputFile string) error {
-	rateLimit := t.effectiveRate(t.nucleiRateLimit())
-	args := []string{
-		"-l", targetsFile,
-		"-as",                          // automatic scan — Wappalyzer tech → template mapping
-		"-severity", "critical,high",
-		"-etags", "dos,fuzz,exposure,default-login,misconfig,unauth", // covered by misconfig pass
-		"-c", strconv.Itoa(t.nucleiConcurrency()),
-		"-rl", strconv.Itoa(rateLimit),
-		"-timeout", "5",
-		"-max-host-error", "3",
-		"-retries", "0",
-		"-stats", "-stats-interval", "30",
-		"-jsonl",
-		"-o", outputFile,
+	s, err := t.GetScanner("nuclei")
+	if err != nil {
+		return err
 	}
-	if t.nucleiDisableOOB() {
-		args = append(args, "-interactsh-disable")
-	}
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
-	return err
+	return s.Scan(ctx, targetsFile, outputFile, ScanOptions{
+		Mode:        "smart-cve",
+		Concurrency: t.nucleiConcurrency(),
+		RateLimit:   t.effectiveRate(t.nucleiRateLimit()),
+		DisableOOB:  t.nucleiDisableOOB(),
+		MaxTimeout:  t.nucleiMaxTimeout(),
+	})
 }
 
 // RunNucleiMisconfig runs generic misconfig/exposure scanning (tech-agnostic).
 // These templates catch exposed .env files, default credentials, open debug panels,
 // etc. — relevant regardless of the target's technology stack.
 func (t *ToolBox) RunNucleiMisconfig(ctx context.Context, targetsFile string, outputFile string) error {
-	rateLimit := t.effectiveRate(t.nucleiRateLimit())
-	args := []string{
-		"-l", targetsFile,
-		"-tags", "exposure,default-login,misconfig,unauth",
-		"-severity", "critical,high,medium",
-		"-etags", "dos,fuzz",
-		"-pt", "http",
-		"-c", strconv.Itoa(t.nucleiConcurrency()),
-		"-rl", strconv.Itoa(rateLimit),
-		"-timeout", "5",
-		"-max-host-error", "3",
-		"-retries", "0",
-		"-stats", "-stats-interval", "30",
-		"-jsonl",
-		"-o", outputFile,
+	s, err := t.GetScanner("nuclei")
+	if err != nil {
+		return err
 	}
-	if t.nucleiDisableOOB() {
-		args = append(args, "-interactsh-disable")
-	}
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
-	return err
+	return s.Scan(ctx, targetsFile, outputFile, ScanOptions{
+		Mode:        "misconfig",
+		Concurrency: t.nucleiConcurrency(),
+		RateLimit:   t.effectiveRate(t.nucleiRateLimit()),
+		DisableOOB:  t.nucleiDisableOOB(),
+		MaxTimeout:  t.nucleiMaxTimeout(),
+	})
 }
 
 // RunNucleiDAST runs Nuclei in DAST fuzzing mode against parameterized URLs.
@@ -662,24 +663,17 @@ func (t *ToolBox) RunNucleiDAST(ctx context.Context, urlsFile string, outputFile
 	if concurrency < 5 {
 		concurrency = 5
 	}
-	args := []string{
-		"-l", urlsFile,
-		"-dast",
-		"-severity", "critical,high,medium",
-		"-fa", t.dastAggression(),
-		"-c", strconv.Itoa(concurrency),
-		"-rl", strconv.Itoa(rateLimit),
-		"-timeout", "10",       // longer for fuzzing payloads
-		"-max-host-error", "3",
-		"-retries", "0",
-		"-stats", "-stats-interval", "30",
-		"-jsonl",
-		"-o", outputFile,
+	s, err := t.GetScanner("nuclei")
+	if err != nil {
+		return err
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
-	return err
+	return s.Scan(ctx, urlsFile, outputFile, ScanOptions{
+		Mode:           "dast",
+		Concurrency:    concurrency,
+		RateLimit:      rateLimit,
+		DASTAggression: t.dastAggression(),
+		MaxTimeout:     t.nucleiMaxTimeout(),
+	})
 }
 
 // --- Cloud & Org ---
@@ -699,6 +693,37 @@ func (t *ToolBox) RunCloudEnum(ctx context.Context, keyword string, outputFile s
 	return err
 }
 
+func runBypassedCmd(ctx context.Context, cmd *exec.Cmd) error {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		// Wait up to 2 seconds for clean exit
+		select {
+		case err := <-done:
+			if err == nil {
+				return ctx.Err()
+			}
+			return err
+		case <-time.After(2 * time.Second):
+			return ctx.Err()
+		}
+	}
+}
+
 func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile string) error {
 	// hakrawler reads target URLs from stdin (echo URL | hakrawler).
 	// We bypass the Runner here so we can wire stdin correctly.
@@ -715,7 +740,7 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := runBypassedCmd(ctx, cmd); err != nil {
 		if ctx.Err() != nil {
 			// Cancelled / skipped — save partial output if any
 			if stdout.Len() > 0 {
@@ -723,7 +748,10 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 			}
 			return ctx.Err()
 		}
-		return fmt.Errorf("%v: %s", err, stderr.String())
+		if stderr.Len() > 0 {
+			return fmt.Errorf("%v: %s", err, stderr.String())
+		}
+		return err
 	}
 	return writeToFile(outputFile, stdout.String())
 }
@@ -789,6 +817,9 @@ func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputF
 		args = append(args, "-follow-redirects")
 	}
 	args = t.appendUAHeader(args)
+	args = t.appendTLSOpSec(args)
+	args = t.appendCustomHeaders(args, "-H")
+	args = t.appendCustomCookies(args, "-cookie")
 	args = t.appendProxy(args, "-http-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
@@ -822,6 +853,9 @@ func (t *ToolBox) RunHttpxFetchJS(ctx context.Context, urlsFile string, download
 		"-no-fallback",
 	}
 	args = t.appendUAHeader(args)
+	args = t.appendTLSOpSec(args)
+	args = t.appendCustomHeaders(args, "-H")
+	args = t.appendCustomCookies(args, "-cookie")
 	args = t.appendProxy(args, "-http-proxy")
 	_, err := t.Runner.Run(ctx, "httpx", args)
 	return err
@@ -841,29 +875,16 @@ func (t *ToolBox) RunNucleiURLs(ctx context.Context, urlsFile string, outputFile
 		concurrency = 5
 	}
 
-	args := []string{
-		"-l", urlsFile,
-		"-c", strconv.Itoa(concurrency),
-		"-rl", strconv.Itoa(rateLimit),
-		"-timeout", "5",          // per-request timeout (seconds)
-		"-max-host-error", "3",   // bail out of a host after 3 consecutive errors (blocked IPs don't stall the scan)
-		"-bulk-size", "25",       // process 25 URLs at a time so progress is visible
-		"-tags", strings.Join(t.nucleiURLTags(), ","),
-		"-severity", "critical,high,medium",
-		"-jsonl",
-		"-o", outputFile,
+	s, err := t.GetScanner("nuclei")
+	if err != nil {
+		return err
 	}
-
-	// Apply exclude tags from config
-	excludeTags := t.nucleiExcludeTags()
-	if len(excludeTags) > 0 {
-		args = append(args, "-etags", strings.Join(excludeTags, ","))
-	}
-
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "nuclei", args)
-	return err
+	return s.Scan(ctx, urlsFile, outputFile, ScanOptions{
+		Mode:        "urls",
+		Concurrency: concurrency,
+		RateLimit:   rateLimit,
+		ExcludeTags: t.nucleiExcludeTags(),
+	})
 }
 
 // RunGFPattern filters an input file with a single gf pattern and writes matches.
@@ -892,7 +913,7 @@ func (t *ToolBox) RunGFPattern(ctx context.Context, pattern string, inputFile st
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := runBypassedCmd(ctx, cmd)
 	if err != nil {
 		if stderr.Len() > 0 {
 			return fmt.Errorf("%v: %s", err, stderr.String())
@@ -945,7 +966,7 @@ func (t *ToolBox) RunShuffleDNS(ctx context.Context, domain string, wordlist str
 		args = append(args, "-r", resolversFile)
 	}
 	// Check for massdns in PATH and use it
-	args = append(args, "-type", "bruteforce")
+	args = append(args, "-mode", "bruteforce")
 	_, err := t.Runner.Run(ctx, "shuffledns", args)
 	return err
 }
@@ -968,26 +989,17 @@ func (t *ToolBox) RunShuffleDNSResolve(ctx context.Context, inputFile string, re
 
 // RunNucleiTakeovers runs nuclei specifically for subdomain takeovers.
 func (t *ToolBox) RunNucleiTakeovers(ctx context.Context, targetsFile string, outputFile string) error {
-	rateLimit := t.effectiveRate(t.nucleiRateLimit())
-	args := []string{
-		"-l", targetsFile,
-		"-tags", "takeover",
-		"-c", strconv.Itoa(t.nucleiConcurrency()),
-		"-rl", strconv.Itoa(rateLimit),
-		"-timeout", "5",        // per-request timeout (seconds)
-		"-max-host-error", "3", // bail out of unresponsive hosts quickly
-		"-retries", "0",
-		"-stats", "-stats-interval", "30",
-		"-jsonl",
-		"-o", outputFile,
+	s, err := t.GetScanner("nuclei")
+	if err != nil {
+		return err
 	}
-	if t.nucleiDisableOOB() {
-		args = append(args, "-interactsh-disable")
-	}
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "nuclei", args, runner.WithTimeout(t.nucleiMaxTimeout()))
-	return err
+	return s.Scan(ctx, targetsFile, outputFile, ScanOptions{
+		Mode:        "takeover",
+		Concurrency: t.nucleiConcurrency(),
+		RateLimit:   t.effectiveRate(t.nucleiRateLimit()),
+		DisableOOB:  t.nucleiDisableOOB(),
+		MaxTimeout:  t.nucleiMaxTimeout(),
+	})
 }
 
 // --- XSS Scanning ---
@@ -995,25 +1007,11 @@ func (t *ToolBox) RunNucleiTakeovers(ctx context.Context, targetsFile string, ou
 // RunDalfox scans URLs with parameters for XSS vulnerabilities.
 // Takes a list of parameterized URLs and tests for reflected/stored XSS.
 func (t *ToolBox) RunDalfox(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{
-		"file", inputFile,
-		"--format", "jsonl",
-		"-o", outputFile,
-		"--silence",
-		"--no-color",
-		"--timeout", "10", // seconds per request; prevents hanging on blocked IPs
+	s, err := t.GetScanner("dalfox")
+	if err != nil {
+		return err
 	}
-	args = t.appendDalfoxUA(args)
-	args = t.appendProxy(args, "--proxy")
-	if rps := t.globalRPS(); rps > 0 {
-		delayMs := 1000 / rps
-		if delayMs < 1 {
-			delayMs = 1
-		}
-		args = append(args, "--delay", strconv.Itoa(delayMs))
-	}
-	_, err := t.Runner.Run(ctx, "dalfox", args)
-	return err
+	return s.Scan(ctx, inputFile, outputFile, ScanOptions{})
 }
 
 // --- TLS/SSL Analysis ---
@@ -1104,6 +1102,9 @@ func (t *ToolBox) RunHttpxFingerprint(ctx context.Context, inputFile string, out
 		"-o", outputFile,
 	}
 	args = t.appendUAHeader(args)
+	args = t.appendTLSOpSec(args)
+	args = t.appendCustomHeaders(args, "-H")
+	args = t.appendCustomCookies(args, "-cookie")
 	args = t.appendProxy(args, "-http-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))

@@ -40,6 +40,10 @@ var (
 	proxyURL          string
 	rateLimitRPS      int
 	saveLog           bool
+	customCookie      string
+	customHeaders     []string
+	customToken       string
+	enableOriginBypass bool
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -115,6 +119,10 @@ func init() {
 	wildcardCmd.Flags().StringVar(&proxyURL, "proxy", "", "Proxy URL for target-facing tools (e.g., socks5://127.0.0.1:9050)")
 	wildcardCmd.Flags().IntVar(&rateLimitRPS, "rate-limit", 0, "Global rate limit (requests/sec) for all tools (0 = per-tool defaults)")
 	wildcardCmd.Flags().BoolVar(&saveLog, "log", false, "Save scan output to ~/.chaathan/logs/ (plain text, ANSI stripped)")
+	wildcardCmd.Flags().StringVar(&customCookie, "cookie", "", "Custom session cookie string (e.g. 'auth=123; PHPSESSID=abc')")
+	wildcardCmd.Flags().StringSliceVarP(&customHeaders, "header", "H", nil, "Custom request header (can be repeated, e.g. -H 'Authorization: Bearer token')")
+	wildcardCmd.Flags().StringVar(&customToken, "token", "", "Bearer token shorthand (injects 'Authorization: Bearer <token>')")
+	wildcardCmd.Flags().BoolVar(&enableOriginBypass, "origin-bypass", false, "Enable active WAF bypass Origin IP resolution check")
 	wildcardCmd.MarkFlagRequired("domain")
 	rootCmd.AddCommand(wildcardCmd)
 }
@@ -200,6 +208,10 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		ResumeScanID:      resumeScanID,
 		GenerateReport:    generateReport,
 		SaveLog:           saveLog,
+		CustomCookie:      customCookie,
+		CustomHeaders:     customHeaders,
+		CustomToken:       customToken,
+		EnableOriginBypass: enableOriginBypass,
 	}
 
 	if err := wf.Run(cfg); err != nil {

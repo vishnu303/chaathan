@@ -1,7 +1,6 @@
 package metadata
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"io"
 	"math/rand"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
+	"github.com/vishnu303/chaathan-flow/pkg/utils"
 )
 
 const (
@@ -134,7 +134,7 @@ func CollectURLMetadata(scanID int64, urls []string, proxy string) (int, error) 
 
 func collectSignals(urls []string, proxy string) []httpSignal {
 	transport := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig:     utils.ModernBrowserTLSConfig(),
 		MaxIdleConns:        16,
 		MaxIdleConnsPerHost: 2,
 	}

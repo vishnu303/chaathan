@@ -239,3 +239,16 @@ func parseHex4(s string) (rune, bool) {
 	}
 	return r, true
 }
+
+// DeduplicateSlice returns a unique, deduplicated slice of strings.
+func DeduplicateSlice(in []string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, val := range in {
+		if !seen[val] {
+			seen[val] = true
+			out = append(out, val)
+		}
+	}
+	return out
+}

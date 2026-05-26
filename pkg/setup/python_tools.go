@@ -91,10 +91,10 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 			// installed — pip won't downgrade an already-satisfied dependency. Force a
 			// separate reinstall to guarantee the working 1.26.x series is on disk.
 			if tool.name == "sublist3r" || tool.name == "arjun" {
-				pinArgs := []string{"install", "--break-system-packages", "--force-reinstall", "urllib3>=1.26.18,<2"}
+				pinArgs := []string{"install", "--break-system-packages", "--upgrade", "requests", "urllib3"}
 				pinCmd := exec.Command(pip, pinArgs...)
-				if err := captureCommandOutput(pinCmd, tool.name+" (urllib3 pin)"); err != nil {
-					tracker.Fail(tool.name, "urllib3 pin failed: "+err.Error())
+				if err := captureCommandOutput(pinCmd, tool.name+" (urllib3/requests upgrade)"); err != nil {
+					tracker.Fail(tool.name, "upgrade requests/urllib3 failed: "+err.Error())
 					return
 				}
 			}

@@ -325,9 +325,37 @@ Set `notifications.step_complete` to `true` for per-step notifications. Subdomai
 
 ---
 
-## WAF Evasion / Stealth Mode
+## WAF Evasion & Coverage Playbook
 
-All features are opt-in — disabled by default, zero behavior change unless enabled.
+All features are opt-in, giving full control over request authentication and stealthy origin bypass routing.
+
+### Authenticated Session Fuzzing
+
+Scan deep authenticated application states (APIs, parameter fuzzers, directory scanners, and vulnerability discovery engines) using cookies, tokens, and custom headers.
+
+Flags:
+*   `--cookie "<string>"`: Injects session cookies (e.g. `PHPSESSID=abc; auth=123`) across Httpx, Katana, ffuf, Nuclei, and Dalfox.
+*   `-H`, `--header "<name: value>"`: Appends custom request headers (can be repeated) across all target-facing tools.
+*   `--token "<token_val>"`: Shorthand to automatically inject `Authorization: Bearer <token_val>`.
+
+```bash
+chaathan wildcard -d target.com \
+  --cookie "auth_session=v1_active" \
+  -H "X-Client-Version: 2.14" \
+  --token "eyJhbGciOi..."
+```
+
+### Universal WAF/CDN Origin IP Bypass
+
+CDNs and Web Application Firewalls (Cloudflare, Fastly, Incapsula, Sucuri, and AWS CloudFront) cover frontend assets but can often be bypassed by addressing the backend server directly at its real origin IP.
+
+*   `--origin-bypass`: Opt-in switch that runs an active DNS partitioning check immediately after live HTTP probing.
+*   **How it works**: Maps subdomains resolving to known WAF ranges, finds non-WAF candidate direct backend IPs discovered during the scan, and performs concurrent validation probes by addressing the direct IP while injecting the target subdomain Host header over browser-spoofed TLS configs.
+*   **Result Storage**: Confirmed bypasses are saved in the SQLite `vulnerabilities` table and pushed to notifications automatically.
+
+```bash
+chaathan wildcard -d target.com --origin-bypass
+```
 
 ### User-Agent Rotation
 

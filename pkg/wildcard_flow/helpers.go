@@ -2,6 +2,7 @@ package wildcard_flow
 
 import (
 	"bufio"
+	"container/heap"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vishnu303/chaathan-flow/pkg/config"
 	"github.com/vishnu303/chaathan-flow/pkg/database"
 	"github.com/vishnu303/chaathan-flow/pkg/logger"
 	"github.com/vishnu303/chaathan-flow/pkg/tools"
@@ -318,14 +320,7 @@ func isHighValueURL(raw string) bool {
 	if strings.Contains(lower, "?") && strings.Contains(lower, "=") {
 		return true
 	}
-	highValueMarkers := []string{
-		"/admin", "/login", "/signin", "/signup", "/auth",
-		"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
-		"/rest/", "/debug", "/console", "/actuator", "/swagger",
-		"/openapi", "/health", "/metrics", "/config", "/upload",
-		"/callback", "/redirect", "/reset", "/password",
-	}
-	for _, marker := range highValueMarkers {
+	for _, marker := range getHighValueMarkers() {
 		if strings.Contains(lower, marker) {
 			return true
 		}
@@ -450,35 +445,76 @@ func filterCNAMESubdomains(dnsxJSONFile, outputFile string) int {
 // ─────────────────────────────────────────────────────────────
 
 // junkDomainSuffixes are 3rd-party domains that should never be scanned.
-var junkDomainSuffixes = []string{
-	"googleapis.com", "gstatic.com", "google-analytics.com",
-	"googletagmanager.com", "doubleclick.net", "googlesyndication.com",
-	"facebook.com", "fbcdn.net", "twitter.com", "twimg.com",
-	"cloudflare.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
-	"unpkg.com", "maxcdn.bootstrapcdn.com", "bootstrapcdn.com",
-	"jquery.com", "fontawesome.com", "fonts.googleapis.com",
-	"gravatar.com", "wp.com", "amazon-adsystem.com",
-	"hotjar.com", "clarity.ms", "segment.io", "segment.com",
-	"intercom.io", "sentry.io", "newrelic.com", "nr-data.net",
-	"akamaihd.net", "akamai.net", "fastly.net", "edgecastcdn.net",
-	"cloudfront.net", "azureedge.net", "azurewebsites.net",
-	"herokuapp.com", "github.io", "gitlab.io",
-	"recaptcha.net", "hcaptcha.com",
+func getJunkDomains() []string {
+	if config.Cfg != nil && len(config.Cfg.Heuristics.JunkDomains) > 0 {
+		return config.Cfg.Heuristics.JunkDomains
+	}
+	return []string{
+		"googleapis.com", "gstatic.com", "google-analytics.com",
+		"googletagmanager.com", "doubleclick.net", "googlesyndication.com",
+		"facebook.com", "fbcdn.net", "twitter.com", "twimg.com",
+		"cloudflare.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
+		"unpkg.com", "maxcdn.bootstrapcdn.com", "bootstrapcdn.com",
+		"jquery.com", "fontawesome.com", "fonts.googleapis.com",
+		"gravatar.com", "wp.com", "amazon-adsystem.com",
+		"hotjar.com", "clarity.ms", "segment.io", "segment.com",
+		"intercom.io", "sentry.io", "newrelic.com", "nr-data.net",
+		"akamaihd.net", "akamai.net", "fastly.net", "edgecastcdn.net",
+		"cloudfront.net", "azureedge.net", "azurewebsites.net",
+		"herokuapp.com", "github.io", "gitlab.io",
+		"recaptcha.net", "hcaptcha.com",
+	}
 }
 
 // staticExtensions are file extensions that can't have injection points.
-var staticExtensions = map[string]bool{
-	".js": true, ".css": true, ".png": true, ".jpg": true, ".jpeg": true,
-	".gif": true, ".svg": true, ".ico": true, ".woff": true, ".woff2": true,
-	".ttf": true, ".eot": true, ".otf": true, ".mp4": true, ".webm": true,
-	".mp3": true, ".pdf": true, ".zip": true, ".gz": true, ".tar": true,
-	".map": true, ".webp": true, ".avif": true, ".bmp": true, ".tif": true,
+func getStaticExtensions() map[string]bool {
+	exts := []string{
+		".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+		".woff", ".woff2", ".ttf", ".eot", ".otf", ".mp4", ".webm",
+		".mp3", ".pdf", ".zip", ".gz", ".tar", ".map", ".webp",
+		".avif", ".bmp", ".tif",
+	}
+	if config.Cfg != nil && len(config.Cfg.Heuristics.StaticExtensions) > 0 {
+		exts = config.Cfg.Heuristics.StaticExtensions
+	}
+	res := make(map[string]bool, len(exts))
+	for _, ext := range exts {
+		res[strings.ToLower(ext)] = true
+	}
+	return res
+}
+
+// getHighValueMarkers returns path markers that identify high-value/sensitive components.
+func getHighValueMarkers() []string {
+	if config.Cfg != nil && len(config.Cfg.Heuristics.HighValueMarkers) > 0 {
+		return config.Cfg.Heuristics.HighValueMarkers
+	}
+	return []string{
+		"/admin", "/login", "/signin", "/signup", "/auth",
+		"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
+		"/rest/", "/debug", "/console", "/actuator", "/swagger",
+		"/openapi", "/health", "/metrics", "/config", "/upload",
+		"/callback", "/redirect", "/reset", "/password", "/search",
+		"/export", "/import", "/webhook",
+	}
+}
+
+// getInterestingParameters returns parameters names that often contain security vulnerabilities.
+func getInterestingParameters() []string {
+	if config.Cfg != nil && len(config.Cfg.Heuristics.InterestingParameters) > 0 {
+		return config.Cfg.Heuristics.InterestingParameters
+	}
+	return []string{
+		"url", "uri", "path", "redirect", "return", "next", "goto",
+		"file", "page", "template", "include", "cmd", "exec",
+		"query", "search", "id", "user", "email", "callback",
+	}
 }
 
 // isJunkDomain returns true if the host belongs to a known 3rd-party service.
 func isJunkDomain(host string) bool {
 	host = strings.ToLower(host)
-	for _, suffix := range junkDomainSuffixes {
+	for _, suffix := range getJunkDomains() {
 		if host == suffix || strings.HasSuffix(host, "."+suffix) {
 			return true
 		}
@@ -493,14 +529,13 @@ func hasStaticExtension(rawURL string) bool {
 		return false
 	}
 	path := strings.ToLower(parsed.Path)
-	for ext := range staticExtensions {
+	for ext := range getStaticExtensions() {
 		if strings.HasSuffix(path, ext) {
 			return true
 		}
 	}
 	return false
 }
-
 
 // pathKey extracts a deduplication key from a URL — the scheme+host+path
 // without query parameters, so /api/user?id=1 and /api/user?id=2 map
@@ -513,14 +548,40 @@ func pathKey(rawURL string) string {
 	return strings.ToLower(parsed.Scheme + "://" + parsed.Host + parsed.Path)
 }
 
-// collectScopedURLs filters all_urls_live.txt for DAST-suitable URLs:
-//  1. Must contain parameters (?key=value)
-//  2. Must be in-scope domain (matches target domain)
-//  3. Skip static extensions
-//  4. Skip known 3rd-party domains (when skip_third_party is true)
-//  5. Deduplicate by path (keep highest-ROI variant per endpoint)
-//  6. Sort by ROI score descending (best targets first)
-//  7. Cap at maxURLs
+// urlItem represents a tracked, evaluated URL target candidate.
+type urlItem struct {
+	raw   string
+	path  string
+	score int
+	index int // Index inside heap
+}
+
+// urlHeap implements a min-heap structure on urlItems for top-N ranking.
+type urlHeap []*urlItem
+
+func (h urlHeap) Len() int           { return len(h) }
+func (h urlHeap) Less(i, j int) bool { return h[i].score < h[j].score } // Min-heap: lowest score first
+func (h urlHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index = i
+	h[j].index = j
+}
+func (h *urlHeap) Push(x interface{}) {
+	n := len(*h)
+	item := x.(*urlItem)
+	item.index = n
+	*h = append(*h, item)
+}
+func (h *urlHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	item.index = -1
+	*h = old[0 : n-1]
+	return item
+}
+
+// collectScopedURLs filters all_urls_live.txt for DAST-suitable URLs using O(1) heap pipelines.
 func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 	file, err := os.Open(inputFile)
 	if err != nil {
@@ -529,96 +590,175 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 	defer file.Close()
 
 	// Determine whether to filter 3rd-party domains.
-	// Default: filter ON. Set skip_third_party: false in config to disable.
+	// Default: filter ON. Config field SkipThirdParty defaults to true,
+	// meaning "yes, skip/filter junk domains". When set to false the
+	// filter is disabled — the negation below reads: "if NOT skipping
+	// third-party → don't filter".
 	filterJunk := true
-	if c.Cfg != nil && !c.Cfg.Tools.Dalfox.SkipThirdParty {
+	if c.Cfg != nil && c.Cfg.Tools.Dalfox.SkipThirdParty != nil && !*c.Cfg.Tools.Dalfox.SkipThirdParty {
 		filterJunk = false
 	}
 
-	// Phase 1: collect all qualifying URLs with scores
-	type scoredURL struct {
-		raw   string
-		score int
-	}
-	// Keep the best-scoring URL per path key
-	bestPerPath := make(map[string]scoredURL)
 	scanner := bufio.NewScanner(file)
+	target := strings.ToLower(c.Domain)
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		// Must have parameters
-		if !strings.Contains(line, "?") || !strings.Contains(line, "=") {
-			continue
-		}
-		// Skip static extensions
-		if hasStaticExtension(line) {
-			continue
-		}
-		// Extract host for scope and junk checks
-		parsed, err := neturl.Parse(line)
-		if err != nil {
-			continue
-		}
-		host := strings.ToLower(parsed.Hostname())
-		if host == "" {
-			continue
-		}
-		// Skip 3rd-party domains (when enabled)
-		if filterJunk && isJunkDomain(host) {
-			continue
-		}
-		// Must be in-scope for target domain
-		target := strings.ToLower(c.Domain)
-		if host != target && !strings.HasSuffix(host, "."+target) {
-			continue
-		}
+	if maxURLs > 0 {
+		// Bounded pipeline space: use a min-heap of size N to keep memory O(1)
+		pq := make(urlHeap, 0, maxURLs)
+		heap.Init(&pq)
+		pathIndex := make(map[string]*urlItem)
 
-		// Score this URL for ROI ordering
-		score := urlROIScore(line)
-
-		// Deduplicate by path — keep the highest-scoring variant
-		pk := pathKey(line)
-		if existing, ok := bestPerPath[pk]; ok {
-			if score > existing.score {
-				bestPerPath[pk] = scoredURL{raw: line, score: score}
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
 			}
-		} else {
-			bestPerPath[pk] = scoredURL{raw: line, score: score}
+			// Must have parameters
+			if !strings.Contains(line, "?") || !strings.Contains(line, "=") {
+				continue
+			}
+			// Skip static extensions
+			if hasStaticExtension(line) {
+				continue
+			}
+			// Extract host for scope and junk checks
+			parsed, err := neturl.Parse(line)
+			if err != nil {
+				continue
+			}
+			host := strings.ToLower(parsed.Hostname())
+			if host == "" {
+				continue
+			}
+			// Skip 3rd-party domains (when enabled)
+			if filterJunk && isJunkDomain(host) {
+				continue
+			}
+			// Must be in-scope for target domain
+			if host != target && !strings.HasSuffix(host, "."+target) {
+				continue
+			}
+
+			// Score this URL for ROI ordering
+			score := urlROIScore(line)
+			pk := pathKey(line)
+
+			if existing, exists := pathIndex[pk]; exists {
+				if score > existing.score {
+					existing.raw = line
+					existing.score = score
+					heap.Fix(&pq, existing.index)
+				}
+			} else {
+				if pq.Len() < maxURLs {
+					item := &urlItem{raw: line, path: pk, score: score}
+					heap.Push(&pq, item)
+					pathIndex[pk] = item
+				} else if score > pq[0].score {
+					minItem := heap.Pop(&pq).(*urlItem)
+					delete(pathIndex, minItem.path)
+
+					item := &urlItem{raw: line, path: pk, score: score}
+					heap.Push(&pq, item)
+					pathIndex[pk] = item
+				}
+			}
 		}
-	}
 
-	if len(bestPerPath) == 0 {
-		return 0
-	}
-
-	// Phase 2: sort by ROI score descending
-	urls := make([]scoredURL, 0, len(bestPerPath))
-	for _, su := range bestPerPath {
-		urls = append(urls, su)
-	}
-	sort.Slice(urls, func(i, j int) bool {
-		return urls[i].score > urls[j].score
-	})
-
-	// Phase 3: write top N to output file
-	f, err := os.Create(outputFile)
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-
-	count := 0
-	for _, su := range urls {
-		fmt.Fprintln(f, su.raw)
-		count++
-		if maxURLs > 0 && count >= maxURLs {
-			break
+		if pq.Len() == 0 {
+			return 0
 		}
+
+		// Sort the bounded results in memory for execution
+		results := make([]*urlItem, 0, pq.Len())
+		for pq.Len() > 0 {
+			results = append(results, heap.Pop(&pq).(*urlItem))
+		}
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].score > results[j].score
+		})
+
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return 0
+		}
+		defer f.Close()
+
+		count := 0
+		for _, su := range results {
+			fmt.Fprintln(f, su.raw)
+			count++
+		}
+		return count
+
+	} else {
+		// Unbounded pipeline space (still capped at O(Unique Paths) instead of O(All Crawls))
+		bestPerPath := make(map[string]*urlItem)
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			if !strings.Contains(line, "?") || !strings.Contains(line, "=") {
+				continue
+			}
+			if hasStaticExtension(line) {
+				continue
+			}
+			parsed, err := neturl.Parse(line)
+			if err != nil {
+				continue
+			}
+			host := strings.ToLower(parsed.Hostname())
+			if host == "" {
+				continue
+			}
+			if filterJunk && isJunkDomain(host) {
+				continue
+			}
+			if host != target && !strings.HasSuffix(host, "."+target) {
+				continue
+			}
+
+			score := urlROIScore(line)
+			pk := pathKey(line)
+
+			if existing, ok := bestPerPath[pk]; ok {
+				if score > existing.score {
+					existing.raw = line
+					existing.score = score
+				}
+			} else {
+				bestPerPath[pk] = &urlItem{raw: line, path: pk, score: score}
+			}
+		}
+
+		if len(bestPerPath) == 0 {
+			return 0
+		}
+
+		results := make([]*urlItem, 0, len(bestPerPath))
+		for _, item := range bestPerPath {
+			results = append(results, item)
+		}
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].score > results[j].score
+		})
+
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return 0
+		}
+		defer f.Close()
+
+		count := 0
+		for _, su := range results {
+			fmt.Fprintln(f, su.raw)
+			count++
+		}
+		return count
 	}
-	return count
 }
 
 // urlROIScore assigns a priority score to a URL for DAST/XSS scanning.
@@ -634,14 +774,7 @@ func urlROIScore(rawURL string) int {
 	}
 
 	// High-value path markers (auth, API, debug, etc.)
-	highValueMarkers := []string{
-		"/admin", "/login", "/signin", "/signup", "/auth",
-		"/oauth", "/token", "/graphql", "/api/", "/v1/", "/v2/",
-		"/rest/", "/debug", "/console", "/actuator", "/swagger",
-		"/openapi", "/upload", "/callback", "/redirect", "/reset",
-		"/password", "/search", "/export", "/import", "/webhook",
-	}
-	for _, marker := range highValueMarkers {
+	for _, marker := range getHighValueMarkers() {
 		if strings.Contains(lower, marker) {
 			score += 5
 			break // one marker match is enough
@@ -649,13 +782,8 @@ func urlROIScore(rawURL string) int {
 	}
 
 	// Interesting parameter names (+3 each)
-	interestingParams := []string{
-		"url", "uri", "path", "redirect", "return", "next", "goto",
-		"file", "page", "template", "include", "cmd", "exec",
-		"query", "search", "id", "user", "email", "callback",
-	}
 	if parsed != nil {
-		for _, key := range interestingParams {
+		for _, key := range getInterestingParameters() {
 			if parsed.Query().Get(key) != "" {
 				score += 3
 			}
@@ -665,9 +793,7 @@ func urlROIScore(rawURL string) int {
 	return score
 }
 
-// collectScopedParamURLs filters URLs for Dalfox XSS scanning:
-// in-scope, parameterized, no static files, no 3rd-party junk (config-driven),
-// ROI-ordered (best targets first), deduplicated by path, capped at the configured max.
+// collectScopedParamURLs filters URLs for Dalfox XSS scanning.
 func collectScopedParamURLs(c *Ctx, inputFile, outputFile string) int {
 	maxURLs := 500
 	if c.Cfg != nil && c.Cfg.Tools.Dalfox.MaxURLs > 0 {
