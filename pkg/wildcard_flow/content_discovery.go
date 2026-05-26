@@ -259,7 +259,7 @@ func stepJSAnalysis(c *Ctx) bool {
 // Step 14 — HTTP Parameter Discovery (Arjun)
 // ─────────────────────────────────────────────────────────────
 
-// stepParamDiscovery discovers HTTP parameters with Arjun (Step 13).
+// stepParamDiscovery discovers HTTP parameters with Arjun (Step 14).
 // After a successful run it converts discovered params into parameterized URLs
 // (written to ArjunURLsOut) so they flow into Step 15 consolidation and
 // downstream scanners (Nuclei/Dalfox).
@@ -272,8 +272,22 @@ func stepParamDiscovery(c *Ctx) bool {
 		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
 		logger.SubStep("Running Arjun on live hosts...")
 
+		// Validate parameters wordlist if configured (same pattern as ffuf/shuffledns).
+		// If the file doesn't exist, run Arjun without -w so it uses its built-in default.
+		paramWordlist := ""
+		if c.Cfg != nil && c.Cfg.General.Wordlists.Parameters != "" {
+			if utils.FileExists(c.Cfg.General.Wordlists.Parameters) {
+				paramWordlist = c.Cfg.General.Wordlists.Parameters
+			} else {
+				logger.Warning("Arjun parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
+				logger.Info("  Install seclists (apt install seclists) or set a valid wordlist in config.yaml")
+				logger.Info("  Falling back to Arjun's built-in parameter list")
+				logger.FileDebug("arjun: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
+			}
+		}
+
 		if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
-			return c.Tb.RunArjun(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut)
+			return c.Tb.RunArjunWithWordlist(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut, paramWordlist)
 		}); err != nil {
 			if err == ErrToolSkipped {
 				// User-skipped counts as intentional — mark complete so resume skips it too.

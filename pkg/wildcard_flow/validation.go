@@ -190,7 +190,15 @@ func stepHTTPProbing(c *Ctx) bool {
 	}
 
 	// Trigger active WAF bypass Origin IP resolution
-	RunOriginIPBypass(c)
+	if err := runWithSkip(c, "WAF Origin IP Bypass", func(sCtx context.Context) error {
+		return RunOriginIPBypass(sCtx, c)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			// Logged internally by runWithSkip
+		} else {
+			logger.Warning("WAF Origin IP Bypass failed: %v", err)
+		}
+	}
 
 	c.StateMgr.MarkStepComplete(c.State, "http_probing")
 	return c.cancelled()

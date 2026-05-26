@@ -791,6 +791,18 @@ func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile str
 	return err
 }
 
+// RunArjunWithWordlist discovers hidden HTTP parameters, using the given wordlist.
+// Pass an empty wordlist to let Arjun use its built-in default parameter list.
+func (t *ToolBox) RunArjunWithWordlist(ctx context.Context, inputFile string, outputFile string, wordlist string) error {
+	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
+	if wordlist != "" {
+		args = append(args, "-w", wordlist)
+	}
+	args = t.appendArjunUA(args)
+	_, err := t.Runner.Run(ctx, "arjun", args)
+	return err
+}
+
 // RunArjunFromFile discovers hidden HTTP parameters from a file of URLs
 func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}

@@ -140,7 +140,7 @@ func TestVerifyOriginBypassMatch(t *testing.T) {
 	}
 
 	// 1. Verify baseline behavior (requesting direct IP with raw IP host header)
-	baselineCode, _, err := makeRawRequest(client, server.URL, ip)
+	baselineCode, _, err := makeRawRequest(context.Background(), client, server.URL, ip)
 	if err != nil {
 		t.Fatalf("baseline request failed: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestVerifyOriginBypassMatch(t *testing.T) {
 	}
 
 	// 2. Verify WAF Bypass behavior (injecting matching Host header)
-	probeCode, probeBody, err := makeRawRequest(client, server.URL, "protected.example.com")
+	probeCode, probeBody, err := makeRawRequest(context.Background(), client, server.URL, "protected.example.com")
 	if err != nil {
 		t.Fatalf("probe request failed: %v", err)
 	}

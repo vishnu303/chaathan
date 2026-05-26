@@ -1,12 +1,14 @@
 package wildcard_flow
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vishnu303/chaathan-flow/pkg/database"
@@ -76,20 +78,30 @@ func isWafIP(ipStr string) bool {
 
 // RunOriginIPBypass performs direct backend IP discovery and verifies
 // if CDN/WAF shields can be bypassed via direct HTTP Host injection.
-func RunOriginIPBypass(c *Ctx) {
+func RunOriginIPBypass(ctx context.Context, c *Ctx) error {
 	if !c.EnableOriginBypass {
-		return
+		return nil
 	}
 
-	logger.StepHeader("Optional Step: WAF Origin IP Bypass Resolution")
+	logger.Section("Optional Step: WAF Origin IP Bypass Resolution")
 	logger.SubStep("Analyzing subdomains to discover real backend servers...")
 
-	// 1. Load subdomains from database
-	subs, err := database.GetSubdomains(c.ScanID)
+	// 1. Load live subdomains from database
+	subs, err := database.GetLiveSubdomains(c.ScanID)
 	if err != nil || len(subs) == 0 {
-		logger.Info("  No subdomains found in database for bypass analysis.")
-		return
+		logger.Info("  No live subdomains found in database for bypass analysis.")
+		return nil
 	}
+
+	var bypassCount int32
+	defer func() {
+		count := atomic.LoadInt32(&bypassCount)
+		if ctx.Err() != nil {
+			logger.Info("  WAF Origin IP Bypass resolution skipped/cancelled. Discovered %d bypass(es) so far.", count)
+		} else {
+			logger.Success("  WAF Origin IP Bypass resolution completed. Discovered %d bypass(es).", count)
+		}
+	}()
 
 	var protectedSubs []string
 	var directIPs []string
@@ -106,7 +118,10 @@ func RunOriginIPBypass(c *Ctx) {
 		go func() {
 			defer wgResolve.Done()
 			for domain := range resolverChan {
-				ips, err := net.LookupIP(domain)
+				if ctx.Err() != nil {
+					continue
+				}
+				ips, err := net.DefaultResolver.LookupIP(ctx, "ip", domain)
 				if err != nil || len(ips) == 0 {
 					continue
 				}
@@ -131,10 +146,17 @@ func RunOriginIPBypass(c *Ctx) {
 	}
 
 	for _, sub := range subs {
+		if ctx.Err() != nil {
+			break
+		}
 		resolverChan <- sub.Domain
 	}
 	close(resolverChan)
 	wgResolve.Wait()
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	protectedSubs = utils.DeduplicateSlice(protectedSubs)
 	logger.FileDebug("origin_bypass: %d WAF-protected subdomains, %d direct backend candidate IPs found",
@@ -142,7 +164,7 @@ func RunOriginIPBypass(c *Ctx) {
 
 	if len(directIPs) == 0 || len(protectedSubs) == 0 {
 		logger.Success("  All subdomains resolve uniformly or no direct backend IPs were exposed.")
-		return
+		return nil
 	}
 
 	logger.SubStep("Probing %d backend IPs against %d subdomains...", len(directIPs), len(protectedSubs))
@@ -152,21 +174,27 @@ func RunOriginIPBypass(c *Ctx) {
 		TLSClientConfig: utils.ModernBrowserTLSConfig(),
 	}
 	client := &http.Client{
-		Timeout:   4 * time.Second,
+		Timeout:   2 * time.Second,
 		Transport: transport,
 	}
 
 	// Limit concurrency for active Host injection checks
-	sem := make(chan struct{}, 5)
+	sem := make(chan struct{}, 30)
 	var wgProbe sync.WaitGroup
 
+	outer:
 	for _, ip := range directIPs {
 		for _, domain := range protectedSubs {
-			if c.cancelled() {
-				break
+			if ctx.Err() != nil {
+				break outer
 			}
 			wgProbe.Add(1)
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				wgProbe.Done()
+				break outer
+			}
 
 			go func(ipVal, domainVal string) {
 				defer func() {
@@ -174,26 +202,34 @@ func RunOriginIPBypass(c *Ctx) {
 					wgProbe.Done()
 				}()
 
-				verifyOriginBypass(c, client, ipVal, domainVal)
+				verifyOriginBypass(ctx, c, client, ipVal, domainVal, &bypassCount)
 			}(ip, domain)
 		}
 	}
 	wgProbe.Wait()
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return nil
 }
 
-func verifyOriginBypass(c *Ctx, client *http.Client, ip string, hostHeader string) {
+func verifyOriginBypass(ctx context.Context, c *Ctx, client *http.Client, ip string, hostHeader string, bypassCount *int32) {
 	schemes := []string{"https", "http"}
 	for _, scheme := range schemes {
+		if ctx.Err() != nil {
+			return
+		}
 		// 1. Establish the baseline behavior (accessing direct IP without the host header)
 		baselineURL := fmt.Sprintf("%s://%s/", scheme, ip)
-		baselineCode, _, err := makeRawRequest(client, baselineURL, ip)
+		baselineCode, _, err := makeRawRequest(ctx, client, baselineURL, ip)
 		if err != nil {
 			continue
 		}
 
 		// 2. Perform the bypass probe (address IP directly but inject the protected host header)
 		probeURL := fmt.Sprintf("%s://%s/", scheme, ip)
-		probeCode, probeBody, err := makeRawRequest(client, probeURL, hostHeader)
+		probeCode, probeBody, err := makeRawRequest(ctx, client, probeURL, hostHeader)
 		if err != nil {
 			continue
 		}
@@ -214,7 +250,7 @@ func verifyOriginBypass(c *Ctx, client *http.Client, ip string, hostHeader strin
 
 			// Safe fallback validation check - compare direct vs standard target response similarity
 			targetURL := fmt.Sprintf("%s://%s/", scheme, hostHeader)
-			targetReq, err := http.NewRequest("GET", targetURL, nil)
+			targetReq, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 			if err == nil {
 				targetReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 				resp, err := client.Do(targetReq)
@@ -226,6 +262,7 @@ func verifyOriginBypass(c *Ctx, client *http.Client, ip string, hostHeader strin
 					// If the bypassed page is structurally similar to the target site, it's a 100% confirmed bypass
 					if strings.Contains(bodyLower, "<title>") && strings.Contains(strings.ToLower(targetBody), "<title>") {
 						logger.Success("  [WAF-BYPASS CONFIRMED] %s exposed directly at %s://%s", hostHeader, scheme, ip)
+						atomic.AddInt32(bypassCount, 1)
 
 						// Save to Database
 						description := fmt.Sprintf("Direct Origin IP Bypass Confirmed. The CDN/WAF shields for host %s were successfully bypassed by addressing the backend server directly at %s://%s using HTTP Host header injection.", hostHeader, scheme, ip)
@@ -251,8 +288,8 @@ func verifyOriginBypass(c *Ctx, client *http.Client, ip string, hostHeader strin
 	}
 }
 
-func makeRawRequest(client *http.Client, urlStr, hostHeader string) (int, string, error) {
-	req, err := http.NewRequest("GET", urlStr, nil)
+func makeRawRequest(ctx context.Context, client *http.Client, urlStr, hostHeader string) (int, string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
 		return 0, "", err
 	}
