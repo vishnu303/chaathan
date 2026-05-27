@@ -8,7 +8,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	s "github.com/vishnu303/chaathan-flow/pkg/setup"
+	s "github.com/vishnu303/chaathan/pkg/setup"
 )
 
 // ─────────────────────────────────────────────────────────────

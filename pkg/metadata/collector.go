@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/utils"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/utils"
 )
 
 const (

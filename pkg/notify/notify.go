@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/config"
 )
 
 // Severity levels for comparison

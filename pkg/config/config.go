@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/vishnu303/chaathan-flow/pkg/paths"
+	"github.com/vishnu303/chaathan/pkg/paths"
 )
 
 // Config represents the main configuration structure
@@ -265,7 +265,7 @@ func Save(cfg *Config, path string) error {
 
 	header := `# Chaathan Configuration File
 # Generated automatically - customize as needed
-# Documentation: https://github.com/vishnu303/chaathan-flow
+# Documentation: https://github.com/vishnu303/chaathan
 
 `
 	content := header + string(data)

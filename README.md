@@ -18,7 +18,7 @@ Chaathan runs a **22-step automated recon workflow** on a target domain and a **
 ## Install
 
 ```bash
-git clone https://github.com/vishnu303/chaathan-flow.git
+git clone https://github.com/vishnu303/chaathan.git
 cd chaathan-flow
 
 # One-command setup: builds, installs to /usr/local/bin, installs all tools

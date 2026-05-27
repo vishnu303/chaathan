@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/config"
 )
 
 func TestCollectScopedURLs(t *testing.T) {

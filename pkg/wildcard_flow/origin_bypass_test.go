@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/runner"
-	"github.com/vishnu303/chaathan-flow/pkg/tools"
+	"github.com/vishnu303/chaathan/pkg/runner"
+	"github.com/vishnu303/chaathan/pkg/tools"
 )
 
 // MockRunner captures the run arguments for validation.

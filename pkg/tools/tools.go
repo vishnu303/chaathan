@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
-	"github.com/vishnu303/chaathan-flow/pkg/runner"
+	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/runner"
 )
 
 // ToolBox wraps the runner and provides methods to invoke external recon tools.

@@ -15,10 +15,10 @@ import (
 	neturl "net/url"
 	"strings"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/metadata"
-	"github.com/vishnu303/chaathan-flow/utils"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/metadata"
+	"github.com/vishnu303/chaathan/utils"
 )
 
 // ─────────────────────────────────────────────────────────────

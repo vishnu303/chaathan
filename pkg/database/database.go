@@ -10,8 +10,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/paths"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/paths"
 )
 
 // DB is the global database connection

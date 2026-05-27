@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/vishnu303/chaathan-flow/pkg/progress"
+	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
 // ─────────────────────────────────────────────────────────────

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/progress"
-	"github.com/vishnu303/chaathan-flow/pkg/tools"
+	"github.com/vishnu303/chaathan/pkg/progress"
+	"github.com/vishnu303/chaathan/pkg/tools"
 )
 
 // ─────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/database"
 )
 
 // ParseSubdomainsFile reads a file with one subdomain per line and adds to database

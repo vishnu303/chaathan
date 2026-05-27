@@ -2,7 +2,7 @@ package utils
 
 import (
 	"fmt"
-	"github.com/vishnu303/chaathan-flow/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/database"
 	"os"
 	"path/filepath"
 	"strings"

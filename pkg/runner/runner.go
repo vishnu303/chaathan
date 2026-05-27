@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/logger"
 )
 
 type Runner interface {

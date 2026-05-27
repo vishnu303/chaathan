@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/logger"
 )
 
 var configCmd = &cobra.Command{

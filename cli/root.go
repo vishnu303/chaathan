@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/paths"
+	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/paths"
+	"github.com/vishnu303/chaathan/pkg/update"
 )
 
 var (
@@ -22,7 +24,7 @@ var (
 )
 
 // Version and BuildTime are injected at build time via ldflags.
-// See Makefile: -X github.com/vishnu303/chaathan-flow/cli.Version=...
+// See Makefile: -X github.com/vishnu303/chaathan/cli.Version=...
 var (
 	Version   = "dev"
 	BuildTime = "unknown"
@@ -147,7 +149,29 @@ var versionCmd = &cobra.Command{
 		fmt.Printf("%sBuilt: %s%s\n", logger.Dim, BuildTime, logger.Reset)
 		fmt.Printf("%sPentesting Recon Framework%s\n", logger.Dim, logger.Reset)
 		fmt.Printf("%s28 tools • 22-step wildcard • 3-step company%s\n", logger.Dim, logger.Reset)
-		fmt.Printf("%shttps://github.com/vishnu303/chaathan-flow%s\n", logger.Dim, logger.Reset)
+		fmt.Printf("%shttps://github.com/vishnu303/chaathan%s\n", logger.Dim, logger.Reset)
+
+		fmt.Printf("\n%sChecking for updates...%s\n", logger.Dim, logger.Reset)
+		info, err := update.CheckForUpdates(Version)
+		if err != nil {
+			if Verbose {
+				logger.Warning("Update check failed: %v", err)
+			} else {
+				fmt.Printf("%s(Could not connect to GitHub to check for updates)%s\n", logger.Dim, logger.Reset)
+			}
+			return
+		}
+
+		if info.IsNewer {
+			fmt.Printf("\n  %s🔥 A new version is available: %s%s %s(latest)%s\n", logger.BrightYellow+logger.Bold, logger.BrightGreen, info.LatestVersion, logger.Dim, logger.Reset)
+			fmt.Printf("  %sDownload / Changelog: %s%s\n\n", logger.Dim, info.URL, logger.Reset)
+		} else {
+			if Version == "dev" || strings.HasPrefix(Version, "dev-") {
+				fmt.Printf("  %sLatest stable version is %s (you are running a local dev build)%s\n", logger.Dim, info.LatestVersion, logger.Reset)
+			} else {
+				fmt.Printf("  %sYou are running the latest version! (%s)%s\n", logger.BrightGreen, Version, logger.Reset)
+			}
+		}
 	},
 }
 
