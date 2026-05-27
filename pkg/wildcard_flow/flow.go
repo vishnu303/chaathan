@@ -393,6 +393,11 @@ func Run(cfg RunConfig) error {
 		c.Proxy = cfg.Cfg.General.Proxy
 	}
 
+	// Wire notification logging (FileDebug no-ops if --log is inactive)
+	if c.Notifier != nil {
+		c.Notifier.LogFunc = logger.FileDebug
+	}
+
 	logger.Info("💡 Press 's' at any time to skip the current tool")
 	logger.Info("Mode: %s", cfg.Mode)
 
@@ -597,7 +602,7 @@ func finalizeScan(c *Ctx, status string) {
 			}
 
 			if c.Notifier != nil {
-				c.Notifier.SendScanComplete(notify.ScanComplete{
+				if err := c.Notifier.SendScanComplete(notify.ScanComplete{
 					Target:   c.Domain,
 					ScanID:   c.ScanID,
 					Duration: duration,
@@ -606,7 +611,9 @@ func finalizeScan(c *Ctx, status string) {
 						"ports":      dbStats.TotalPorts,
 						"vulns":      len(dbStats.Vulnerabilities),
 					},
-				})
+				}); err != nil {
+					logger.Warning("Failed to send scan complete notification: %v", err)
+				}
 			}
 		}
 

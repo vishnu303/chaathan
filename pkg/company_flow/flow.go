@@ -151,6 +151,11 @@ func Run(cfg RunConfig) error {
 		Cfg:                cfg.Cfg,
 	}
 
+	// Wire notification logging (FileDebug no-ops if --log is inactive)
+	if c.Notifier != nil {
+		c.Notifier.LogFunc = logger.FileDebug
+	}
+
 	// ── Execute steps ────────────────────────────────────────
 
 	if executeStep(c, 1, "metabigor", "ASN & Network Range Discovery (Metabigor)", stepMetabigor) {

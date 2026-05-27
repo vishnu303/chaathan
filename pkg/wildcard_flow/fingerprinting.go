@@ -100,7 +100,7 @@ func sendWafNotifications(c *Ctx, base notify.Finding, knownVulnIDs map[int64]bo
 		}
 
 		if strings.Contains(strings.ToLower(v.TemplateID), "waf") || strings.Contains(strings.ToLower(v.Name), "waf") {
-			c.Notifier.SendFinding(notify.Finding{
+			if err := c.Notifier.SendFinding(notify.Finding{
 				Target:      base.Target,
 				Type:        base.Type,
 				Name:        v.Name,
@@ -109,7 +109,9 @@ func sendWafNotifications(c *Ctx, base notify.Finding, knownVulnIDs map[int64]bo
 				URL:         v.URL,
 				TemplateID:  v.TemplateID,
 				Timestamp:   base.Timestamp,
-			})
+			}); err != nil {
+				logger.Warning("Failed to send WAF notification: %v", err)
+			}
 		}
 	}
 }
