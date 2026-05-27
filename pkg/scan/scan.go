@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/database"
 )
 
 // State represents the current state of a scan

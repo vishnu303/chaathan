@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/notify"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/notify"
+	"github.com/vishnu303/chaathan/utils"
 )
 
 // Phase 5 — Fingerprinting (Step 22)

@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/utils"
 )
 
 var queryCmd = &cobra.Command{
@@ -450,6 +450,3 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 
 	logger.Info("Showing %d ranked targets (max 3 per host)", len(targets))
 }
-
-// summarizeSeverityCounts, truncateURL, and colorSeverity have been moved to
-// pkg/utils.SummarizeSeverityCounts, pkg/utils.TruncateURL, and pkg/logger.ColorSeverity.

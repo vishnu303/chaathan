@@ -1,7 +1,7 @@
 package scope
 
 import (
-	"github.com/vishnu303/chaathan-flow/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/config"
 	"net"
 	"regexp"
 	"strings"

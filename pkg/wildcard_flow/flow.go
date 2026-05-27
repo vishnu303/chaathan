@@ -15,17 +15,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/notify"
-	"github.com/vishnu303/chaathan-flow/pkg/orchestrate"
-	"github.com/vishnu303/chaathan-flow/pkg/paths"
-	"github.com/vishnu303/chaathan-flow/pkg/report"
-	"github.com/vishnu303/chaathan-flow/pkg/scan"
-	"github.com/vishnu303/chaathan-flow/pkg/scope"
-	"github.com/vishnu303/chaathan-flow/pkg/tools"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/notify"
+	"github.com/vishnu303/chaathan/pkg/orchestrate"
+	"github.com/vishnu303/chaathan/pkg/paths"
+	"github.com/vishnu303/chaathan/pkg/report"
+	"github.com/vishnu303/chaathan/pkg/scan"
+	"github.com/vishnu303/chaathan/pkg/scope"
+	"github.com/vishnu303/chaathan/pkg/tools"
+	"github.com/vishnu303/chaathan/utils"
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -72,6 +72,12 @@ type RunConfig struct {
 	// ~/.chaathan/logs/ (plain text, ANSI stripped). The filename is
 	// generated automatically as <domain>_<scanID>_<timestamp>.log.
 	SaveLog bool
+
+	// Playbook - Evasion & Auth Coverage
+	CustomCookie       string
+	CustomHeaders      []string
+	CustomToken        string
+	EnableOriginBypass bool
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -121,6 +127,9 @@ type Files struct {
 	DalfoxOut          string
 	HttpxTechOut       string
 	NucleiWafOut       string
+	NucleiMisconfigOut string
+	NucleiDASTOut      string
+	TakeoverCandidates string
 }
 
 // newFiles builds all output paths from the result directory.
@@ -177,6 +186,9 @@ func newFiles(dir string) Files {
 		ParamURLsFile:    j("param_urls_live.txt"),
 		HttpxTechOut:     jf("httpx_tech.json"),
 		NucleiWafOut:     jf("nuclei_waf.json"),
+		NucleiMisconfigOut: jf("nuclei_misconfig.json"),
+		NucleiDASTOut:    jf("nuclei_dast.json"),
+		TakeoverCandidates: j("takeover_candidates.txt"),
 	}
 }
 
@@ -343,6 +355,13 @@ func Run(cfg RunConfig) error {
 
 	// ── Runner, ToolBox & Notifier ──────────────────────────
 	infra := orchestrate.NewInfra(cfg.Mode, cfg.Verbose, cfg.Cfg)
+
+	var authHeaders []string
+	if cfg.CustomToken != "" {
+		authHeaders = append(authHeaders, "Authorization: Bearer "+cfg.CustomToken)
+	}
+	authHeaders = append(authHeaders, cfg.CustomHeaders...)
+	infra.ToolBox.WithCustomAuth(cfg.CustomCookie, authHeaders)
 
 	// ── Ensure output subdirectories exist ───────────────────
 	if err := os.MkdirAll(filepath.Join(cfg.ResultDir, "intermediate_files"), 0755); err != nil {
@@ -531,9 +550,9 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "dir_fuzzing":
 		return countLines(c.F.FfufOut)
 	case "vuln_scanning":
-		return countLines(c.F.NucleiOut)
+		return countLines(c.F.NucleiOut, c.F.NucleiMisconfigOut)
 	case "vuln_scanning_urls":
-		return countLines(c.F.NucleiURLOut)
+		return countLines(c.F.NucleiDASTOut)
 	case "takeover_detection":
 		return countLines(c.F.SubjackOut)
 	case "xss_scanning":

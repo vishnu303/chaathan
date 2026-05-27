@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/config"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/notify"
-	"github.com/vishnu303/chaathan-flow/pkg/runner"
-	"github.com/vishnu303/chaathan-flow/pkg/tools"
+	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/notify"
+	"github.com/vishnu303/chaathan/pkg/runner"
+	"github.com/vishnu303/chaathan/pkg/tools"
 )
 
 // Infra bundles the shared infrastructure components constructed by

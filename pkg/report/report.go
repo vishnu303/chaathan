@@ -10,7 +10,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/database"
 )
 
 // ReportFormat represents the output format

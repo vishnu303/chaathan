@@ -15,10 +15,10 @@ import (
 	neturl "net/url"
 	"strings"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/metadata"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/metadata"
+	"github.com/vishnu303/chaathan/utils"
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -97,35 +97,50 @@ func stepDNSBruteforce(c *Ctx) bool {
 		logger.StepHeader("Step 7: DNS Brute-force (ShuffleDNS) [RESUMED — skipping]")
 	} else if !c.SkipShuffleDNS && c.DNSWordlistPath != "" {
 		logger.StepHeader("Step 7: DNS Brute-force (ShuffleDNS)")
-		logger.SubStep("Running ShuffleDNS with wordlist: %s", c.DNSWordlistPath)
-		logger.FileDebug("shuffledns input: domain=%s wordlist=%s resolvers=%s out=%s",
-			c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
 
-		if err := runWithSkip(c, "shuffledns", func(sCtx context.Context) error {
-			return c.Tb.RunShuffleDNS(sCtx, c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				// Logged internally by runWithSkip
-			} else {
-				c.StateMgr.MarkStepFailed(c.State, "dns_bruteforce", err)
-				logger.Warning("ShuffleDNS failed: %v", err)
-			}
+		// Validate DNS wordlist exists (may be a default config path like seclists)
+		if !utils.FileExists(c.DNSWordlistPath) {
+			logger.Warning("DNS wordlist not found: %s", c.DNSWordlistPath)
+			logger.Info("  Install seclists (apt install seclists) or provide a valid --dns-wordlist path")
+			logger.FileDebug("shuffledns skipped: wordlist does not exist at %s", c.DNSWordlistPath)
+			c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
+		} else if c.ResolversPath != "" && !utils.FileExists(c.ResolversPath) {
+			// Resolvers file was explicitly provided but doesn't exist
+			logger.Warning("Resolvers file not found: %s", c.ResolversPath)
+			logger.Info("  Provide a valid --resolvers file path")
+			logger.FileDebug("shuffledns skipped: resolvers file does not exist at %s", c.ResolversPath)
+			c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 		} else {
-			if c.ScanID > 0 {
-				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.ShufflednsOut, "shuffledns")
-				logger.Info("  Found %d subdomains via DNS brute-force", count)
-				logger.FileDebug("shuffledns output: %d subdomains -> %s", count, c.F.ShufflednsOut)
+			logger.SubStep("Running ShuffleDNS with wordlist: %s", c.DNSWordlistPath)
+			logger.FileDebug("shuffledns input: domain=%s wordlist=%s resolvers=%s out=%s",
+				c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
+
+			if err := runWithSkip(c, "shuffledns", func(sCtx context.Context) error {
+				return c.Tb.RunShuffleDNS(sCtx, c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
+			}); err != nil {
+				if err == ErrToolSkipped {
+					// Logged internally by runWithSkip
+				} else {
+					c.StateMgr.MarkStepFailed(c.State, "dns_bruteforce", err)
+					logger.Warning("ShuffleDNS failed: %v", err)
+				}
+			} else {
+				if c.ScanID > 0 {
+					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.ShufflednsOut, "shuffledns")
+					logger.Info("  Found %d subdomains via DNS brute-force", count)
+					logger.FileDebug("shuffledns output: %d subdomains -> %s", count, c.F.ShufflednsOut)
+				}
+				// Merge brute-forced subs back into the consolidated list
+				utils.MergeAndDeduplicate(
+					[]string{c.F.ConsolidatedSubs, c.F.ShufflednsOut},
+					c.F.ConsolidatedSubs,
+				)
+				if merged, _ := utils.CountFileLines(c.F.ConsolidatedSubs); merged > 0 {
+					logger.FileDebug("consolidated subs after shuffledns merge: %d", merged)
+				}
 			}
-			// Merge brute-forced subs back into the consolidated list
-			utils.MergeAndDeduplicate(
-				[]string{c.F.ConsolidatedSubs, c.F.ShufflednsOut},
-				c.F.ConsolidatedSubs,
-			)
-			if merged, _ := utils.CountFileLines(c.F.ConsolidatedSubs); merged > 0 {
-				logger.FileDebug("consolidated subs after shuffledns merge: %d", merged)
-			}
+			c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 		}
-		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 	} else if c.SkipShuffleDNS {
 		logger.StepHeader("Step 7: Skipping ShuffleDNS (--skip-shuffledns)")
 		logger.FileDebug("shuffledns skipped via --skip-shuffledns flag")
@@ -173,6 +188,18 @@ func stepHTTPProbing(c *Ctx) bool {
 		}
 		logger.FileDebug("httpx output: %d live hosts -> %s", count, c.F.HttpxOut)
 	}
+
+	// Trigger active WAF bypass Origin IP resolution
+	if err := runWithSkip(c, "WAF Origin IP Bypass", func(sCtx context.Context) error {
+		return RunOriginIPBypass(sCtx, c)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			// Logged internally by runWithSkip
+		} else {
+			logger.Warning("WAF Origin IP Bypass failed: %v", err)
+		}
+	}
+
 	c.StateMgr.MarkStepComplete(c.State, "http_probing")
 	return c.cancelled()
 }

@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/logger"
 )
 
 type Runner interface {
@@ -144,8 +144,12 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 
 	err := startAndWait(ctx, cmd)
 	if err != nil {
-		// Write full stderr to log file for debugging
-		logger.LogToolFailure(command, cmdStr, stderr.String(), err)
+		// Distinguish user-skipped tools from real errors in log file
+		if ctx.Err() != nil {
+			logger.LogToolSkipped(command, cmdStr)
+		} else {
+			logger.LogToolFailure(command, cmdStr, stderr.String(), err)
+		}
 		if r.Verbose {
 			logger.Debug("CMD Error: %v | Stderr: %s", err, stderr.String())
 		}
@@ -227,8 +231,12 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 
 	err := startAndWait(ctx, cmd)
 	if err != nil {
-		// Write full stderr to log file for debugging
-		logger.LogToolFailure(command, cmdStr, stderr.String(), err)
+		// Distinguish user-skipped tools from real errors in log file
+		if ctx.Err() != nil {
+			logger.LogToolSkipped(command, cmdStr)
+		} else {
+			logger.LogToolFailure(command, cmdStr, stderr.String(), err)
+		}
 		if stderr.Len() > 0 {
 			return stdout.String(), fmt.Errorf("%v: %s", err, stderr.String())
 		}

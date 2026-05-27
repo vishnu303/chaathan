@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vishnu303/chaathan-flow/pkg/progress"
+	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
 // ─────────────────────────────────────────────────────────────

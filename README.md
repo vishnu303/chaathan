@@ -18,7 +18,7 @@ Chaathan runs a **22-step automated recon workflow** on a target domain and a **
 ## Install
 
 ```bash
-git clone https://github.com/vishnu303/chaathan-flow.git
+git clone https://github.com/vishnu303/chaathan.git
 cd chaathan-flow
 
 # One-command setup: builds, installs to /usr/local/bin, installs all tools
@@ -64,7 +64,7 @@ chaathan wildcard -d target.com
 | **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, Hakrawler | `all_subdomains.txt` |
 | **2 — Validation** | 6–10 | DNSx, ShuffleDNS, Httpx, tlsx, Naabu | `live_hosts.txt` |
 | **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, GoLinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
-| **4 — Vulnerability Scan** | 18–21 | Nuclei (infra + URLs + takeovers), Dalfox| DB findings |
+| **4 — Vulnerability Scan** | 18–21 | Nuclei (smart CVE + misconfig + DAST), Dalfox | DB findings |
 | **5 — Fingerprinting** | 22 | Httpx, Nuclei | Tech/WAF JSON |
 
 <details>
@@ -89,10 +89,10 @@ chaathan wildcard -d target.com
 | 15 | Httpx | URL consolidation + live check | — |
 | 16 | Httpx, gf | JS file secret scan | — |
 | 17 | ffuf | Directory fuzzing | needs `--wordlist` |
-| 18 | Nuclei | Vuln scanning — infrastructure | `--skip-nuclei` |
-| 19 | Nuclei | Vuln scanning — URLs | `--skip-nuclei` |
-| 20 | Nuclei (Takeovers) | Subdomain takeover detection | `--skip-takeovers` |
-| 21 | Dalfox | XSS scanning on parameterized URLs | `--skip-dalfox` |
+| 18 | Nuclei | Vuln scanning — infra (smart CVE + misconfig) | `--skip-nuclei` |
+| 19 | Nuclei | Vuln scanning — URLs (DAST fuzzing) | `--skip-nuclei` |
+| 20 | Nuclei (Takeovers) | Subdomain takeover detection (CNAME-filtered) | `--skip-takeovers` |
+| 21 | Dalfox | XSS scanning (scoped, deduped, capped URLs) | `--skip-dalfox` |
 | 22 | Httpx, Nuclei | Technology & WAF Fingerprinting | `--skip-fingerprint` |
 
 </details>
@@ -249,7 +249,7 @@ general:
   retry_delay_sec: 3
   mode: native
   concurrency: 5
-  ua_rotation: false
+  ua_rotation: true
   user_agent: ""
   proxy: ""
 
@@ -266,6 +266,12 @@ tools:
     rate_limit: 150
     severity: [low, medium, high, critical]
     exclude_tags: [dos, fuzz]
+    disable_oob: true            # disable Interactsh OOB checks (prevents hangs)
+    max_timeout_min: 300         # hard process timeout per Nuclei run (5 hours)
+    dast_aggression: low         # DAST fuzzing payload count: low/medium/high
+  dalfox:
+    max_urls: 500                # cap parameterized URLs for XSS scanning
+    skip_third_party: true       # filter CDN/analytics/font domains from input
   httpx:
     threads: 50
     timeout: 10
@@ -319,17 +325,46 @@ Set `notifications.step_complete` to `true` for per-step notifications. Subdomai
 
 ---
 
-## WAF Evasion / Stealth Mode
+## WAF Evasion & Coverage Playbook
 
-All features are opt-in — disabled by default, zero behavior change unless enabled.
+All features are opt-in, giving full control over request authentication and stealthy origin bypass routing.
+
+### Authenticated Session Fuzzing
+
+Scan deep authenticated application states (APIs, parameter fuzzers, directory scanners, and vulnerability discovery engines) using cookies, tokens, and custom headers.
+
+Flags:
+*   `--cookie "<string>"`: Injects session cookies (e.g. `PHPSESSID=abc; auth=123`) across Httpx, Katana, ffuf, Nuclei, and Dalfox.
+*   `-H`, `--header "<name: value>"`: Appends custom request headers (can be repeated) across all target-facing tools.
+*   `--token "<token_val>"`: Shorthand to automatically inject `Authorization: Bearer <token_val>`.
+
+```bash
+chaathan wildcard -d target.com \
+  --cookie "auth_session=v1_active" \
+  -H "X-Client-Version: 2.14" \
+  --token "eyJhbGciOi..."
+```
+
+### Universal WAF/CDN Origin IP Bypass
+
+CDNs and Web Application Firewalls (Cloudflare, Fastly, Incapsula, Sucuri, and AWS CloudFront) cover frontend assets but can often be bypassed by addressing the backend server directly at its real origin IP.
+
+*   `--origin-bypass`: Opt-in switch that runs an active DNS partitioning check immediately after live HTTP probing.
+*   **How it works**: Maps subdomains resolving to known WAF ranges, finds non-WAF candidate direct backend IPs discovered during the scan, and performs concurrent validation probes by addressing the direct IP while injecting the target subdomain Host header over browser-spoofed TLS configs.
+*   **Result Storage**: Confirmed bypasses are saved in the SQLite `vulnerabilities` table and pushed to notifications automatically.
+
+```bash
+chaathan wildcard -d target.com --origin-bypass
+```
 
 ### User-Agent Rotation
 
-Rotate using real browser UAs (Chrome, Firefox, Edge, Safari) instead of tool-identifiable strings:
+UA rotation is **enabled by default** (`ua_rotation: true`). Real browser UAs (Chrome, Firefox, Edge, Safari) are rotated on every request, preventing WAF fingerprinting from static tool UAs like `"Nuclei - Open-source project"`.
 
+To disable:
 ```yaml
 general:
-  ua_rotation: true
+  ua_rotation: false
 ```
 
 Or set a fixed UA:
@@ -409,7 +444,9 @@ chaathan setup --update       # reinstall all tools (force update to latest)
 │   └── target.com/
 │       ├── intermediate_files/  # Raw outputs from individual tools
 │       ├── final_files/         # Consolidated product files
-│       │   ├── nuclei_vulns.json
+│       │   ├── nuclei_vulns.json      # Smart CVE findings
+│       │   ├── nuclei_misconfig.json  # Misconfig/exposure findings
+│       │   ├── nuclei_dast.json       # DAST injection findings
 │       │   ├── gf_secrets_findings.txt
 │       │   └── dalfox_xss.jsonl
 │       ├── SUMMARY.txt

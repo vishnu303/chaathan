@@ -6,7 +6,7 @@ package company_flow
 import (
 	"path/filepath"
 
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/logger"
 )
 
 // ─────────────────────────────────────────────────────────────

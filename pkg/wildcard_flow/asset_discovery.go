@@ -15,8 +15,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/utils"
 )
 
 // ─────────────────────────────────────────────────────────────

@@ -40,8 +40,8 @@ chaathan-flow/
 │   ├── notify/                Discord, Slack, Telegram notifications
 │   ├── logger/                Styled terminal output, colors, scan UI
 │   ├── progress/              Spinners and progress bars
-│   ├── paths/                 Centralised ~/.chaathan directory paths
-│   └── utils/                 File I/O, parsers, export helpers, validation
+│   └── paths/                 Centralised ~/.chaathan directory paths
+├── utils/                     File I/O, parsers, export helpers, validation
 ```
 
 ## Core architecture rules

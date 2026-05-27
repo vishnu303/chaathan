@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vishnu303/chaathan-flow/cli"
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/paths"
+	"github.com/vishnu303/chaathan/cli"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/paths"
 )
 
 func main() {

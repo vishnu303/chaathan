@@ -17,8 +17,8 @@ Activate this skill when the task affects how stored scan data is queried, ranke
 | Report command flags, output path selection | `cli/report.go` |
 | Report assembly, format-specific rendering | `pkg/report/report.go` |
 | Persistence, queries, ROI, metadata retrieval | `pkg/database/` (`database.go`, `roi.go`, `metadata.go`) |
-| Display helpers (truncation, severity summary) | `pkg/utils/format.go` |
-| Text file export | `pkg/utils/export.go`, `cli/export.go` |
+| Display helpers (truncation, severity summary) | `utils/format.go` |
+| Text file export | `utils/export.go`, `cli/export.go` |
 
 Keep presentation in `cli/` and `pkg/report/`. Keep data access and ranking in `pkg/database/`.
 
@@ -35,7 +35,7 @@ Keep presentation in `cli/` and `pkg/report/`. Keep data access and ranking in `
 - **New filter:** wire flag in Cobra → parse in `cli/query.go` → keep selection logic near the database call.
 - **Table output change:** keep JSON output stable unless the task explicitly changes API shape.
 - **ROI ranking change:** inspect `pkg/database/roi.go`, `pkg/database/metadata.go`, and all fields printed in `query roi`.
-- **Display change:** check truncation helpers in `pkg/utils/format.go`.
+- **Display change:** check truncation helpers in `utils/format.go`.
 
 ## Report changes
 
@@ -57,7 +57,7 @@ Keep presentation in `cli/` and `pkg/report/`. Keep data access and ranking in `
 - `cli/query.go`, `cli/report.go`, `cli/export.go`
 - `pkg/report/report.go`
 - `pkg/database/database.go`, `pkg/database/roi.go`, `pkg/database/metadata.go`
-- `pkg/utils/format.go`, `pkg/utils/export.go`
+- `utils/format.go`, `utils/export.go`
 
 ## Validation
 

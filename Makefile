@@ -4,7 +4,7 @@
 BINARY_NAME := chaathan
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-GOFLAGS := -buildvcs=false -ldflags "-s -w -X github.com/vishnu303/chaathan-flow/cli.Version=$(VERSION) -X github.com/vishnu303/chaathan-flow/cli.BuildTime=$(BUILD_TIME)"
+GOFLAGS := -buildvcs=false -ldflags "-s -w -X github.com/vishnu303/chaathan/cli.Version=$(VERSION) -X github.com/vishnu303/chaathan/cli.BuildTime=$(BUILD_TIME)"
 INSTALL_DIR := /usr/local/bin
 
 .PHONY: all build install uninstall clean test vet lint setup tools-check help

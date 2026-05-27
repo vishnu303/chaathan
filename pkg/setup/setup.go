@@ -16,7 +16,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/progress"
+	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
 // ─────────────────────────────────────────────────────────────

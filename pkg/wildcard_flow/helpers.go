@@ -2,36 +2,22 @@ package wildcard_flow
 
 import (
 	"bufio"
+	"container/heap"
 	"context"
 	"encoding/json"
 	"fmt"
 	neturl "net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/vishnu303/chaathan-flow/pkg/database"
-	"github.com/vishnu303/chaathan-flow/pkg/logger"
-	"github.com/vishnu303/chaathan-flow/pkg/tools"
-	"github.com/vishnu303/chaathan-flow/pkg/utils"
+	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/tools"
+	"github.com/vishnu303/chaathan/utils"
 )
-
-var tier1GFPatterns = map[string]bool{
-	"xss":         true,
-	"sqli":        true,
-	"sqli-error":  true,
-	"lfi":         true,
-	"ssrf":        true,
-	"redirect":    true,
-	"rce":         true,
-	"rce-2":       true,
-	"idor":        true,
-	"debug_logic": true,
-	"ssti":        true,
-}
 
 var jsGFPatterns = map[string]bool{
 	"domxss":   true,
@@ -127,40 +113,6 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0644)
 }
 
-// ─────────────────────────────────────────────────────────────
-// URL collection helpers
-// ─────────────────────────────────────────────────────────────
-
-// collectParamURLsFromFile filters an URL file for parameterised URLs
-// (containing ?key=value) and writes the unique results to outputFile.
-func collectParamURLsFromFile(inputFile, outputFile string) int {
-	file, err := os.Open(inputFile)
-	if err != nil {
-		return 0
-	}
-	defer file.Close()
-
-	seen := make(map[string]bool)
-	f, err := os.Create(outputFile)
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-
-	count := 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" && strings.Contains(line, "?") && strings.Contains(line, "=") {
-			if !seen[line] {
-				seen[line] = true
-				fmt.Fprintln(f, line)
-				count++
-			}
-		}
-	}
-	return count
-}
 
 // collectLiveHostTargetsFromHttpx reads a JSONL httpx output file and
 // writes unique host URLs to outputFile. Returns the number written.
@@ -278,14 +230,6 @@ func collectROIMetadataTargetsFromFile(inputFile, outputFile string, perHostLimi
 	return count
 }
 
-// collectGFTargetURLs runs installed Tier 1 gf patterns against inputFile,
-// merges the matches and writes them to outputFile.
-// When scanID > 0, persists each URL-pattern pair in the gf_matches table.
-// The caller should pass a skip-aware context (e.g. from runWithSkip) so the
-// user can press 's' to abort gf filtering.
-func collectGFTargetURLs(ctx context.Context, c *Ctx, tb *tools.ToolBox, inputFile, outputFile string) int {
-	return collectGFMatches(ctx, tb, inputFile, outputFile, tier1GFPatterns, c.ScanID)
-}
 
 // collectGFMatches runs the installed gf patterns present in allowlist against
 // inputFile, merges the matches and writes them to outputFile.
@@ -367,29 +311,6 @@ func writeEmptyFile(path string) {
 	_ = os.WriteFile(path, nil, 0644)
 }
 
-// ─────────────────────────────────────────────────────────────
-// URL classification helpers
-// ─────────────────────────────────────────────────────────────
-
-// isGFUsable returns true when the gf binary and its pattern pack are present.
-func isGFUsable() bool {
-	if _, err := exec.LookPath("gf"); err != nil {
-		return false
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	gfDir := filepath.Join(home, ".gf")
-	if _, err := os.Stat(gfDir); err != nil {
-		return false
-	}
-	entries, err := os.ReadDir(gfDir)
-	if err != nil {
-		return false
-	}
-	return len(entries) > 0
-}
 
 // isHighValueURL returns true for parameterised URLs or those containing
 // known sensitive path markers (admin panels, APIs, auth endpoints, etc.).
@@ -398,14 +319,7 @@ func isHighValueURL(raw string) bool {
 	if strings.Contains(lower, "?") && strings.Contains(lower, "=") {
 		return true
 	}
-	highValueMarkers := []string{
-		"/admin", "/login", "/signin", "/signup", "/auth",
-		"/oauth", "/token", "/graphql", "/api", "/v1/", "/v2/",
-		"/rest/", "/debug", "/console", "/actuator", "/swagger",
-		"/openapi", "/health", "/metrics", "/config", "/upload",
-		"/callback", "/redirect", "/reset", "/password",
-	}
-	for _, marker := range highValueMarkers {
+	for _, marker := range getHighValueMarkers() {
 		if strings.Contains(lower, marker) {
 			return true
 		}
@@ -469,4 +383,371 @@ func extractUncoverHosts(uncoverJSON, outputFile string) int {
 		count++
 	}
 	return count
+}
+
+// ─────────────────────────────────────────────────────────────
+// CNAME filtering for takeover detection
+// ─────────────────────────────────────────────────────────────
+
+// filterCNAMESubdomains reads dnsx_resolved.json and extracts subdomains
+// that have CNAME records. Only these are real takeover candidates — a
+// subdomain with only A/AAAA records can't be taken over via dangling CNAME.
+func filterCNAMESubdomains(dnsxJSONFile, outputFile string) int {
+	file, err := os.Open(dnsxJSONFile)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	out, err := os.Create(outputFile)
+	if err != nil {
+		return 0
+	}
+	defer out.Close()
+
+	type dnsxRecord struct {
+		Host  string   `json:"host"`
+		CNAME []string `json:"cname"`
+	}
+
+	seen := make(map[string]bool)
+	count := 0
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 4*1024*1024)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec dnsxRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if len(rec.CNAME) == 0 || rec.Host == "" {
+			continue
+		}
+		host := strings.ToLower(strings.TrimSpace(rec.Host))
+		if seen[host] {
+			continue
+		}
+		seen[host] = true
+		fmt.Fprintln(out, host)
+		count++
+	}
+	return count
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scoped URL filtering for DAST and Dalfox
+// ─────────────────────────────────────────────────────────────
+
+// junkDomainSuffixes are 3rd-party domains that should never be scanned.
+func getJunkDomains() []string {
+	return utils.JunkDomains
+}
+
+// staticExtensions are file extensions that can't have injection points.
+func getStaticExtensions() map[string]bool {
+	res := make(map[string]bool, len(utils.StaticExtensions))
+	for _, ext := range utils.StaticExtensions {
+		res[strings.ToLower(ext)] = true
+	}
+	return res
+}
+
+// getHighValueMarkers returns path markers that identify high-value/sensitive components.
+func getHighValueMarkers() []string {
+	return utils.HighValueMarkers
+}
+
+// getInterestingParameters returns parameters names that often contain security vulnerabilities.
+func getInterestingParameters() []string {
+	return utils.InterestingParameters
+}
+
+// isJunkDomain returns true if the host belongs to a known 3rd-party service.
+func isJunkDomain(host string) bool {
+	host = strings.ToLower(host)
+	for _, suffix := range getJunkDomains() {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasStaticExtension returns true if the URL path ends with a static file extension.
+func hasStaticExtension(rawURL string) bool {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	path := strings.ToLower(parsed.Path)
+	for ext := range getStaticExtensions() {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathKey extracts a deduplication key from a URL — the scheme+host+path
+// without query parameters, so /api/user?id=1 and /api/user?id=2 map
+// to the same key.
+func pathKey(rawURL string) string {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return strings.ToLower(parsed.Scheme + "://" + parsed.Host + parsed.Path)
+}
+
+// urlItem represents a tracked, evaluated URL target candidate.
+type urlItem struct {
+	raw   string
+	path  string
+	score int
+	index int // Index inside heap
+}
+
+// urlHeap implements a min-heap structure on urlItems for top-N ranking.
+type urlHeap []*urlItem
+
+func (h urlHeap) Len() int           { return len(h) }
+func (h urlHeap) Less(i, j int) bool { return h[i].score < h[j].score } // Min-heap: lowest score first
+func (h urlHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index = i
+	h[j].index = j
+}
+func (h *urlHeap) Push(x interface{}) {
+	n := len(*h)
+	item := x.(*urlItem)
+	item.index = n
+	*h = append(*h, item)
+}
+func (h *urlHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	item.index = -1
+	*h = old[0 : n-1]
+	return item
+}
+
+// collectScopedURLs filters all_urls_live.txt for DAST-suitable URLs using O(1) heap pipelines.
+func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	// Determine whether to filter 3rd-party domains.
+	// Default: filter ON. Config field SkipThirdParty defaults to true,
+	// meaning "yes, skip/filter junk domains". When set to false the
+	// filter is disabled — the negation below reads: "if NOT skipping
+	// third-party → don't filter".
+	filterJunk := true
+	if c.Cfg != nil && c.Cfg.Tools.Dalfox.SkipThirdParty != nil && !*c.Cfg.Tools.Dalfox.SkipThirdParty {
+		filterJunk = false
+	}
+
+	scanner := bufio.NewScanner(file)
+
+	if maxURLs > 0 {
+		// Bounded pipeline space: use a min-heap of size N to keep memory O(1)
+		pq := make(urlHeap, 0, maxURLs)
+		heap.Init(&pq)
+		pathIndex := make(map[string]*urlItem)
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			// Must have parameters
+			if !strings.Contains(line, "?") || !strings.Contains(line, "=") {
+				continue
+			}
+			// Skip static extensions
+			if hasStaticExtension(line) {
+				continue
+			}
+			// Extract host for scope and junk checks
+			parsed, err := neturl.Parse(line)
+			if err != nil {
+				continue
+			}
+			host := strings.ToLower(parsed.Hostname())
+			if host == "" {
+				continue
+			}
+			// Skip 3rd-party domains (when enabled)
+			if filterJunk && isJunkDomain(host) {
+				continue
+			}
+
+
+			// Score this URL for ROI ordering
+			score := urlROIScore(line)
+			pk := pathKey(line)
+
+			if existing, exists := pathIndex[pk]; exists {
+				if score > existing.score {
+					existing.raw = line
+					existing.score = score
+					heap.Fix(&pq, existing.index)
+				}
+			} else {
+				if pq.Len() < maxURLs {
+					item := &urlItem{raw: line, path: pk, score: score}
+					heap.Push(&pq, item)
+					pathIndex[pk] = item
+				} else if score > pq[0].score {
+					minItem := heap.Pop(&pq).(*urlItem)
+					delete(pathIndex, minItem.path)
+
+					item := &urlItem{raw: line, path: pk, score: score}
+					heap.Push(&pq, item)
+					pathIndex[pk] = item
+				}
+			}
+		}
+
+		if pq.Len() == 0 {
+			return 0
+		}
+
+		// Sort the bounded results in memory for execution
+		results := make([]*urlItem, 0, pq.Len())
+		for pq.Len() > 0 {
+			results = append(results, heap.Pop(&pq).(*urlItem))
+		}
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].score > results[j].score
+		})
+
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return 0
+		}
+		defer f.Close()
+
+		count := 0
+		for _, su := range results {
+			fmt.Fprintln(f, su.raw)
+			count++
+		}
+		return count
+
+	} else {
+		// Unbounded pipeline space (still capped at O(Unique Paths) instead of O(All Crawls))
+		bestPerPath := make(map[string]*urlItem)
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			if !strings.Contains(line, "?") || !strings.Contains(line, "=") {
+				continue
+			}
+			if hasStaticExtension(line) {
+				continue
+			}
+			parsed, err := neturl.Parse(line)
+			if err != nil {
+				continue
+			}
+			host := strings.ToLower(parsed.Hostname())
+			if host == "" {
+				continue
+			}
+			if filterJunk && isJunkDomain(host) {
+				continue
+			}
+
+
+			score := urlROIScore(line)
+			pk := pathKey(line)
+
+			if existing, ok := bestPerPath[pk]; ok {
+				if score > existing.score {
+					existing.raw = line
+					existing.score = score
+				}
+			} else {
+				bestPerPath[pk] = &urlItem{raw: line, path: pk, score: score}
+			}
+		}
+
+		if len(bestPerPath) == 0 {
+			return 0
+		}
+
+		results := make([]*urlItem, 0, len(bestPerPath))
+		for _, item := range bestPerPath {
+			results = append(results, item)
+		}
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].score > results[j].score
+		})
+
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return 0
+		}
+		defer f.Close()
+
+		count := 0
+		for _, su := range results {
+			fmt.Fprintln(f, su.raw)
+			count++
+		}
+		return count
+	}
+}
+
+// urlROIScore assigns a priority score to a URL for DAST/XSS scanning.
+// Higher score = more likely to contain exploitable vulnerabilities.
+func urlROIScore(rawURL string) int {
+	score := 0
+	lower := strings.ToLower(rawURL)
+
+	// More parameters = more injection surface (+2 per param)
+	parsed, err := neturl.Parse(rawURL)
+	if err == nil {
+		score += len(parsed.Query()) * 2
+	}
+
+	// High-value path markers (auth, API, debug, etc.)
+	for _, marker := range getHighValueMarkers() {
+		if strings.Contains(lower, marker) {
+			score += 5
+			break // one marker match is enough
+		}
+	}
+
+	// Interesting parameter names (+3 each)
+	if parsed != nil {
+		for _, key := range getInterestingParameters() {
+			if parsed.Query().Get(key) != "" {
+				score += 3
+			}
+		}
+	}
+
+	return score
+}
+
+// collectScopedParamURLs filters URLs for Dalfox XSS scanning.
+func collectScopedParamURLs(c *Ctx, inputFile, outputFile string) int {
+	maxURLs := 500
+	if c.Cfg != nil && c.Cfg.Tools.Dalfox.MaxURLs > 0 {
+		maxURLs = c.Cfg.Tools.Dalfox.MaxURLs
+	}
+	return collectScopedURLs(c, inputFile, outputFile, maxURLs)
 }

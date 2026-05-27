@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,6 +31,10 @@ func InitFileLog(path string) error {
 	if logFile != nil {
 		logFile.Close()
 		logFile = nil
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("cannot create log directory %q: %w", dir, err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -104,6 +109,8 @@ func LogCommand(cmd string) {
 // LogToolFailure writes a structured tool failure block to the log file only.
 // Call this from the runner when a tool exits with an error. The terminal
 // still shows only the existing logger.Warning/Error messages.
+// Stderr is truncated to 30 lines to avoid log noise from tools that
+// emit excessive repetitive output (e.g. Nuclei HTTP/2 warnings).
 func LogToolFailure(tool, command, stderr string, exitErr error) {
 	logFileMu.Lock()
 	defer logFileMu.Unlock()
@@ -117,11 +124,35 @@ func LogToolFailure(tool, command, stderr string, exitErr error) {
 		fmt.Fprintf(logFile, "[%s]   Exit:    %v\n", ts, exitErr)
 	}
 	if stderr != "" {
+		lines := strings.Split(strings.TrimSpace(stderr), "\n")
+		const maxStderrLines = 30
+		truncated := len(lines) > maxStderrLines
+		if truncated {
+			lines = lines[:maxStderrLines]
+		}
 		fmt.Fprintf(logFile, "[%s]   Stderr:\n", ts)
-		for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+		for _, line := range lines {
 			fmt.Fprintf(logFile, "[%s]     %s\n", ts, line)
 		}
+		if truncated {
+			fmt.Fprintf(logFile, "[%s]     ... (%d more lines truncated)\n", ts, len(strings.Split(strings.TrimSpace(stderr), "\n"))-maxStderrLines)
+		}
 	}
+	fmt.Fprintf(logFile, "\n")
+}
+
+// LogToolSkipped writes a structured skip entry to the log file only.
+// Call this instead of LogToolFailure when the tool was cancelled by user
+// skip request, to distinguish intentional skips from real errors.
+func LogToolSkipped(tool, command string) {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	if logFile == nil {
+		return
+	}
+	ts := time.Now().Format("15:04:05")
+	fmt.Fprintf(logFile, "[%s] TOOL SKIPPED: %s\n", ts, tool)
+	fmt.Fprintf(logFile, "[%s]   Command: %s\n", ts, command)
 	fmt.Fprintf(logFile, "\n")
 }
 // FileDebug writes a debug-level line to the log file only.
