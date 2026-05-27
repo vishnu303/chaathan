@@ -248,4 +248,3 @@ func maskSecret(key, value string) string {
 	}
 	return value
 }
-

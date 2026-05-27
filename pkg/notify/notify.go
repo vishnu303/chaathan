@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/vishnu303/chaathan/pkg/config"
 )
@@ -62,6 +63,11 @@ type StepComplete struct {
 type Notifier struct {
 	cfg    *config.NotificationConfig
 	client *http.Client
+	// LogFunc, when non-nil, receives structured log lines for every
+	// notification attempt (sent, succeeded, failed). The workflow layer
+	// wires this to logger.FileDebug so entries appear in --log files
+	// without pkg/notify depending on pkg/logger.
+	LogFunc func(format string, args ...interface{})
 }
 
 // New creates a new Notifier
@@ -71,6 +77,13 @@ func New(cfg *config.NotificationConfig) *Notifier {
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+	}
+}
+
+// logf writes to LogFunc if set.
+func (n *Notifier) logf(format string, args ...interface{}) {
+	if n.LogFunc != nil {
+		n.LogFunc(format, args...)
 	}
 }
 
@@ -96,36 +109,51 @@ func (n *Notifier) ShouldNotify(severity string) bool {
 // SendFinding sends a notification about a finding
 func (n *Notifier) SendFinding(finding Finding) error {
 	if !n.ShouldNotify(finding.Severity) {
+		n.logf("notify_finding SKIPPED [%s] %s (below min_severity %s)", finding.Severity, finding.Name, n.cfg.MinSeverity)
 		return nil
 	}
+
+	n.logf("notify_finding SENDING [%s] %s target=%s type=%s", finding.Severity, finding.Name, finding.Target, finding.Type)
 
 	var errors []string
 
 	// Discord
 	if n.cfg.DiscordWebhook != "" {
 		if err := n.sendDiscord(finding); err != nil {
+			n.logf("notify_finding FAILED discord: %v", err)
 			errors = append(errors, fmt.Sprintf("discord: %v", err))
+		} else {
+			n.logf("notify_finding OK discord")
 		}
 	}
 
 	// Slack
 	if n.cfg.SlackWebhook != "" {
 		if err := n.sendSlack(finding); err != nil {
+			n.logf("notify_finding FAILED slack: %v", err)
 			errors = append(errors, fmt.Sprintf("slack: %v", err))
+		} else {
+			n.logf("notify_finding OK slack")
 		}
 	}
 
 	// Telegram
 	if n.cfg.TelegramBotToken != "" && n.cfg.TelegramChatID != "" {
 		if err := n.sendTelegram(finding); err != nil {
+			n.logf("notify_finding FAILED telegram: %v", err)
 			errors = append(errors, fmt.Sprintf("telegram: %v", err))
+		} else {
+			n.logf("notify_finding OK telegram")
 		}
 	}
 
 	// Generic webhook
 	if n.cfg.WebhookURL != "" {
 		if err := n.sendWebhook(finding); err != nil {
+			n.logf("notify_finding FAILED webhook: %v", err)
 			errors = append(errors, fmt.Sprintf("webhook: %v", err))
+		} else {
+			n.logf("notify_finding OK webhook")
 		}
 	}
 
@@ -139,26 +167,38 @@ func (n *Notifier) SendFinding(finding Finding) error {
 // SendScanComplete sends a notification when a scan completes
 func (n *Notifier) SendScanComplete(scan ScanComplete) error {
 	if !n.cfg.Enabled {
+		n.logf("notify_scan_complete SKIPPED target=%s (notifications disabled)", scan.Target)
 		return nil
 	}
+
+	n.logf("notify_scan_complete SENDING target=%s scan_id=%d duration=%s", scan.Target, scan.ScanID, scan.Duration)
 
 	var errors []string
 
 	if n.cfg.DiscordWebhook != "" {
 		if err := n.sendDiscordScanComplete(scan); err != nil {
+			n.logf("notify_scan_complete FAILED discord: %v", err)
 			errors = append(errors, fmt.Sprintf("discord: %v", err))
+		} else {
+			n.logf("notify_scan_complete OK discord")
 		}
 	}
 
 	if n.cfg.SlackWebhook != "" {
 		if err := n.sendSlackScanComplete(scan); err != nil {
+			n.logf("notify_scan_complete FAILED slack: %v", err)
 			errors = append(errors, fmt.Sprintf("slack: %v", err))
+		} else {
+			n.logf("notify_scan_complete OK slack")
 		}
 	}
 
 	if n.cfg.TelegramBotToken != "" && n.cfg.TelegramChatID != "" {
 		if err := n.sendTelegramScanComplete(scan); err != nil {
+			n.logf("notify_scan_complete FAILED telegram: %v", err)
 			errors = append(errors, fmt.Sprintf("telegram: %v", err))
+		} else {
+			n.logf("notify_scan_complete OK telegram")
 		}
 	}
 
@@ -172,32 +212,47 @@ func (n *Notifier) SendScanComplete(scan ScanComplete) error {
 // SendStepComplete sends a notification when a workflow step completes
 func (n *Notifier) SendStepComplete(step StepComplete) error {
 	if !n.cfg.Enabled || !n.cfg.StepComplete {
+		n.logf("notify_step_complete SKIPPED step=%s (%d/%d) target=%s (notifications/step_complete disabled)", step.StepName, step.StepNumber, step.TotalSteps, step.Target)
 		return nil
 	}
+
+	n.logf("notify_step_complete SENDING step=%s (%d/%d) target=%s", step.StepName, step.StepNumber, step.TotalSteps, step.Target)
 
 	var errors []string
 
 	if n.cfg.DiscordWebhook != "" {
 		if err := n.sendDiscordStepComplete(step); err != nil {
+			n.logf("notify_step_complete FAILED discord: %v", err)
 			errors = append(errors, fmt.Sprintf("discord: %v", err))
+		} else {
+			n.logf("notify_step_complete OK discord")
 		}
 	}
 
 	if n.cfg.SlackWebhook != "" {
 		if err := n.sendSlackStepComplete(step); err != nil {
+			n.logf("notify_step_complete FAILED slack: %v", err)
 			errors = append(errors, fmt.Sprintf("slack: %v", err))
+		} else {
+			n.logf("notify_step_complete OK slack")
 		}
 	}
 
 	if n.cfg.TelegramBotToken != "" && n.cfg.TelegramChatID != "" {
 		if err := n.sendTelegramStepComplete(step); err != nil {
+			n.logf("notify_step_complete FAILED telegram: %v", err)
 			errors = append(errors, fmt.Sprintf("telegram: %v", err))
+		} else {
+			n.logf("notify_step_complete OK telegram")
 		}
 	}
 
 	if n.cfg.WebhookURL != "" {
 		if err := n.sendWebhookStepComplete(step); err != nil {
+			n.logf("notify_step_complete FAILED webhook: %v", err)
 			errors = append(errors, fmt.Sprintf("webhook: %v", err))
+		} else {
+			n.logf("notify_step_complete OK webhook")
 		}
 	}
 
@@ -441,14 +496,14 @@ func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
 	printed := make(map[string]bool)
 	for _, k := range orderedKeys {
 		if v, ok := scan.Stats[k]; ok {
-			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(strings.Title(k)), v)
+			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), v)
 			printed[k] = true
 		}
 	}
 	// Any remaining keys not in the preferred order
 	for k, v := range scan.Stats {
 		if !printed[k] {
-			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(strings.Title(k)), v)
+			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), v)
 		}
 	}
 
@@ -558,13 +613,21 @@ func (n *Notifier) postJSON(url string, payload interface{}) error {
 			lastErr = fmt.Errorf("request failed: %w", err)
 			continue // network error — retry
 		}
-		io.Copy(io.Discard, resp.Body) // drain body so connection can be reused
-		resp.Body.Close()
 
 		if resp.StatusCode < 400 {
+			io.Copy(io.Discard, resp.Body) // drain body so connection can be reused
+			resp.Body.Close()
 			return nil // success
 		}
-		lastErr = fmt.Errorf("received error status: %d", resp.StatusCode)
+
+		// Read error body for diagnostic detail (e.g. Telegram MarkdownV2 parse errors)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		resp.Body.Close()
+		if len(errBody) > 0 {
+			lastErr = fmt.Errorf("status %d: %s", resp.StatusCode, string(errBody))
+		} else {
+			lastErr = fmt.Errorf("received error status: %d", resp.StatusCode)
+		}
 
 		// Only retry on server errors (5xx); client errors (4xx) are permanent
 		if resp.StatusCode < 500 {
@@ -636,6 +699,9 @@ func formatStepLabel(step StepComplete) string {
 func escapeMarkdown(s string) string {
 	// Escape all Telegram MarkdownV2 special characters to prevent
 	// injection from attacker-controlled finding names, template IDs, etc.
+	// Backslash MUST be escaped first to avoid double-escaping the
+	// backslashes we insert for the other characters.
+	s = strings.ReplaceAll(s, "\\", "\\\\")
 	replacer := strings.NewReplacer(
 		"_", "\\_",
 		"*", "\\*",
@@ -657,6 +723,16 @@ func escapeMarkdown(s string) string {
 		")", "\\)",
 	)
 	return replacer.Replace(s)
+}
+
+// titleCase capitalises the first rune of s (replaces deprecated strings.Title).
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 // formatDuration converts a duration to a clean human-readable string.
