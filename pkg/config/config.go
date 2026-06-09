@@ -289,9 +289,9 @@ func DefaultConfig() *Config {
 			Verbose:      false,
 			UARotation:   true,
 			Wordlists: WordlistsConfig{
-				Subdomains:  "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
-				Directories: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
-				Parameters:  "/usr/share/wordlists/seclists/Discovery/Web-Content/burp-parameter-names.txt",
+				Subdomains:  filepath.Join(resolveSeclistsBase(), "Discovery", "DNS", "subdomains-top1million-5000.txt"),
+				Directories: filepath.Join(resolveSeclistsBase(), "Discovery", "Web-Content", "common.txt"),
+				Parameters:  filepath.Join(resolveSeclistsBase(), "Discovery", "Web-Content", "burp-parameter-names.txt"),
 			},
 			JSLimit: 2000,
 		},
@@ -425,4 +425,18 @@ func (c *Config) GetAPIKey(name string) string {
 	default:
 		return ""
 	}
+}
+
+// resolveSeclistsBase returns the seclists installation base directory.
+// Arch Linux (CachyOS, BlackArch) installs to /usr/share/seclists/,
+// while Debian/Kali uses /usr/share/wordlists/seclists/.
+// Returns whichever path exists, falling back to the Debian path.
+func resolveSeclistsBase() string {
+	archPath := "/usr/share/seclists"
+	debianPath := "/usr/share/wordlists/seclists"
+
+	if info, err := os.Stat(archPath); err == nil && info.IsDir() {
+		return archPath
+	}
+	return debianPath
 }

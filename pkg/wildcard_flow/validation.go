@@ -101,7 +101,7 @@ func stepDNSBruteforce(c *Ctx) bool {
 		// Validate DNS wordlist exists (may be a default config path like seclists)
 		if !utils.FileExists(c.DNSWordlistPath) {
 			logger.Warning("DNS wordlist not found: %s", c.DNSWordlistPath)
-			logger.Info("  Install seclists (apt install seclists) or provide a valid --dns-wordlist path")
+			logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --dns-wordlist path")
 			logger.FileDebug("shuffledns skipped: wordlist does not exist at %s", c.DNSWordlistPath)
 			c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
 		} else if c.ResolversPath != "" && !utils.FileExists(c.ResolversPath) {

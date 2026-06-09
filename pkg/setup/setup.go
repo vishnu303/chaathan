@@ -4,7 +4,7 @@
 // Each tool category lives in its own file:
 //
 //   log.go         — log file creation & captureCommandOutput
-//   prereqs.go     — system prerequisites (apt packages)
+//   prereqs.go     — system prerequisites (apt/pacman packages)
 //   go_tools.go    — Go tool list & parallel installer
 //   gf_patterns.go — gf JSON pattern pack installer
 //   python_tools.go — pip + script-based Python tools

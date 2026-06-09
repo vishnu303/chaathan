@@ -1,10 +1,12 @@
 // Prerequisites Installation
 //
-// Checks and installs system-level packages (go, pip3, git, gcc, libpcap-dev…)
+// Checks and installs system-level packages (go, pip3, git, gcc, libpcap…)
 // required before any tool installation can begin.
+// Supports Debian/Ubuntu (apt) and Arch Linux/CachyOS (pacman).
 package setup
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +17,56 @@ import (
 	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
+// distroFamily identifies the Linux distribution family for package management.
+type distroFamily int
+
+const (
+	distroUnknown distroFamily = iota
+	distroDebian               // Debian, Ubuntu, Kali, etc.
+	distroArch                 // Arch, CachyOS, Manjaro, EndeavourOS, etc.
+)
+
+// detectDistro reads /etc/os-release and returns the distro family.
+// Falls back to distroUnknown if the file is missing or unrecognised.
+func detectDistro() distroFamily {
+	f, err := os.Open("/etc/os-release")
+	if err != nil {
+		return distroUnknown
+	}
+	defer f.Close()
+
+	var id, idLike string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "ID=") {
+			id = strings.Trim(strings.TrimPrefix(line, "ID="), "\"")
+		} else if strings.HasPrefix(line, "ID_LIKE=") {
+			idLike = strings.Trim(strings.TrimPrefix(line, "ID_LIKE="), "\"")
+		}
+	}
+
+	// Check ID first, then ID_LIKE for derivatives
+	combined := id + " " + idLike
+	switch {
+	case containsWord(combined, "arch"):
+		return distroArch
+	case containsWord(combined, "debian") || containsWord(combined, "ubuntu"):
+		return distroDebian
+	}
+	return distroUnknown
+}
+
+// containsWord checks if any whitespace-separated token in s equals word.
+func containsWord(s, word string) bool {
+	for _, w := range strings.Fields(s) {
+		if w == word {
+			return true
+		}
+	}
+	return false
+}
+
 // ─────────────────────────────────────────────────────────────
 // installPrerequisites
 // ─────────────────────────────────────────────────────────────
@@ -23,62 +75,101 @@ func installPrerequisites() {
 	progress.Section("Prerequisites", "")
 
 	if runtime.GOOS != "linux" {
-		progress.ItemInfo("Auto-install only supported on Ubuntu/Debian.")
-		progress.ItemInfo("Please ensure: go, pip3, gem, git, make, gcc, libpcap-dev")
+		progress.ItemInfo("Auto-install only supported on Linux (Debian/Ubuntu, Arch/CachyOS).")
+		progress.ItemInfo("Please ensure: go, pip3, gem, git, make, gcc, libpcap")
+		return
+	}
+
+	distro := detectDistro()
+	if distro == distroUnknown {
+		progress.ItemInfo("Unrecognised Linux distribution — cannot auto-install prerequisites.")
+		progress.ItemInfo("Please ensure: go, pip3, gem, git, make, gcc, libpcap")
+		ensurePathSetup()
 		return
 	}
 
 	type prereq struct {
-		name, binary, aptPkg, dpkgPkg string
+		name      string
+		binary    string
+		aptPkg    string // Debian/Ubuntu
+		pacmanPkg string // Arch/CachyOS
+		// dpkgPkg / pacmanQPkg are used for header-only packages with no binary
+		dpkgPkg    string // dpkg -l check on Debian
+		pacmanQPkg string // pacman -Qi check on Arch
 	}
 
 	prereqs := []prereq{
-		{"Go", "go", "golang-go", ""},
-		{"pip3", "pip3", "python3-pip", ""},
-		{"Ruby gem", "gem", "ruby-full", ""},
-		{"Git", "git", "git", ""},
-		{"Make", "make", "make", ""},
-		{"GCC", "gcc", "gcc", ""},
-		{"libpcap-dev", "", "libpcap-dev", "libpcap-dev"},
+		{"Go", "go", "golang-go", "go", "", ""},
+		{"pip3", "pip3", "python3-pip", "python-pip", "", ""},
+		{"Ruby gem", "gem", "ruby-full", "ruby", "", ""},
+		{"Git", "git", "git", "git", "", ""},
+		{"Make", "make", "make", "make", "", ""},
+		{"GCC", "gcc", "gcc", "gcc", "", ""},
+		{"libpcap", "", "libpcap-dev", "libpcap", "libpcap-dev", "libpcap"},
 	}
 
 	var toInstall []string
 	for _, p := range prereqs {
-		if isInstalled(p.binary, p.dpkgPkg) {
+		if isPrereqInstalled(p.binary, p.dpkgPkg, p.pacmanQPkg, distro) {
 			progress.ItemOK(p.name)
 		} else {
 			progress.ItemPending(p.name)
-			toInstall = append(toInstall, p.aptPkg)
+			switch distro {
+			case distroDebian:
+				toInstall = append(toInstall, p.aptPkg)
+			case distroArch:
+				toInstall = append(toInstall, p.pacmanPkg)
+			}
 		}
 	}
 
 	if len(toInstall) == 0 {
 		progress.ItemInfo("All prerequisites ready")
+		ensurePathSetup()
 		return
 	}
 
-	progress.ItemInfo(fmt.Sprintf("Installing %d packages via apt...", len(toInstall)))
-	runSysCmd("sudo", "apt", "update", "-qq")
-	if err := runSysCmd("sudo", append([]string{"apt", "install", "-y", "-qq"}, toInstall...)...); err != nil {
-		progress.ItemFail("apt install", err.Error())
-	} else {
-		progress.ItemOK(fmt.Sprintf("%d packages installed", len(toInstall)))
+	switch distro {
+	case distroDebian:
+		progress.ItemInfo(fmt.Sprintf("Installing %d packages via apt...", len(toInstall)))
+		runSysCmd("sudo", "apt", "update", "-qq")
+		if err := runSysCmd("sudo", append([]string{"apt", "install", "-y", "-qq"}, toInstall...)...); err != nil {
+			progress.ItemFail("apt install", err.Error())
+		} else {
+			progress.ItemOK(fmt.Sprintf("%d packages installed", len(toInstall)))
+		}
+	case distroArch:
+		progress.ItemInfo(fmt.Sprintf("Installing %d packages via pacman...", len(toInstall)))
+		if err := runSysCmd("sudo", append([]string{"pacman", "-S", "--noconfirm", "--needed"}, toInstall...)...); err != nil {
+			progress.ItemFail("pacman install", err.Error())
+		} else {
+			progress.ItemOK(fmt.Sprintf("%d packages installed", len(toInstall)))
+		}
 	}
 
 	ensurePathSetup()
 }
 
 // ─────────────────────────────────────────────────────────────
-// isInstalled — check binary presence or dpkg install status
+// isPrereqInstalled — check binary presence or package-manager install status
 // ─────────────────────────────────────────────────────────────
 
-func isInstalled(binary, dpkgPkg string) bool {
+func isPrereqInstalled(binary, dpkgPkg, pacmanQPkg string, distro distroFamily) bool {
+	// Prefer binary check — works on all distros
 	if binary != "" {
 		_, err := exec.LookPath(binary)
 		return err == nil
 	}
-	if dpkgPkg != "" {
-		return exec.Command("dpkg", "-l", dpkgPkg).Run() == nil
+	// Fall back to package-manager query for header-only packages
+	switch distro {
+	case distroDebian:
+		if dpkgPkg != "" {
+			return exec.Command("dpkg", "-l", dpkgPkg).Run() == nil
+		}
+	case distroArch:
+		if pacmanQPkg != "" {
+			return exec.Command("pacman", "-Qi", pacmanQPkg).Run() == nil
+		}
 	}
 	return false
 }
@@ -105,6 +196,7 @@ func ensurePathSetup() {
 		return
 	}
 
+	// POSIX shell exports (bash, zsh)
 	pathsToAdd := []string{
 		`export PATH="$HOME/.local/bin:$PATH"`,
 		`export PATH="$HOME/go/bin:$PATH"`,
@@ -149,7 +241,37 @@ func ensurePathSetup() {
 		}
 	}
 
-	// Also update the current Go process's PATH so that subsequent setup functions 
+	// Fish shell support (CachyOS default)
+	fishConfig := filepath.Join(home, ".config", "fish", "config.fish")
+	if _, err := os.Stat(fishConfig); err == nil {
+		content, err := os.ReadFile(fishConfig)
+		if err == nil {
+			fileContent := string(content)
+			fishPaths := []string{
+				`fish_add_path -g $HOME/.local/bin`,
+				`fish_add_path -g $HOME/go/bin`,
+			}
+			added := false
+			f, err := os.OpenFile(fishConfig, os.O_APPEND|os.O_WRONLY, 0644)
+			if err == nil {
+				for _, p := range fishPaths {
+					if !strings.Contains(fileContent, p) {
+						if !added {
+							f.WriteString("\n# Chaathan PATH configuration\n")
+							added = true
+						}
+						f.WriteString(p + "\n")
+					}
+				}
+				f.Close()
+				if added {
+					progress.ItemOK("Added paths to config.fish (Restart terminal to apply)")
+				}
+			}
+		}
+	}
+
+	// Also update the current Go process's PATH so that subsequent setup functions
 	// or tool runs in this same execution session can find the new paths instantly.
 	currentPath := os.Getenv("PATH")
 	localBin := filepath.Join(home, ".local", "bin")

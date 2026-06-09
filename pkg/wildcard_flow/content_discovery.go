@@ -280,7 +280,7 @@ func stepParamDiscovery(c *Ctx) bool {
 				paramWordlist = c.Cfg.General.Wordlists.Parameters
 			} else {
 				logger.Warning("Arjun parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
-				logger.Info("  Install seclists (apt install seclists) or set a valid wordlist in config.yaml")
+				logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or set a valid wordlist in config.yaml")
 				logger.Info("  Falling back to Arjun's built-in parameter list")
 				logger.FileDebug("arjun: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
 			}
@@ -571,7 +571,7 @@ func stepDirFuzzing(c *Ctx) bool {
 		// The path may come from config defaults (e.g. seclists) that aren't installed.
 		if !utils.FileExists(c.WordlistPath) {
 			logger.Warning("ffuf wordlist not found: %s", c.WordlistPath)
-			logger.Info("  Install seclists (apt install seclists) or provide a valid --wordlist path")
+			logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --wordlist path")
 			logger.FileDebug("ffuf skipped: wordlist does not exist at %s", c.WordlistPath)
 		} else {
 			targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)

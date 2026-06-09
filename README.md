@@ -1,542 +1,235 @@
 # Chaathan
 
-A modular CLI pentesting framework for bug bounty reconnaissance and vulnerability scanning. Single binary, persistent SQLite database, 28 integrated tools.
+[![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
+[![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=for-the-badge&logo=sqlite)](https://sqlite.org)
+[![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux)](https://linux.org)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
-```
-   _____ _                 _   _                 
-  / ____| |               | | | |                
- | |    | |__   __ _  __ _| |_| |__   __ _ _ __  
- | |    | '_ \ / _' |/ _' | __| '_ \ / _' | '_ \ 
- | |____| | | | (_| | (_| | |_| | | | (_| | | | |
-  \_____|_| |_|\__,_|\__,_|\__|_| |_|\__,_|_| |_|
-```
-
-## What It Does
-
-Chaathan runs a **22-step automated recon workflow** on a target domain and a **3-step company reconnaissance workflow** — subdomain discovery, DNS resolution, port scanning, web crawling, vulnerability scanning, XSS detection, subdomain takeover checks, cloud enumeration, JS secret scanning, ASN discovery — and stores everything in a local SQLite database you can query, diff, and export.
-
-## Install
-
-```bash
-git clone https://github.com/vishnu303/chaathan.git
-cd chaathan-flow
-
-# One-command setup: builds, installs to /usr/local/bin, installs all tools
-make all
-
-# Or step by step:
-make build          # Build binary
-make install        # Install to /usr/local/bin
-make setup          # Install all external tools
-```
-
-**Requirements:** Go 1.21+, Git, Linux
-
-## Quick Start
-
-```bash
-chaathan setup                          # Install tools (first time)
-chaathan setup --update                 # Reinstall / update all tools
-
-chaathan wildcard -d target.com         # Full 22-step domain recon
-chaathan company -n "Company Inc"       # Company/org discovery
-
-chaathan tools check                    # Verify tool installations
-chaathan status                         # Dashboard overview
-
-chaathan query vulns 1 --severity critical    # Query results
-chaathan query subdomains 1 --live            # Live subdomains only
-chaathan report generate 1 --format html      # Generate report
-```
+> **Chaathan** is an enterprise-grade, single-binary Go pentesting orchestration framework built for professional bug hunters and red teams. It automates high-performance multi-phase reconnaissance, stores results in a centralized SQLite database, tracks targets over time with stateful diffs, and fires real-time alerts on critical discoveries.
 
 ---
 
-## Workflows
+## ⚡ Core Capabilities
 
-### Wildcard Scan (22 Steps)
-
-```bash
-chaathan wildcard -d target.com
-```
-
-| Phase | Steps | Tools | Output |
-|-------|-------|-------|--------|
-| **1 — Asset Discovery** | 1–5 | Subfinder, Assetfinder, Sublist3r, Amass, GitHub-subdomains, Uncover, Hakrawler | `all_subdomains.txt` |
-| **2 — Validation** | 6–10 | DNSx, ShuffleDNS, Httpx, tlsx, Naabu | `live_hosts.txt` |
-| **3 — Content Discovery** | 11–17 | Waybackurls, GAU, Katana, GoSpider, GoLinkFinder, Arjun, gf, ffuf | `all_urls_live.txt` |
-| **4 — Vulnerability Scan** | 18–21 | Nuclei (smart CVE + misconfig + DAST), Dalfox | DB findings |
-| **5 — Fingerprinting** | 22 | Httpx, Nuclei | Tech/WAF JSON |
-
-<details>
-<summary>Full step breakdown</summary>
-
-| Step | Tool(s) | What It Does | Skip Flag |
-|------|---------|-------------|-----------|
-| 1 | Subfinder, Assetfinder, Sublist3r | Passive subdomain enumeration | — |
-| 2 | Amass | Active DNS brute-force | `--skip-amass` |
-| 3 | github-subdomains | GitHub scraping for subdomains | needs `--github-token` |
-| 4 | Uncover | Shodan/Censys/Fofa passive dorking | `--skip-uncover` |
-| 5 | Hakrawler | JavaScript crawling for subdomain & endpoint discovery | `--skip-hakrawler` |
-| 6 | DNSx | Consolidation + DNS resolution | — |
-| 7 | ShuffleDNS/MassDNS | DNS brute-force with wordlist | `--skip-shuffledns` |
-| 8 | Httpx | HTTP probing + tech detection | — |
-| 9 | tlsx | TLS cert analysis + SAN extraction | `--skip-tlsx` |
-| 10 | Naabu | Port scanning (all subdomains) | `--skip-naabu` |
-| 11 | Waybackurls, GAU | Historical URL discovery | — |
-| 12 | Katana, GoSpider | Web crawling | `--skip-crawl` |
-| 13 | GoLinkFinder | JavaScript endpoint extraction | — |
-| 14 | Arjun | HTTP parameter discovery | `--skip-arjun` |
-| 15 | Httpx | URL consolidation + live check | — |
-| 16 | Httpx, gf | JS file secret scan | — |
-| 17 | ffuf | Directory fuzzing | needs `--wordlist` |
-| 18 | Nuclei | Vuln scanning — infra (smart CVE + misconfig) | `--skip-nuclei` |
-| 19 | Nuclei | Vuln scanning — URLs (DAST fuzzing) | `--skip-nuclei` |
-| 20 | Nuclei (Takeovers) | Subdomain takeover detection (CNAME-filtered) | `--skip-takeovers` |
-| 21 | Dalfox | XSS scanning (scoped, deduped, capped URLs) | `--skip-dalfox` |
-| 22 | Httpx, Nuclei | Technology & WAF Fingerprinting | `--skip-fingerprint` |
-
-</details>
-
-**Fast scan** (skip heavy tools):
-```bash
-chaathan wildcard -d target.com --skip-amass --skip-naabu --skip-nuclei
-```
-
-**Stealth scan** (avoid WAF detection):
-```bash
-chaathan wildcard -d target.com --proxy socks5://127.0.0.1:9050 --rate-limit 10
-```
-
-**Resume interrupted scan:**
-```bash
-chaathan wildcard -d target.com --resume <scan_id>
-```
-
-**Save scan output to a log file:**
-```bash
-chaathan wildcard -d target.com --log
-```
-Writes a plain-text, ANSI-stripped copy of the full scan output to `~/.chaathan/logs/<domain>_<scanID>_<timestamp>.log`. Useful for debugging or archiving scan sessions.
-
-Press **`s`** during scanning to skip the current tool without aborting.
-
-### Company Scan (3 Steps)
-
-```bash
-chaathan company -n "Company Inc"
-```
-
-| Step | Tool | What It Does | Skip Flag |
-|------|------|-------------|-----------|
-| 1 | Metabigor | ASN & network range discovery | `--skip-metabigor` |
-| 2 | Amass Intel | Root domain discovery (reverse-whois) | `--skip-amass-intel` |
-| 3 | Cloud Enum | Cloud infrastructure enumeration | `--skip-cloud-enum` |
+*   **Stateful 22-Step Wildcard Recon**: End-to-end domain discovery, HTTP probing, historical URL extraction, vulnerability auditing, and WAF fingerprinting.
+*   **Stateful 3-Step Company Discovery**: Network ASN mappings, reverse-WHOIS root enumeration, and public cloud asset discovery.
+*   **Universal WAF/CDN Origin Bypass**: Automatically maps WAF-shielded hosts, tests candidate origin IPs, and validates direct origin routing with browser-spoofed headers.
+*   **Relational Intelligence**: Stores all assets, open ports, vulnerabilities, URLs, and API endpoints in a high-speed local SQLite database.
+*   **Intelligent ROI Ranking**: Evaluates crawled endpoints to rank test targets by vulnerability density and potential ROI.
+*   **Continuous Monitoring & Diffs**: Compare scans over time to immediately isolate new subdomains, ports, or vulnerabilities.
+*   **Real-time Alerts**: Native webhook support for Discord, Slack, Telegram, and generic HTTP endpoints with automated subdomain takeover detection.
 
 ---
 
-## Commands
+## 🎮 Consolidated Command Center
 
-### Scanning
+All commands in the Chaathan ecosystem—including installation, building, testing, scanning, querying, diffing, reporting, configuration, and scheduling—are consolidated in this single section. There are no scattered commands throughout the rest of the document.
 
-| Command | Description |
-|---------|-------------|
-| `chaathan wildcard -d <domain>` | 22-step domain recon workflow |
-| `chaathan wildcard -d <domain> --proxy <url>` | Scan through a proxy |
-| `chaathan wildcard -d <domain> --rate-limit <n>` | Cap all tools to N req/sec |
-| `chaathan wildcard -d <domain> --log` | Mirror scan output to `~/.chaathan/logs/` |
-| `chaathan company -n <name>` | 3-step company discovery workflow |
+### 1. Build & Installation (Makefile)
 
-### Data & Results
-
-| Command | Description |
-|---------|-------------|
-| `chaathan status` | Dashboard — recent scans, progress, stats |
-| `chaathan scans list` | List all past scans |
-| `chaathan scans show <id>` | Scan details and statistics |
-| `chaathan scans resume <id>` | Resume an interrupted scan |
-| `chaathan scans delete <id>` | Delete a specific scan |
-| `chaathan diff <id1> <id2>` | Compare two scans |
-
-### Querying
-
-| Command | Description |
-|---------|-------------|
-| `chaathan query subdomains <id>` | Query discovered subdomains |
-| `chaathan query vulns <id>` | Query vulnerabilities |
-| `chaathan query ports <id>` | Query open ports |
-| `chaathan query urls <id>` | Query discovered URLs |
-| `chaathan query endpoints <id>` | Query API endpoints |
-| `chaathan query roi <id>` | Rank URLs by testing ROI |
-
-### Reporting & Export
-
-| Command | Description |
-|---------|-------------|
-| `chaathan report generate <id>` | Generate html/md/json report |
-| `chaathan export <id>` | Export results to text files |
-
-### Tooling & Config
-
-| Command | Description |
-|---------|-------------|
-| `chaathan setup` | Install missing external tools |
-| `chaathan setup --update` | Force-reinstall all tools to latest |
-| `chaathan tools list` | List all 28 tools with categories |
-| `chaathan tools check` | Check which tools are installed |
-| `chaathan config show` | Show current configuration |
-| `chaathan config edit` | Edit config in your editor |
-| `chaathan config set <key> <val>` | Set a config value |
-| `chaathan config reset` | Reset config to defaults |
-| `chaathan config path` | Show config file path |
-
-### Cleanup
-
-| Command | Description |
-|---------|-------------|
-| `chaathan delete target <domain>` | Delete all data for a target |
-| `chaathan delete scan <id>` | Delete a specific scan |
-| `chaathan delete old <days>` | Delete scans older than N days |
-| `chaathan delete list` | List scans available for deletion |
-
----
-
-## Query Examples
+Run these targets from the root of the cloned repository directory to compile the binary and provision external engines.
 
 ```bash
-# Subdomains
-chaathan query subdomains 1 --live         # only live ones
-chaathan query subdomains 1 --grep api     # filter by pattern
-chaathan query subdomains 1 --json         # JSON output
+# Clone the repository
+git clone https://github.com/vishnu303/chaathan.git && cd chaathan
 
-# Vulnerabilities
-chaathan query vulns 1 --severity critical
-
-# ROI-ranked targets
-chaathan query roi 1 --limit 10
-chaathan query roi 1 --json -o roi.json
-
-# Pipe to other tools
-chaathan query subdomains 1 --live > live.txt
-chaathan query urls 1 > urls_for_burp.txt
+# Orchestration targets
+make all            # Installs chaathan binary and provisions all 28 tools (Recommended)
+make build          # Compiles the single chaathan binary in the local directory
+make install        # Installs the compiled binary globally to /usr/local/bin
+make setup          # Provisions and compiles all 28 third-party tools
+make test           # Executes the Go unit test suite
+make vet            # Performs static analysis and code verification
+make clean          # Cleans up local compilation and build artifacts
 ```
 
-## Scan Diffing
+### 2. Reconnaissance & Scanning
+
+| Purpose | Command |
+| :--- | :--- |
+| **Standard Scan** | `chaathan wildcard -d target.com` |
+| **Fast Scan** *(Skip heavy DNS/vuln/port scans)* | `chaathan wildcard -d target.com --skip-amass --skip-naabu --skip-nuclei` |
+| **Stealth Scan** *(Proxy + Rate limit)* | `chaathan wildcard -d target.com --proxy socks5://127.0.0.1:9050 --rate-limit 10` |
+| **Stateful Resume** | `chaathan wildcard -d target.com --resume <scan_id>` |
+| **Session-Authenticated Scan** | `chaathan wildcard -d target.com --cookie "PHPSESSID=abc; auth=1" -H "X-Client: Pro" --token "jwt_value"` |
+| **Origin IP Bypass Scan** | `chaathan wildcard -d target.com --origin-bypass` |
+| **Execution Logging** | `chaathan wildcard -d target.com --log` |
+| **Company Discovery** | `chaathan company -n "Acme Corporation"` |
+| **Company Discovery** *(Fast)* | `chaathan company -n "Acme Corporation" --skip-metabigor` |
+
+### 3. Database Queries & Filtering
+
+Extract and pivot relational reconnaissance datasets directly from the local SQLite database.
 
 ```bash
-chaathan diff 1 2
+# Subdomain queries
+chaathan query subdomains 1 --live          # Filter for live HTTP assets only
+chaathan query subdomains 1 --grep api      # Filter subdomains containing 'api'
+chaathan query subdomains 1 --json          # Output in clean JSON format
+chaathan query subdomains 1 --live > live.txt # Pipe live subdomains to a text file
+
+# Vulnerabilities, Ports, & Endpoints
+chaathan query vulns 1 --severity critical  # Filter vulnerabilities by severity level
+chaathan query ports 1                      # List all discovered open ports
+chaathan query urls 1                       # List all historical and crawled URL paths
+chaathan query urls 1 > urls_for_burp.txt   # Export all discovered URLs for external proxies
+chaathan query endpoints 1                  # List resolved REST/GraphQL API endpoints
+
+# Attack Surface Analysis
+chaathan query roi 1 --limit 10             # Rank high-value web targets by estimated ROI
+chaathan query roi 1 --json -o roi.json     # Export high-ROI assets directly to JSON
+chaathan diff 1 2                           # Isolate differences (new subdomains, open ports, vulns) between two scans
 ```
 
-Shows new/removed subdomains, new open ports, new vulnerabilities with severity, and new URLs. Useful for continuous monitoring.
+### 4. Telemetry & Environment Control
 
----
-
-## Configuration
-
-Config lives at `~/.chaathan/config.yaml`:
+Manage running scans, configure system options, clean up old records, and verify tool health.
 
 ```bash
-chaathan config edit                   # open in editor
-chaathan config show                   # view current config
-chaathan config set api_keys.github ghp_xxxxx
+# Dashboard & Telemetry
+chaathan status                             # Show interactive dashboard of active and historical runs
+chaathan scans list                         # List database scan history and run metadata
+chaathan scans show <id>                    # Inspect detailed runtime metrics for a specific scan
+chaathan scans resume <id>                  # Resume a suspended or interrupted scan from the database
+chaathan scans delete <id>                  # Delete metadata and tables for a single scan ID
+
+# Data Cleanups
+chaathan delete target target.com           # Completely purge all database entries for a target domain
+chaathan delete old 30                      # Delete all database runs and assets older than 30 days
+chaathan delete list                        # Catalog and list all scans flagged as eligible for deletion
+
+# Tooling Checks & Provisioning
+chaathan setup                              # Install missing external third-party dependencies
+chaathan setup --update                     # Force rebuild and update all 28 third-party tools to latest
+chaathan tools list                         # Show categorization list of all 28 integrated engines
+chaathan tools check                        # Perform disk audits and check binary paths for all tools
 ```
 
-<details>
-<summary>Full config reference</summary>
-
-```yaml
-general:
-  max_retries: 1
-  retry_delay_sec: 3
-  mode: native
-  concurrency: 5
-  ua_rotation: true
-  user_agent: ""
-  proxy: ""
-
-tools:
-  subfinder:
-    threads: 30
-    timeout: 30
-  naabu:
-    threads: 25
-    rate: 1000
-    ports: "top-1000"
-  nuclei:
-    concurrency: 25
-    rate_limit: 150
-    severity: [low, medium, high, critical]
-    exclude_tags: [dos, fuzz]
-    disable_oob: true            # disable Interactsh OOB checks (prevents hangs)
-    max_timeout_min: 300         # hard process timeout per Nuclei run (5 hours)
-    dast_aggression: low         # DAST fuzzing payload count: low/medium/high
-  dalfox:
-    max_urls: 500                # cap parameterized URLs for XSS scanning
-    skip_third_party: true       # filter CDN/analytics/font domains from input
-  httpx:
-    threads: 50
-    timeout: 10
-    ports: ["80", "443", "8080", "8443"]
-
-notifications:
-  enabled: false
-  step_complete: false
-  min_severity: high
-  discord_webhook: ""
-  slack_webhook: ""
-  telegram_bot_token: ""
-  telegram_chat_id: ""
-  webhook_url: ""
-  email:
-    enabled: false
-    smtp_host: ""
-    smtp_port: 587
-    username: ""
-    password: ""
-    from: ""
-    to: ""
-
-scope:
-  in_scope: []
-  out_of_scope: []
-  exclude_ips: []
-  allowed_ports: []
-
-rate_limits:
-  global_rps: 0   # ceiling across all tools; 0 = disabled
-```
-
-</details>
-
----
-
-## Notifications
-
-Get alerts on Discord/Slack/Telegram when critical findings are discovered:
+### 5. Config Management
 
 ```bash
-chaathan config set notifications.enabled true
-chaathan config set notifications.discord_webhook https://discord.com/api/webhooks/xxx/yyy
-chaathan config set notifications.telegram_bot_token 12345:ABCDE
-chaathan config set notifications.telegram_chat_id 987654321
-chaathan config set notifications.min_severity high
+chaathan config path                        # Display filepath to local config.yaml
+chaathan config show                        # Print compiled configuration schema currently loaded
+chaathan config edit                        # Open config.yaml in the system default CLI text editor
+chaathan config set api_keys.github ghp_xx  # Programmatically write GitHub token for subdomains
+chaathan config set notifications.enabled true # Programmatically enable notification dispatchers
+chaathan config reset                       # Overwrite config.yaml back to system defaults
 ```
 
-Set `notifications.step_complete` to `true` for per-step notifications. Subdomain takeover findings trigger immediate alerts.
-
----
-
-## WAF Evasion & Coverage Playbook
-
-All features are opt-in, giving full control over request authentication and stealthy origin bypass routing.
-
-### Authenticated Session Fuzzing
-
-Scan deep authenticated application states (APIs, parameter fuzzers, directory scanners, and vulnerability discovery engines) using cookies, tokens, and custom headers.
-
-Flags:
-*   `--cookie "<string>"`: Injects session cookies (e.g. `PHPSESSID=abc; auth=123`) across Httpx, Katana, ffuf, Nuclei, and Dalfox.
-*   `-H`, `--header "<name: value>"`: Appends custom request headers (can be repeated) across all target-facing tools.
-*   `--token "<token_val>"`: Shorthand to automatically inject `Authorization: Bearer <token_val>`.
+### 6. Reports & Text File Exports
 
 ```bash
-chaathan wildcard -d target.com \
-  --cookie "auth_session=v1_active" \
-  -H "X-Client-Version: 2.14" \
-  --token "eyJhbGciOi..."
+chaathan report generate 1 --format html    # Output an interactive HTML/Markdown report of scan assets
+chaathan export 1                           # Dump raw text asset files from database to the workspace directory
 ```
 
-### Universal WAF/CDN Origin IP Bypass
+### 7. Continuous Automation (System Cron)
 
-CDNs and Web Application Firewalls (Cloudflare, Fastly, Incapsula, Sucuri, and AWS CloudFront) cover frontend assets but can often be bypassed by addressing the backend server directly at its real origin IP.
-
-*   `--origin-bypass`: Opt-in switch that runs an active DNS partitioning check immediately after live HTTP probing.
-*   **How it works**: Maps subdomains resolving to known WAF ranges, finds non-WAF candidate direct backend IPs discovered during the scan, and performs concurrent validation probes by addressing the direct IP while injecting the target subdomain Host header over browser-spoofed TLS configs.
-*   **Result Storage**: Confirmed bypasses are saved in the SQLite `vulnerabilities` table and pushed to notifications automatically.
+Integrate these system scheduler triggers directly into your crontab environment for continuous surveillance.
 
 ```bash
-chaathan wildcard -d target.com --origin-bypass
-```
+# Quiet, bandwidth-controlled daily scan at midnight
+0 0 * * * /usr/local/bin/chaathan wildcard -d target.com --rate-limit 5
 
-### User-Agent Rotation
+# Compare latest scan states automatically every Sunday
+chaathan diff <previous_id> <latest_id>
 
-UA rotation is **enabled by default** (`ua_rotation: true`). Real browser UAs (Chrome, Firefox, Edge, Safari) are rotated on every request, preventing WAF fingerprinting from static tool UAs like `"Nuclei - Open-source project"`.
-
-To disable:
-```yaml
-general:
-  ua_rotation: false
-```
-
-Or set a fixed UA:
-```yaml
-general:
-  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-```
-
-### Proxy Support
-
-```bash
-chaathan wildcard -d target.com --proxy socks5://127.0.0.1:9050    # Tor
-chaathan wildcard -d target.com --proxy http://127.0.0.1:8080       # Burp
-```
-
-Or permanently in config:
-```yaml
-general:
-  proxy: "socks5://127.0.0.1:9050"
-```
-
-Proxy is injected into httpx, nuclei, katana, gospider, ffuf, dalfox, naabu, and the metadata collector. Arjun is skipped (no native proxy flag).
-
-### Global Rate Limiting
-
-```bash
-chaathan wildcard -d target.com --rate-limit 10
-```
-
-Acts as a ceiling — if a tool's per-tool rate is already lower, it stays lower.
-
-### Combined Stealth
-
-```bash
-chaathan wildcard -d target.com \
-  --proxy socks5://127.0.0.1:9050 \
-  --rate-limit 10
-```
-
-With `ua_rotation: true` in config: randomized browser UAs + rotating IPs via Tor + rate-limited traffic.
-
----
-
-## Integrated Tools (28)
-
-| Category | Tools |
-|----------|-------|
-| **Subdomain Discovery** | subfinder, assetfinder, sublist3r, amass |
-| **DNS** | dnsx, shuffledns, massdns |
-| **Web Probing** | httpx, tlsx, naabu |
-| **URL Discovery** | waybackurls, gau, arjun |
-| **Web Crawling** | katana, gospider |
-| **JS Analysis** | GoLinkFinder, hakrawler |
-| **Fuzzing** | ffuf |
-| **Vuln Scanning** | nuclei, dalfox |
-| **Passive Recon** | uncover, metabigor, github-subdomains |
-| **Cloud** | cloud_enum |
-| **Utility** | anew, gf |
-
-```bash
-chaathan tools check          # see what's installed
-chaathan setup                # install missing tools
-chaathan setup --update       # reinstall all tools (force update to latest)
-```
-
----
-
-## Output Structure
-
-```
-~/.chaathan/
-├── config.yaml
-├── chaathan.db                  # SQLite — all results
-├── logs/
-│   └── setup_2024-01-15.log     # Setup install logs
-├── scans/
-│   └── target.com/
-│       ├── intermediate_files/  # Raw outputs from individual tools
-│       ├── final_files/         # Consolidated product files
-│       │   ├── nuclei_vulns.json      # Smart CVE findings
-│       │   ├── nuclei_misconfig.json  # Misconfig/exposure findings
-│       │   ├── nuclei_dast.json       # DAST injection findings
-│       │   ├── gf_secrets_findings.txt
-│       │   └── dalfox_xss.jsonl
-│       ├── SUMMARY.txt
-│       └── REPORT.md
-├── reports/
-│   └── scan_1.md
-└── state/
-    └── scan_1.json              # for resume
-```
-
----
-
-## Continuous Monitoring
-
-```bash
-# Daily scan via cron
-0 0 * * * /usr/local/bin/chaathan wildcard -d target.com
-
-# Weekly diff to spot changes
-chaathan diff <old_scan_id> <new_scan_id>
-
-# Cleanup old data
+# Run a weekly database prune to clean out data older than 7 days
 0 0 * * 0 /usr/local/bin/chaathan delete old 7
 ```
 
 ---
 
-## Project Structure
+## 📦 System Provisioning & Requirements
 
-```
-chaathan-flow/
-├── main.go                    # Entry point
-├── Makefile                   # Build, install, setup, test, vet
-├── cli/                       # Cobra commands (13 files)
-│   ├── root.go                # Global flags, version, init
-│   ├── wildcard.go            # 22-step recon command
-│   ├── company.go             # 3-step company command
-│   ├── setup.go               # Tool installation
-│   ├── scans.go               # Scan management
-│   ├── query.go               # Result queries
-│   ├── report.go              # Report generation
-│   ├── export.go              # Text export
-│   ├── delete.go              # Data cleanup
-│   ├── diff.go                # Scan comparison
-│   ├── status.go              # Dashboard
-│   ├── config.go              # Config management
-│   └── tools_cmd.go           # Tools list/check
-├── pkg/
-│   ├── wildcard_flow/         # 22-step workflow (5 phase files + helpers)
-│   ├── company_flow/          # 3-step workflow (3 step files + flow)
-│   ├── orchestrate/           # Signal handling, infra bootstrap
-│   ├── database/              # SQLite persistence, queries, ROI ranking
-│   ├── report/                # Report templates and multi-format export
-│   ├── scan/                  # Scan state, resume, step definitions
-│   ├── setup/                 # Tool installation (Go, Python, massdns, gf)
-│   ├── tools/                 # Tool registry (28 tools) and wrappers
-│   ├── runner/                # Command execution, retry, docker mode
-│   ├── config/                # YAML config loading and defaults
-│   ├── metadata/              # Host metadata collection
-│   ├── scope/                 # Scope filtering
-│   ├── notify/                # Discord, Slack, Telegram notifications
-│   ├── logger/                # Styled terminal output, colors
-│   ├── progress/              # Spinners and progress bars
-│   ├── paths/                 # ~/.chaathan directory paths
-│   └── utils/                 # File I/O, parsers, export, validation
-```
+Chaathan is packaged as a single static binary. It acts as an orchestration engine, launching and managing 28 third-party security utilities. 
 
-## Makefile
-
-```bash
-make build          # build binary
-make install        # build + install to /usr/local/bin
-make setup          # build + install all tools
-make clean          # remove build artifacts
-make test           # run tests
-make vet            # static analysis
-make tools-check    # check installed tools
-make all            # build + install + setup (one-stop)
-```
+> [!IMPORTANT]  
+> **Host Requirements:** Linux operating system (tested extensively on Ubuntu, Arch, and CachyOS). Go 1.21 or greater and Git must be pre-installed on the host system.
+> All external scanning engines (such as Amass, Nuclei, Httpx, Dalfox) are dynamically compiled and verified during the `make all` bootstrap process (syntax detailed in the Command Center).
 
 ---
 
-## License
+## 🌪️ Reconnaissance Pipelines
 
-MIT
+Chaathan orchestrates complex multi-stage recon chains, consolidating raw outputs into optimized files and structured SQLite database schemas.
 
-## Author
+### A. Wildcard Workflow (22 Steps)
+```
+[Asset Discovery] ──> [DNS & Port Validation] ──> [Content crawling] ──> [Vulnerability Audits] ──> [WAF Fingerprints]
+```
 
-Built by [vishnu303](https://github.com/vishnu303) for the bug bounty community.
+| Phase | Steps | Key Tools Used | Central Artifact Generated |
+| :--- | :--- | :--- | :--- |
+| **Phase 1: Asset Discovery** | 1–5 | `subfinder`, `assetfinder`, `amass`, `uncover`, `github-subdomains` | `all_subdomains.txt` |
+| **Phase 2: Validation** | 6–10 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_hosts.txt` |
+| **Phase 3: Content Discovery** | 11–17 | `katana`, `gospider`, `waybackurls`, `gau`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls_live.txt` |
+| **Phase 4: Vulnerability Scan** | 18–21 | `nuclei` (smart CVE + DAST rules), `dalfox` (targeted XSS scanning) | Saved to SQLite (`vulnerabilities` table) |
+| **Phase 5: Fingerprinting** | 22 | `httpx`, `nuclei` | `tech_fingerprint.json` |
 
-## Disclaimer
+<details>
+<summary>🔍 Expand Detailed 22-Step Pipeline Spec</summary>
 
-This tool is provided for educational and authorized testing purposes only. The author is not responsible for any misuse, damage, or illegal activities caused by usage of this tool. Use at your own risk.
+| Step | Engine | Purpose / Action | Skip Trigger Flag |
+| :--- | :--- | :--- | :--- |
+| 1 | `subfinder`, `assetfinder`, `sublist3r` | Passive domain enumeration | - |
+| 2 | `amass` | High-depth active DNS brute-forcing | `--skip-amass` |
+| 3 | `github-subdomains` | Scraping Github public repos for references | Needs `--github-token` |
+| 4 | `uncover` | Passive search engine dorking (Shodan, FOFA) | `--skip-uncover` |
+| 5 | `hakrawler` | Extracting assets hidden in JS modules | `--skip-hakrawler` |
+| 6 | `dnsx` | Subdomain validation & initial DNS filtering | - |
+| 7 | `shuffledns` | Active DNS wild-card filtering and resolution | `--skip-shuffledns` |
+| 8 | `httpx` | Live web application probing and tech fingerprinting | - |
+| 9 | `tlsx` | SSL/TLS certificate analysis & SAN mining | `--skip-tlsx` |
+| 10 | `naabu` | Multi-port validation scanning across discoveries | `--skip-naabu` |
+| 11 | `waybackurls`, `gau` | Querying historical web archives for endpoints | - |
+| 12 | `katana`, `gospider` | Dynamic web spiders crawling client assets | `--skip-crawl` |
+| 13 | `GoLinkFinder` | Analyzing static and dynamic JS scripts for URLs | - |
+| 14 | `arjun` | Query parameter and hidden field discovery | `--skip-arjun` |
+| 15 | `httpx` | Live verification of extracted discovery links | - |
+| 16 | `httpx`, `gf` | Scanning JS packages for high-risk hardcoded secrets | - |
+| 17 | `ffuf` | Focused path discovery using wordlists | Needs `--wordlist` |
+| 18 | `nuclei` | General infra misconfiguration & public CVE auditing | `--skip-nuclei` |
+| 19 | `nuclei` | Dynamic application testing (DAST) payload fuzzing | `--skip-nuclei` |
+| 20 | `nuclei (takeovers)` | Proactive subdomain takeover analysis | `--skip-takeovers` |
+| 21 | `dalfox` | High-efficiency parameterized cross-site scripting (XSS) audit | `--skip-dalfox` |
+| 22 | `httpx`, `nuclei` | Direct technology classification & WAF identification | `--skip-fingerprint` |
+
+</details>
+
+### B. Company Discovery Workflow (3 Steps)
+Automates target profiling and corporate footprinting before launching active domain tests.
+
+| Step | Utility | Scope of Action | Skip Trigger Flag |
+| :--- | :--- | :--- | :--- |
+| **1** | `metabigor` | Discovers network ranges, ASN prefixes, and routing tables | `--skip-metabigor` |
+| **2** | `amass intel` | Performs reverse WHOIS lookups to discover root domain registrations | `--skip-amass-intel` |
+| **3** | `cloud_enum` | Audits public cloud storage infrastructure (AWS, GCP, Azure) | `--skip-cloud-enum` |
+
+---
+
+## 🛡️ Enterprise Stealth & WAF Bypass Playbook
+
+Chaathan is designed to traverse hostile, firewalled networks. It includes granular controls for request personalization, proxy routing, and firewall evasion. Detailed CLI flag invocations are cataloged inside the **Consolidated Command Center** under *Reconnaissance & Scanning*.
+
+### 🔑 Authenticated State Auditing
+Allows you to audit deeply nested authenticated application zones (private APIs, parameterized endpoints, gated directories). You can feed complex session cookies (`--cookie`), customized request headers (`-H`), and shorthand OAuth authorization tokens (`--token`) directly into Chaathan. The engine transparently parses these structures and cascades them down to sub-executables like `httpx`, `katana`, `nuclei`, and `dalfox`.
+
+### 🛰️ WAF & CDN Origin IP Bypass
+Modern web applications sit behind front-end shields like Cloudflare, Akamai, and AWS CloudFront. By specifying the `--origin-bypass` switch, Chaathan actively attempts to bypass these filters:
+1. **Host Mapping:** Compiles all subdomains currently resolving to known CDN/WAF IP ranges.
+2. **Origin Discovery:** Extracts candidate non-WAF backend IP addresses discovered during the earlier stages of the scan.
+3. **Validation Probes:** Performs rapid concurrent TLS handshake probes directly against candidate origin IPs while spoofing the target domain's `Host` header, validating if the origin serves unshielded data.
+4. **Relational Tracking:** Automatically stores any validated edge bypasses in the SQLite database and triggers real-time alerts.
+
+### 🕴️ Complete Anonymization & Routing
+- **User-Agent Rotation:** Enabled natively by default (`ua_rotation: true` in config). Chaathan dynamically swaps standard command-line user-agent headers for authentic, rotating desktop and mobile browser signatures (Chrome, Firefox, Safari) on every request, evading signature-based blocking.
+- **Proxy Cascading:** Pipe all underlying scanning traffic through an external gateway. Pass SOCKS5 (e.g., Tor) or HTTP (e.g., Burp Suite) configurations to route execution, audit logs, or debugging sessions.
+
+---
+
+## ⚖️ Legal & Disclaimer
+
+**Disclaimer:** This utility is designed strictly for authorized penetration testing, vulnerability assessment, and approved bug bounty participation. The author assumes absolutely zero liability for unauthorized exploitation, service degradation, or system misuse. Ensure explicit written consent is secured before directing high-volume testing assets at external target nodes.
+
+**License:** MIT License. Developed by [vishnu303](https://github.com/vishnu303).
