@@ -14,15 +14,16 @@ Activate this skill for any normal development work in this repository.
 ```
 main.go              → paths.Init(), defer database.Close(), cli.Execute()
 cli/                 → Cobra commands, flag parsing, delegates to pkg/
-pkg/wildcard_flow/   → 22-step domain recon (5 files: asset_discovery, validation,
+pkg/wildcard_flow/   → 23-step domain recon (6 files: proxy_scraping, asset_discovery, validation,
                        content_discovery, vulnerability_scanning, fingerprinting)
 pkg/company_flow/    → 3-step company recon (asn_discovery, domain_discovery, cloud_enum)
 pkg/orchestrate/     → signal handling, infra bootstrap (runner + toolbox + notifier)
 pkg/database/        → SQLite persistence, queries, ROI ranking, metadata storage
 pkg/report/          → report assembly and multi-format export (md/json/html/txt)
 pkg/scan/            → scan state, resume, WildcardSteps/CompanySteps definitions
-pkg/setup/           → external tool installation (go_tools, python_tools, massdns, gf_patterns)
-pkg/tools/           → tool registry (28 tools) and runtime wrappers
+pkg/setup/           → external tool installation (go_tools, python_tools, massdns, gf_patterns, proxy_tools)
+pkg/tools/           → tool registry (30 tools) and runtime wrappers
+pkg/proxy_scraping/   → automated proxy scraping (proxy-scraper-checker) + IP rotation (mubeng)
 pkg/runner/          → command execution, retry, docker mode, timeout, UA/proxy injection
 pkg/config/          → YAML config loading, defaults, rate limits
 pkg/metadata/        → host metadata collection (CSP, headers, tech fingerprints)

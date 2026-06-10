@@ -11,7 +11,7 @@
 
 ## ⚡ Core Capabilities
 
-*   **Stateful 22-Step Wildcard Recon**: End-to-end domain discovery, HTTP probing, historical URL extraction, vulnerability auditing, and WAF fingerprinting.
+*   **Stateful 23-Step Wildcard Recon**: End-to-end domain discovery, HTTP probing, historical URL extraction, vulnerability auditing, and WAF fingerprinting.
 *   **Stateful 3-Step Company Discovery**: Network ASN mappings, reverse-WHOIS root enumeration, and public cloud asset discovery.
 *   **Universal WAF/CDN Origin Bypass**: Automatically maps WAF-shielded hosts, tests candidate origin IPs, and validates direct origin routing with browser-spoofed headers.
 *   **Relational Intelligence**: Stores all assets, open ports, vulnerabilities, URLs, and API endpoints in a high-speed local SQLite database.
@@ -34,10 +34,10 @@ Run these targets from the root of the cloned repository directory to compile th
 git clone https://github.com/vishnu303/chaathan.git && cd chaathan
 
 # Orchestration targets
-make all            # Installs chaathan binary and provisions all 28 tools (Recommended)
+make all            # Installs chaathan binary and provisions all 30 tools (Recommended)
 make build          # Compiles the single chaathan binary in the local directory
 make install        # Installs the compiled binary globally to /usr/local/bin
-make setup          # Provisions and compiles all 28 third-party tools
+make setup          # Provisions and compiles all 30 third-party tools
 make test           # Executes the Go unit test suite
 make vet            # Performs static analysis and code verification
 make clean          # Cleans up local compilation and build artifacts
@@ -50,6 +50,8 @@ make clean          # Cleans up local compilation and build artifacts
 | **Standard Scan** | `chaathan wildcard -d target.com` |
 | **Fast Scan** *(Skip heavy DNS/vuln/port scans)* | `chaathan wildcard -d target.com --skip-amass --skip-naabu --skip-nuclei` |
 | **Stealth Scan** *(Proxy + Rate limit)* | `chaathan wildcard -d target.com --proxy socks5://127.0.0.1:9050 --rate-limit 10` |
+| **Auto-Proxy Scan** *(Free rotating proxies)* | `chaathan wildcard -d target.com --auto-proxy` |
+| **Auto-Proxy + Stealth** | `chaathan wildcard -d target.com --auto-proxy --rate-limit 10` |
 | **Stateful Resume** | `chaathan wildcard -d target.com --resume <scan_id>` |
 | **Session-Authenticated Scan** | `chaathan wildcard -d target.com --cookie "PHPSESSID=abc; auth=1" -H "X-Client: Pro" --token "jwt_value"` |
 | **Origin IP Bypass Scan** | `chaathan wildcard -d target.com --origin-bypass` |
@@ -100,8 +102,8 @@ chaathan delete list                        # Catalog and list all scans flagged
 
 # Tooling Checks & Provisioning
 chaathan setup                              # Install missing external third-party dependencies
-chaathan setup --update                     # Force rebuild and update all 28 third-party tools to latest
-chaathan tools list                         # Show categorization list of all 28 integrated engines
+chaathan setup --update                     # Force rebuild and update all 30 third-party tools to latest
+chaathan tools list                         # Show categorization list of all 30 integrated engines
 chaathan tools check                        # Perform disk audits and check binary paths for all tools
 ```
 
@@ -142,7 +144,7 @@ chaathan diff <previous_id> <latest_id>
 
 ## 📦 System Provisioning & Requirements
 
-Chaathan is packaged as a single static binary. It acts as an orchestration engine, launching and managing 28 third-party security utilities. 
+Chaathan is packaged as a single static binary. It acts as an orchestration engine, launching and managing 30 third-party security utilities.
 
 > [!IMPORTANT]  
 > **Host Requirements:** Linux operating system (tested extensively on Ubuntu, Arch, and CachyOS). Go 1.21 or greater and Git must be pre-installed on the host system.
@@ -154,46 +156,48 @@ Chaathan is packaged as a single static binary. It acts as an orchestration engi
 
 Chaathan orchestrates complex multi-stage recon chains, consolidating raw outputs into optimized files and structured SQLite database schemas.
 
-### A. Wildcard Workflow (22 Steps)
+### A. Wildcard Workflow (23 Steps)
 ```
-[Asset Discovery] ──> [DNS & Port Validation] ──> [Content crawling] ──> [Vulnerability Audits] ──> [WAF Fingerprints]
+[Proxy Scraping] ──> [Asset Discovery] ──> [DNS & Port Validation] ──> [Content crawling] ──> [Vulnerability Audits] ──> [WAF Fingerprints]
 ```
 
 | Phase | Steps | Key Tools Used | Central Artifact Generated |
 | :--- | :--- | :--- | :--- |
-| **Phase 1: Asset Discovery** | 1–5 | `subfinder`, `assetfinder`, `amass`, `uncover`, `github-subdomains` | `all_subdomains.txt` |
-| **Phase 2: Validation** | 6–10 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_hosts.txt` |
-| **Phase 3: Content Discovery** | 11–17 | `katana`, `gospider`, `waybackurls`, `gau`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls_live.txt` |
-| **Phase 4: Vulnerability Scan** | 18–21 | `nuclei` (smart CVE + DAST rules), `dalfox` (targeted XSS scanning) | Saved to SQLite (`vulnerabilities` table) |
-| **Phase 5: Fingerprinting** | 22 | `httpx`, `nuclei` | `tech_fingerprint.json` |
+| **Phase 0: Proxy Scraping** | 1 | `proxy-scraper-checker`, `mubeng` | `proxy_pool.txt` + rotating proxy server |
+| **Phase 1: Asset Discovery** | 2–6 | `subfinder`, `assetfinder`, `amass`, `uncover`, `github-subdomains` | `all_subdomains.txt` |
+| **Phase 2: Validation** | 7–11 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_hosts.txt` |
+| **Phase 3: Content Discovery** | 12–18 | `katana`, `gospider`, `waybackurls`, `gau`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls_live.txt` |
+| **Phase 4: Vulnerability Scan** | 19–22 | `nuclei` (smart CVE + DAST rules), `dalfox` (targeted XSS scanning) | Saved to SQLite (`vulnerabilities` table) |
+| **Phase 5: Fingerprinting** | 23 | `httpx`, `nuclei` | `tech_fingerprint.json` |
 
 <details>
-<summary>🔍 Expand Detailed 22-Step Pipeline Spec</summary>
+<summary>🔍 Expand Detailed 23-Step Pipeline Spec</summary>
 
 | Step | Engine | Purpose / Action | Skip Trigger Flag |
 | :--- | :--- | :--- | :--- |
-| 1 | `subfinder`, `assetfinder`, `sublist3r` | Passive domain enumeration | - |
-| 2 | `amass` | High-depth active DNS brute-forcing | `--skip-amass` |
-| 3 | `github-subdomains` | Scraping Github public repos for references | Needs `--github-token` |
-| 4 | `uncover` | Passive search engine dorking (Shodan, FOFA) | `--skip-uncover` |
-| 5 | `hakrawler` | Extracting assets hidden in JS modules | `--skip-hakrawler` |
-| 6 | `dnsx` | Subdomain validation & initial DNS filtering | - |
-| 7 | `shuffledns` | Active DNS wild-card filtering and resolution | `--skip-shuffledns` |
-| 8 | `httpx` | Live web application probing and tech fingerprinting | - |
-| 9 | `tlsx` | SSL/TLS certificate analysis & SAN mining | `--skip-tlsx` |
-| 10 | `naabu` | Multi-port validation scanning across discoveries | `--skip-naabu` |
-| 11 | `waybackurls`, `gau` | Querying historical web archives for endpoints | - |
-| 12 | `katana`, `gospider` | Dynamic web spiders crawling client assets | `--skip-crawl` |
-| 13 | `GoLinkFinder` | Analyzing static and dynamic JS scripts for URLs | - |
-| 14 | `arjun` | Query parameter and hidden field discovery | `--skip-arjun` |
-| 15 | `httpx` | Live verification of extracted discovery links | - |
-| 16 | `httpx`, `gf` | Scanning JS packages for high-risk hardcoded secrets | - |
-| 17 | `ffuf` | Focused path discovery using wordlists | Needs `--wordlist` |
-| 18 | `nuclei` | General infra misconfiguration & public CVE auditing | `--skip-nuclei` |
-| 19 | `nuclei` | Dynamic application testing (DAST) payload fuzzing | `--skip-nuclei` |
-| 20 | `nuclei (takeovers)` | Proactive subdomain takeover analysis | `--skip-takeovers` |
-| 21 | `dalfox` | High-efficiency parameterized cross-site scripting (XSS) audit | `--skip-dalfox` |
-| 22 | `httpx`, `nuclei` | Direct technology classification & WAF identification | `--skip-fingerprint` |
+| 1 | `proxy-scraper-checker`, `mubeng` | Auto-scrape free proxies, validate against target, start rotating proxy | `--auto-proxy` to enable |
+| 2 | `subfinder`, `assetfinder`, `sublist3r` | Passive domain enumeration | - |
+| 3 | `amass` | High-depth active DNS brute-forcing | `--skip-amass` |
+| 4 | `github-subdomains` | Scraping Github public repos for references | Needs `--github-token` |
+| 5 | `uncover` | Passive search engine dorking (Shodan, FOFA) | `--skip-uncover` |
+| 6 | `hakrawler` | Extracting assets hidden in JS modules | `--skip-hakrawler` |
+| 7 | `dnsx` | Subdomain validation & initial DNS filtering | - |
+| 8 | `shuffledns` | Active DNS wild-card filtering and resolution | `--skip-shuffledns` |
+| 9 | `httpx` | Live web application probing and tech fingerprinting | - |
+| 10 | `tlsx` | SSL/TLS certificate analysis & SAN mining | `--skip-tlsx` |
+| 11 | `naabu` | Multi-port validation scanning across discoveries | `--skip-naabu` |
+| 12 | `waybackurls`, `gau` | Querying historical web archives for endpoints | - |
+| 13 | `katana`, `gospider` | Dynamic web spiders crawling client assets | `--skip-crawl` |
+| 14 | `GoLinkFinder` | Analyzing static and dynamic JS scripts for URLs | - |
+| 15 | `arjun` | Query parameter and hidden field discovery | `--skip-arjun` |
+| 16 | `httpx` | Live verification of extracted discovery links | - |
+| 17 | `httpx`, `gf` | Scanning JS packages for high-risk hardcoded secrets | - |
+| 18 | `ffuf` | Focused path discovery using wordlists | Needs `--wordlist` |
+| 19 | `nuclei` | General infra misconfiguration & public CVE auditing | `--skip-nuclei` |
+| 20 | `nuclei` | Dynamic application testing (DAST) payload fuzzing | `--skip-nuclei` |
+| 21 | `nuclei (takeovers)` | Proactive subdomain takeover analysis | `--skip-takeovers` |
+| 22 | `dalfox` | High-efficiency parameterized cross-site scripting (XSS) audit | `--skip-dalfox` |
+| 23 | `httpx`, `nuclei` | Direct technology classification & WAF identification | `--skip-fingerprint` |
 
 </details>
 
@@ -225,6 +229,7 @@ Modern web applications sit behind front-end shields like Cloudflare, Akamai, an
 ### 🕴️ Complete Anonymization & Routing
 - **User-Agent Rotation:** Enabled natively by default (`ua_rotation: true` in config). Chaathan dynamically swaps standard command-line user-agent headers for authentic, rotating desktop and mobile browser signatures (Chrome, Firefox, Safari) on every request, evading signature-based blocking.
 - **Proxy Cascading:** Pipe all underlying scanning traffic through an external gateway. Pass SOCKS5 (e.g., Tor) or HTTP (e.g., Burp Suite) configurations to route execution, audit logs, or debugging sessions.
+- **Automated Proxy Rotation (`--auto-proxy`):** Automatically scrapes and validates free proxies from 100+ public sources against the target domain using `proxy-scraper-checker`, then starts `mubeng` as a local rotating proxy server. Every outgoing request from every tool uses a different exit IP address — no manual proxy configuration needed. Dead proxies are automatically removed from the pool.
 
 ---
 

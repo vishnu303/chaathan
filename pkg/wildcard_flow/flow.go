@@ -21,6 +21,7 @@ import (
 	"github.com/vishnu303/chaathan/pkg/notify"
 	"github.com/vishnu303/chaathan/pkg/orchestrate"
 	"github.com/vishnu303/chaathan/pkg/paths"
+	"github.com/vishnu303/chaathan/pkg/proxy_scraping"
 	"github.com/vishnu303/chaathan/pkg/report"
 	"github.com/vishnu303/chaathan/pkg/scan"
 	"github.com/vishnu303/chaathan/pkg/scope"
@@ -78,6 +79,9 @@ type RunConfig struct {
 	CustomHeaders      []string
 	CustomToken        string
 	EnableOriginBypass bool
+
+	// Proxy automation
+	AutoProxy bool
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -130,6 +134,8 @@ type Files struct {
 	NucleiMisconfigOut string
 	NucleiDASTOut      string
 	TakeoverCandidates string
+	ProxyScrapingConfig string // intermediate_files/proxy_scraping_config.toml
+	ProxyPool          string // intermediate_files/proxy_pool.txt
 }
 
 // newFiles builds all output paths from the result directory.
@@ -189,6 +195,8 @@ func newFiles(dir string) Files {
 		NucleiMisconfigOut: jf("nuclei_misconfig.json"),
 		NucleiDASTOut:    jf("nuclei_dast.json"),
 		TakeoverCandidates: j("takeover_candidates.txt"),
+		ProxyScrapingConfig: j("proxy_scraping_config.toml"),
+		ProxyPool:          j("proxy_pool.txt"),
 	}
 }
 
@@ -230,6 +238,9 @@ type Ctx struct {
 
 	// Log file path (set when SaveLog is true and file opened successfully)
 	LogFilePath string
+
+	// Proxy rotation
+	Rotator *proxy_scraping.Rotator // mubeng background process (nil if not using auto-proxy)
 }
 
 // cancelled returns true when the parent context has been cancelled.
@@ -304,6 +315,7 @@ func Run(cfg RunConfig) error {
 		"wordlist":           cfg.WordlistPath,
 		"dns_wordlist":       cfg.DNSWordlistPath,
 		"github":             cfg.GitHubToken != "",
+		"auto_proxy":         cfg.AutoProxy,
 	})
 
 	dbScan, err := database.CreateScan(cfg.Domain, "wildcard", cfg.ResultDir, string(configJSON))
@@ -422,7 +434,10 @@ func Run(cfg RunConfig) error {
 		name string
 		fn   func(*Ctx) bool
 	}{
-		// Phase 1 — Asset Discovery (Steps 1–5)
+		// Phase 0 — Proxy Scraping
+		{"proxy_scraping", stepProxyScraping},
+
+		// Phase 1 — Asset Discovery (Steps 2–6)
 		{"passive_enum", stepPassiveEnum},
 		{"active_enum", stepActiveEnum},
 		{"github_recon", stepGitHubRecon},
@@ -518,6 +533,8 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	}
 
 	switch stepName {
+	case "proxy_scraping":
+		return 0 // infrastructure setup step, no findings
 	case "passive_enum":
 		// Rather than raw lists, the best representation of this step is often the raw results concatenated.
 		// Subdomains are consolidated later, but we can count the underlying outputs.
@@ -576,6 +593,11 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 func finalizeScan(c *Ctx, status string) {
 	duration := time.Since(c.StartTime)
 
+	// Kill mubeng rotating proxy if running
+	if c.Rotator != nil {
+		c.Rotator.Stop()
+		logger.Info("Rotating proxy server stopped")
+	}
 	if c.ScanID > 0 {
 		database.UpdateScanStatus(c.ScanID, status)
 	}

@@ -91,6 +91,11 @@ func Run(cfg RunConfig) {
 	totalSkipped += int32(s)
 	totalFailed += int32(f)
 
+	i, s, f = installProxyToolsSection()
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
 	writeSetupLog("=== Setup Complete ===")
 	writeSetupLog("Duration: %s", time.Since(start).Round(time.Second))
 	writeSetupLog("Installed: %d, Skipped: %d, Failed: %d", totalInstalled, totalSkipped, totalFailed)

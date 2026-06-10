@@ -12,7 +12,7 @@ chaathan-flow/
 ├── Makefile                   Build, install, setup, test, vet targets
 ├── cli/                       Cobra commands, flags, argument parsing
 │   ├── root.go                Global flags, version, PersistentPreRun init
-│   ├── wildcard.go            22-step domain recon command
+│   ├── wildcard.go            23-step domain recon command
 │   ├── company.go             3-step company recon command
 │   ├── setup.go               Tool installation entry
 │   ├── scans.go               Scan list/show/resume/delete
@@ -25,14 +25,15 @@ chaathan-flow/
 │   ├── config.go              Config management commands
 │   └── tools_cmd.go           Tools list/check commands
 ├── pkg/
-│   ├── wildcard_flow/         22-step domain recon workflow (5 phase files)
+│   ├── wildcard_flow/         23-step domain recon workflow (6 phase files)
 │   ├── company_flow/          3-step company recon workflow
 │   ├── orchestrate/           Signal handling, infra bootstrap (runner/toolbox/notifier)
 │   ├── database/              SQLite persistence, queries, ROI ranking, metadata
 │   ├── report/                Report assembly and multi-format export
 │   ├── scan/                  Scan state, resume, step definitions
 │   ├── setup/                 External tool installation and verification
-│   ├── tools/                 Tool registry and wrappers (28 tools)
+│   ├── tools/                 Tool registry and wrappers (30 tools)
+│   ├── proxy_scraping/         Automated proxy scraping (proxy-scraper-checker) and IP rotation (mubeng)
 │   ├── runner/                External command execution, retry, docker mode
 │   ├── config/                YAML config loading and defaults
 │   ├── metadata/              Host metadata collection (CSP, headers, tech)

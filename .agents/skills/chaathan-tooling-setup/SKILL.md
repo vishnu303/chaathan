@@ -22,7 +22,8 @@ Activate this skill for tasks involving external binary installation, setup beha
 | `pkg/setup/gf_patterns.go` | gf pattern installation |
 | `pkg/setup/prereqs.go` | System prerequisite checks |
 | `pkg/setup/log.go` | Setup log file management |
-| `pkg/tools/registry.go` | Canonical tool catalogue (28 tools) |
+| `pkg/setup/proxy_tools.go` | Proxy tool installation (proxy-scraper-checker binary + mubeng via go install) |
+| `pkg/tools/registry.go` | Canonical tool catalogue (30 tools) |
 | `pkg/tools/tools.go` | Runtime tool wrappers and ToolBox (includes `RunNucleiSmartCVE`, `RunNucleiMisconfig`, `RunNucleiDAST`, `RunNucleiTakeovers`) |
 | `pkg/runner/runner.go` | Command execution, retry, docker, UA/proxy |
 | `pkg/config/config.go` | Per-tool config parameters (NucleiConfig, DalfoxConfig, etc.) |
@@ -43,6 +44,7 @@ Activate this skill for tasks involving external binary installation, setup beha
 | Recon | uncover, metabigor, github-subdomains |
 | Cloud | cloud_enum |
 | Util | anew, gf |
+| Proxy | proxy-scraper-checker (Rust binary), mubeng (Go, `go install`) |
 
 ## When adding or changing a tool
 

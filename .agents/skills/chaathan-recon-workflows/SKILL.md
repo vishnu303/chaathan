@@ -23,62 +23,79 @@ Activate this skill when the task touches recon pipeline behavior rather than ge
 
 Same pattern, simpler: 3 steps, each in its own file (`asn_discovery.go`, `domain_discovery.go`, `cloud_enum.go`).
 
-## 5-Phase wildcard workflow (22 steps)
+## 6-Phase wildcard workflow (23 steps)
 
 ```
-Phase 1 — Asset Discovery     (Steps 1–5)   in: domain         out: all_subdomains.txt
-Phase 2 — Validation           (Steps 6–10)  in: subdomains     out: live_hosts.txt
-Phase 3 — Content Discovery    (Steps 11–17) in: live hosts     out: all_urls_live.txt
-Phase 4 — Vulnerability Scan   (Steps 18–21) in: hosts + URLs   out: DB findings
-Phase 5 — Fingerprinting       (Step 22)     in: live hosts     out: Tech/WAF JSON
+Phase 0 — Proxy Scraping       (Step 1)      in: domain         out: proxy_pool.txt + mubeng server
+Phase 1 — Asset Discovery     (Steps 2–6)   in: domain         out: all_subdomains.txt
+Phase 2 — Validation           (Steps 7–11)  in: subdomains     out: live_hosts.txt
+Phase 3 — Content Discovery    (Steps 12–18) in: live hosts     out: all_urls_live.txt
+Phase 4 — Vulnerability Scan   (Steps 19–22) in: hosts + URLs   out: DB findings
+Phase 5 — Fingerprinting       (Step 23)     in: live hosts     out: Tech/WAF JSON
 ```
+
+### Phase 0 — Proxy Scraping (`proxy_scraping.go`)
+
+| Step | Name | Tool(s) | Notes |
+|------|------|---------|-------|
+| 1 | `proxy_scraping` | proxy-scraper-checker + mubeng | `--auto-proxy`; skipped if `--proxy` set |
+
+**How it works:**
+1. `proxy-scraper-checker` scrapes 100+ public proxy sources and validates each against `https://<target-domain>` (10-min default timeout).
+2. Valid proxies are sorted by speed and written to `proxy_pool.txt`.
+3. `mubeng` starts as a background rotating proxy on `127.0.0.1:<random-port>` — every request uses a different exit IP (round-robin/random).
+4. `c.Proxy` and `c.Cfg.General.Proxy` are set to the mubeng local address, so all existing `appendProxy()` plumbing picks it up with zero changes to tool wrappers.
+5. mubeng auto-removes dead proxies (`--remove-on-error`) and retries with next proxy on failure (`--rotate-on-error`).
+6. mubeng is killed in `finalizeScan()` on scan completion or cancellation.
+
+**Failure mode:** Non-fatal — if tools are missing or no proxies found, the scan continues without proxy.
 
 ### Phase 1 — Asset Discovery (`asset_discovery.go`)
 
 | Step | Name | Tool(s) | Notes |
 |------|------|---------|-------|
-| 1 | `passive_enum` | Subfinder, Assetfinder, Sublist3r (parallel) | — |
-| 2 | `active_enum` | Amass | `--skip-amass` |
-| 3 | `github_recon` | github-subdomains | needs `--github-token` |
-| 4 | `search_engine_recon` | Uncover | `--skip-uncover` |
-| 5 | `js_subdomain_discovery` | Hakrawler | `--skip-hakrawler` |
+| 2 | `passive_enum` | Subfinder, Assetfinder, Sublist3r (parallel) | — |
+| 3 | `active_enum` | Amass | `--skip-amass` |
+| 4 | `github_recon` | github-subdomains | needs `--github-token` |
+| 5 | `search_engine_recon` | Uncover | `--skip-uncover` |
+| 6 | `js_subdomain_discovery` | Hakrawler | `--skip-hakrawler` |
 
 ### Phase 2 — Validation (`validation.go`)
 
 | Step | Name | Tool(s) | Notes |
 |------|------|---------|-------|
-| 6 | `dns_resolution` | DNSx | consolidation; early-returns on merge failure |
-| 7 | `dns_bruteforce` | ShuffleDNS | `--skip-shuffledns` |
-| 8 | `http_probing` | Httpx | live host probing; triggers optional `RunOriginIPBypass` if `--origin-bypass` is enabled |
-| 9 | `tls_analysis` | tlsx | `--skip-tlsx`; calls `metadata.CollectHostMetadata` after success |
-| 10 | `port_scanning` | Naabu | `--skip-naabu` |
+| 7 | `dns_resolution` | DNSx | consolidation; early-returns on merge failure |
+| 8 | `dns_bruteforce` | ShuffleDNS | `--skip-shuffledns` |
+| 9 | `http_probing` | Httpx | live host probing; triggers optional `RunOriginIPBypass` if `--origin-bypass` is enabled |
+| 10 | `tls_analysis` | tlsx | `--skip-tlsx`; calls `metadata.CollectHostMetadata` after success |
+| 11 | `port_scanning` | Naabu | `--skip-naabu` |
 
 ### Phase 3 — Content Discovery (`content_discovery.go`)
 
 | Step | Name | Tool(s) | Notes |
 |------|------|---------|-------|
-| 11 | `url_discovery` | Waybackurls + GAU (parallel) | **runs here, not Phase 1** |
-| 12 | `web_crawling` | Katana + GoSpider (parallel) | `--skip-crawl` |
-| 13 | `js_analysis` | LinkFinder | — |
-| 14 | `param_discovery` | Arjun | `--skip-arjun` |
-| 15 | `url_consolidation` | Httpx | live check + ROI metadata enrichment |
-| 16 | `js_secret_scan` | gf + JS download | downloads JS files, runs gf patterns |
-| 17 | `dir_fuzzing` | ffuf | needs `--wordlist` |
+| 12 | `url_discovery` | Waybackurls + GAU (parallel) | **runs here, not Phase 1** |
+| 13 | `web_crawling` | Katana + GoSpider (parallel) | `--skip-crawl` |
+| 14 | `js_analysis` | LinkFinder | — |
+| 15 | `param_discovery` | Arjun | `--skip-arjun` |
+| 16 | `url_consolidation` | Httpx | live check + ROI metadata enrichment |
+| 17 | `js_secret_scan` | gf + JS download | downloads JS files, runs gf patterns |
+| 18 | `dir_fuzzing` | ffuf | needs `--wordlist` |
 
 ### Phase 4 — Vulnerability Scanning (`vulnerability_scanning.go`)
 
 | Step | Name | Tool(s) | Notes |
 |------|------|---------|-------|
-| 18 | `vuln_scanning` | Nuclei (two passes) | `--skip-nuclei`; Pass A: `-as` automatic scan (tech-targeted CVEs via Wappalyzer), Pass B: misconfig/exposure templates (tech-agnostic) |
-| 19 | `vuln_scanning_urls` | Nuclei (DAST) | `--skip-nuclei`; uses `-dast` fuzzing mode with real attack payloads; input scope-filtered + deduped |
-| 20 | `takeover_detection` | Nuclei (takeover templates) | `--skip-takeovers`; input CNAME-filtered from DNSx output (falls back to all subs) |
-| 21 | `xss_scanning` | Dalfox | `--skip-dalfox`; input scope-filtered, deduped by path, capped at `dalfox.max_urls` (default 500) |
+| 19 | `vuln_scanning` | Nuclei (two passes) | `--skip-nuclei`; Pass A: `-as` automatic scan (tech-targeted CVEs via Wappalyzer), Pass B: misconfig/exposure templates (tech-agnostic) |
+| 20 | `vuln_scanning_urls` | Nuclei (DAST) | `--skip-nuclei`; uses `-dast` fuzzing mode with real attack payloads; input scope-filtered + deduped |
+| 21 | `takeover_detection` | Nuclei (takeover templates) | `--skip-takeovers`; input CNAME-filtered from DNSx output (falls back to all subs) |
+| 22 | `xss_scanning` | Dalfox | `--skip-dalfox`; input scope-filtered, deduped by path, capped at `dalfox.max_urls` (default 500) |
 
 ### Phase 5 — Fingerprinting (`fingerprinting.go`)
 
 | Step | Name | Tool(s) | Notes |
 |------|------|---------|-------|
-| 22 | `tech_waf_fingerprinting` | Httpx, Nuclei | `--skip-fingerprint`; runs last to avoid early WAF blocks |
+| 23 | `tech_waf_fingerprinting` | Httpx, Nuclei | `--skip-fingerprint`; runs last to avoid early WAF blocks |
 
 ### Company flow (3 steps)
 
