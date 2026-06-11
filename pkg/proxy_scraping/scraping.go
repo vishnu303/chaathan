@@ -87,14 +87,15 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	defer brokerCancel()
 
 	args := []string{
+		"--max-conn", "200",
 		"find",
 		"--outfile", rawFile,
 		"--limit", fmt.Sprintf("%d", limit),
 		"--strict",
-		"--max-conn", "200",
 	}
-	for _, t := range types {
-		args = append(args, "--types", t)
+	if len(types) > 0 {
+		args = append(args, "--types")
+		args = append(args, types...)
 	}
 	logger.FileDebug("proxybroker args: %v", args)
 
