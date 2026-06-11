@@ -31,9 +31,6 @@ var pyTools = []struct {
 	{"cloud_enum", "git+https://github.com/initstring/cloud_enum.git", "cloud_enum.py", "cloud_enum"},
 	{"sublist3r", "sublist3r", "sublist3r", "sublist3r"},
 	{"arjun", "arjun", "arjun", "arjun"},
-	// proxybroker2: installed from git (no stable PyPI). CLI binary = proxybroker.
-	// The pip entry point is named 'proxybroker', not 'proxybroker2'.
-	{"proxybroker", "git+https://github.com/bluet/proxybroker2.git", "proxybroker", "proxybroker"},
 }
 
 

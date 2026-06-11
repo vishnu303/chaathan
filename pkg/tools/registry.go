@@ -61,7 +61,7 @@ var AllTools = []ToolInfo{
 	{"gf", "Util", "Pattern-based URL/param filtering", false, "github.com/tomnomnom/gf@latest"},
 
 	// Proxy Automation
-	{"proxybroker", "Proxy", "Proxy scraper & checker (Python, pip)", false, ""},
+	{"proxy-scraper-checker", "Proxy", "Proxy scraper and checker (Rust)", false, ""},
 	{"mubeng", "Proxy", "Proxy IP rotator (Go)", false, "github.com/mubeng/mubeng@latest"},
 }
 

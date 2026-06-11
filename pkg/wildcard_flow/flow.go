@@ -241,8 +241,8 @@ type Ctx struct {
 
 	// Proxy rotation
 	Rotator          *proxy_scraping.Rotator // mubeng background process (nil if not using auto-proxy)
-	ProxyTotalScraped int                    // total proxies found by proxybroker
-	ProxyTotalValid   int                    // proxies that passed mubeng WAF check
+	ProxyTotalScraped int                    // total proxies found by proxy-scraper-checker
+	ProxyTotalValid   int                    // proxies that passed target domain validation
 
 	// Findings
 	FfufTotalFindings int // total valid fuzzing discoveries

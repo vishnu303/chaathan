@@ -48,10 +48,11 @@ func stepProxyScraping(c *Ctx) bool {
 		return c.cancelled()
 	}
 
-	logger.StepHeader("Proxy Scraping (proxybroker + mubeng)")
+	logger.StepHeader("Proxy Scraping (proxy-scraper-checker + mubeng)")
 
 	// ── Read config values ──────────────────────────────────
 	timeoutMin := 10
+	maxConcurrent := 256
 	proxyTypes := []string{"socks5", "http", "socks4"}
 	rotateMethod := "random"
 	rotateEvery := 1
@@ -62,8 +63,7 @@ func stepProxyScraping(c *Ctx) bool {
 			timeoutMin = ph.TimeoutMin
 		}
 		if ph.MaxConcurrent > 0 {
-			// MaxConcurrent maps to MaxProxies for proxybroker (limit, not concurrency)
-			_ = ph.MaxConcurrent // retained in config for backward compat
+			maxConcurrent = ph.MaxConcurrent
 		}
 		if len(ph.ProxyTypes) > 0 {
 			proxyTypes = ph.ProxyTypes
@@ -78,11 +78,11 @@ func stepProxyScraping(c *Ctx) bool {
 
 	// ── Phase A: Scrape & validate proxies ──────────────────
 	harvestCfg := proxy_scraping.HarvestConfig{
-		Domain:     c.Domain,
-		TimeoutMin: timeoutMin,
-		ProxyTypes: proxyTypes,
-		MaxProxies: 100, // collect up to 100 validated proxies
-		OutputDir:  filepath.Join(c.ResultDir, "intermediate_files"),
+		Domain:        c.Domain,
+		TimeoutMin:    timeoutMin,
+		ProxyTypes:    proxyTypes,
+		MaxConcurrent: maxConcurrent,
+		OutputDir:     filepath.Join(c.ResultDir, "intermediate_files"),
 	}
 
 	logger.Info("Scraping proxies and validating against %s (timeout: %dm)...", c.Domain, timeoutMin)
