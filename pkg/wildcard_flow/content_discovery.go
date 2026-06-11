@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vishnu303/chaathan/pkg/database"
 	"github.com/vishnu303/chaathan/pkg/logger"
@@ -523,8 +524,8 @@ var localUserAgents = []string{
 // runInMemoryJSSecretScan concurrently downloads JS files and runs regex matches on them.
 func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatterns, secretPatterns map[string][]*regexp.Regexp) (int, int, int64, []string, error) {
 	threads := 10
-	if c.Cfg != nil && c.Cfg.Httpx.Threads > 0 {
-		threads = c.Cfg.Httpx.Threads / 5
+	if c.Cfg != nil && c.Cfg.Tools.Httpx.Threads > 0 {
+		threads = c.Cfg.Tools.Httpx.Threads / 5
 		if threads < 5 {
 			threads = 5
 		}
