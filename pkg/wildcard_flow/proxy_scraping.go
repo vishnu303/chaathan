@@ -1,9 +1,9 @@
 // Phase 0 — Proxy Scraping
 //
 // Automated proxy scraping, validation, and IP rotation setup.
-// This step runs proxy-scraper-checker to collect and validate free proxies
-// against the target domain, then starts mubeng as a background rotating
-// proxy server so all subsequent tools route through different IP addresses.
+// This step runs proxybroker2 to collect and validate free proxies,
+// then starts mubeng as a background rotating proxy server so all
+// subsequent tools route through different IP addresses.
 //
 // Activation:  --auto-proxy flag (skipped otherwise)
 // Override:    --proxy takes precedence (manual proxy always wins)
@@ -48,11 +48,10 @@ func stepProxyScraping(c *Ctx) bool {
 		return c.cancelled()
 	}
 
-	logger.StepHeader("Proxy Scraping (proxy-scraper-checker + mubeng)")
+	logger.StepHeader("Proxy Scraping (proxybroker + mubeng)")
 
 	// ── Read config values ──────────────────────────────────
 	timeoutMin := 10
-	maxConcurrent := 256
 	proxyTypes := []string{"socks5", "http", "socks4"}
 	rotateMethod := "random"
 	rotateEvery := 1
@@ -63,7 +62,8 @@ func stepProxyScraping(c *Ctx) bool {
 			timeoutMin = ph.TimeoutMin
 		}
 		if ph.MaxConcurrent > 0 {
-			maxConcurrent = ph.MaxConcurrent
+			// MaxConcurrent maps to MaxProxies for proxybroker (limit, not concurrency)
+			_ = ph.MaxConcurrent // retained in config for backward compat
 		}
 		if len(ph.ProxyTypes) > 0 {
 			proxyTypes = ph.ProxyTypes
@@ -78,11 +78,11 @@ func stepProxyScraping(c *Ctx) bool {
 
 	// ── Phase A: Scrape & validate proxies ──────────────────
 	harvestCfg := proxy_scraping.HarvestConfig{
-		Domain:        c.Domain,
-		TimeoutMin:    timeoutMin,
-		ProxyTypes:    proxyTypes,
-		MaxConcurrent: maxConcurrent,
-		OutputDir:     filepath.Join(c.ResultDir, "intermediate_files"),
+		Domain:     c.Domain,
+		TimeoutMin: timeoutMin,
+		ProxyTypes: proxyTypes,
+		MaxProxies: 100, // collect up to 100 validated proxies
+		OutputDir:  filepath.Join(c.ResultDir, "intermediate_files"),
 	}
 
 	logger.Info("Scraping proxies and validating against %s (timeout: %dm)...", c.Domain, timeoutMin)
@@ -104,7 +104,12 @@ func stepProxyScraping(c *Ctx) bool {
 		return c.cancelled()
 	}
 
-	logger.Success("Scraped %d proxies, %d valid (took %s)",
+	// Store counts on Ctx so notifyStepCompletion can embed both numbers
+	// in the notification description and FindingsCount.
+	c.ProxyTotalScraped = result.TotalScraped
+	c.ProxyTotalValid = result.TotalValid
+
+	logger.Success("Scraped %d proxies, %d passed WAF check (took %s)",
 		result.TotalScraped, result.TotalValid,
 		result.Duration.Round(time.Second))
 

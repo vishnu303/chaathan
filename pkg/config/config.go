@@ -217,8 +217,8 @@ type RateLimitConfig struct {
 
 // ProxyScrapingConfig controls the automated proxy scraping and rotation step.
 type ProxyScrapingConfig struct {
-	// Max runtime for proxy-scraper-checker in minutes (default: 10).
-	// Covers both scraping from public sources and checking against the target domain.
+	// Max runtime for proxybroker in minutes (default: 10).
+	// Covers both scraping from public sources and checking.
 	TimeoutMin int `yaml:"timeout_min"`
 
 	// Number of proxies to check simultaneously (default: 256)

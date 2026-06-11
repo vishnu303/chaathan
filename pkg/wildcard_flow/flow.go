@@ -240,7 +240,13 @@ type Ctx struct {
 	LogFilePath string
 
 	// Proxy rotation
-	Rotator *proxy_scraping.Rotator // mubeng background process (nil if not using auto-proxy)
+	Rotator          *proxy_scraping.Rotator // mubeng background process (nil if not using auto-proxy)
+	ProxyTotalScraped int                    // total proxies found by proxybroker
+	ProxyTotalValid   int                    // proxies that passed mubeng WAF check
+
+	// Findings
+	FfufTotalFindings int // total valid fuzzing discoveries
+
 }
 
 // cancelled returns true when the parent context has been cancelled.
@@ -505,6 +511,13 @@ func notifyStepCompletion(c *Ctx, stepName string) {
 		}
 	}
 
+	// For proxy_scraping, enrich the description with both counts so all
+	// notification backends (Discord, Slack, Telegram) show the full picture.
+	if stepName == "proxy_scraping" && c.ProxyTotalScraped > 0 {
+		stepDescription = fmt.Sprintf("%s — %d scraped, %d passed WAF check",
+			stepDescription, c.ProxyTotalScraped, c.ProxyTotalValid)
+	}
+
 	if err := c.Notifier.SendStepComplete(notify.StepComplete{
 		Target:          c.Domain,
 		ScanID:          c.ScanID,
@@ -534,7 +547,7 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 
 	switch stepName {
 	case "proxy_scraping":
-		return 0 // infrastructure setup step, no findings
+		return c.ProxyTotalValid // WAF-passed proxies ready for rotation
 	case "passive_enum":
 		// Rather than raw lists, the best representation of this step is often the raw results concatenated.
 		// Subdomains are consolidated later, but we can count the underlying outputs.
@@ -570,7 +583,7 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "js_secret_scan":
 		return countLines(c.F.GFSecretsFinal)
 	case "dir_fuzzing":
-		return countLines(c.F.FfufOut)
+		return c.FfufTotalFindings // Uses properly parsed JSON array count, not lines
 	case "vuln_scanning":
 		return countLines(c.F.NucleiOut, c.F.NucleiMisconfigOut)
 	case "vuln_scanning_urls":

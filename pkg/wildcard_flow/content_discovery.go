@@ -864,6 +864,7 @@ func stepDirFuzzing(c *Ctx) bool {
 					if err != nil {
 						logger.Warning("Failed to parse ffuf results: %v", err)
 					} else if count > 0 {
+						c.FfufTotalFindings = count
 						logger.Info("  Stored %d ffuf discoveries for ROI ranking", count)
 					}
 				}
