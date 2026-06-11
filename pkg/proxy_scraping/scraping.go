@@ -11,6 +11,7 @@ package proxy_scraping
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -99,20 +100,55 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	}
 	logger.FileDebug("proxybroker args: %v", args)
 
-	cmd := exec.CommandContext(brokerCtx, binPath, args...)
+	cmd := exec.Command(binPath, args...)
 	cmd.Dir = cfg.OutputDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if brokerCtx.Err() == context.DeadlineExceeded {
-			logger.Info("proxybroker reached timeout — using partial results")
-		} else if ctx.Err() != nil {
+	var stdoutStderr bytes.Buffer
+	cmd.Stdout = &stdoutStderr
+	cmd.Stderr = &stdoutStderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	var runErr error
+	select {
+	case runErr = <-done:
+		if runErr != nil && ctx.Err() != nil {
 			return nil, fmt.Errorf("cancelled: %w", ctx.Err())
-		} else {
-			logger.Warning("proxybroker exited with error: %v", err)
-			logger.FileDebug("proxybroker output: %s", string(output))
 		}
+	case <-brokerCtx.Done():
+		if ctx.Err() != nil {
+			// Parent context cancelled (user skip or Ctrl+C)
+			logger.Info("proxybroker cancelled — stopping...")
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			<-done
+			return nil, fmt.Errorf("cancelled: %w", ctx.Err())
+		}
+
+		// brokerCtx reached timeout, send SIGINT to allow proxybroker to exit cleanly and flush outfile
+		logger.Info("proxybroker reached timeout — stopping gracefully to save partial results...")
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
+
+		select {
+		case runErr = <-done:
+			logger.Info("proxybroker stopped gracefully")
+		case <-time.After(5 * time.Second):
+			logger.Warning("proxybroker did not stop gracefully — killing...")
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			runErr = <-done
+		}
+	}
+
+	if runErr != nil {
+		logger.Warning("proxybroker exited with error: %v", runErr)
+		logger.FileDebug("proxybroker output: %s", stdoutStderr.String())
 	}
 
 	rawProxies, err := parseProxyFile(rawFile, types)
