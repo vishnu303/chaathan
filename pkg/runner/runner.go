@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -198,6 +199,20 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", pwd))
 	}
 	dockerArgs = append(dockerArgs, "-w", "/data")
+
+	// Mount nuclei config and templates if running nuclei in Docker
+	if command == "nuclei" {
+		if home, err := os.UserHomeDir(); err == nil {
+			hostConfigDir := filepath.Join(home, ".config", "nuclei")
+			hostTemplatesDir := filepath.Join(home, "nuclei-templates")
+			// Create directories on host if they don't exist yet to prevent docker from creating them as root directories
+			_ = os.MkdirAll(hostConfigDir, 0755)
+			_ = os.MkdirAll(hostTemplatesDir, 0755)
+
+			dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/root/.config/nuclei", hostConfigDir))
+			dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/root/nuclei-templates", hostTemplatesDir))
+		}
+	}
 
 	// Pass environment variables
 	for _, env := range options.Env {

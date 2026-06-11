@@ -19,9 +19,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -405,6 +408,305 @@ func stepURLConsolidation(c *Ctx) bool {
 
 // stepJSSecretScan downloads a capped set of JS files, scans their content
 // with installed gf JS/secret patterns, and writes merged findings.
+type gfPatternFile struct {
+	Pattern  string   `json:"pattern"`
+	Patterns []string `json:"patterns"`
+	Flags    string   `json:"flags"`
+}
+
+// loadGFPatterns reads patterns from ~/.gf/ and compiles them to regular expressions.
+func loadGFPatterns(allowlist map[string]bool) (map[string][]*regexp.Regexp, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	gfDir := filepath.Join(home, ".gf")
+	entries, err := os.ReadDir(gfDir)
+	if err != nil {
+		return nil, err
+	}
+
+	compiledPatterns := make(map[string][]*regexp.Regexp)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".json")
+		if allowlist != nil && !allowlist[name] {
+			continue
+		}
+
+		filePath := filepath.Join(gfDir, entry.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		var pf gfPatternFile
+		if err := json.Unmarshal(data, &pf); err != nil {
+			continue
+		}
+
+		var rawPatterns []string
+		if pf.Pattern != "" {
+			rawPatterns = append(rawPatterns, pf.Pattern)
+		}
+		rawPatterns = append(rawPatterns, pf.Patterns...)
+
+		// Determine Go regex flags
+		prefix := ""
+		caseInsensitive := strings.Contains(pf.Flags, "i")
+		multiline := strings.Contains(pf.Flags, "m")
+		if caseInsensitive || multiline {
+			prefix = "(?"
+			if caseInsensitive {
+				prefix += "i"
+			}
+			if multiline {
+				prefix += "m"
+			}
+			prefix += ")"
+		}
+
+		var regexes []*regexp.Regexp
+		for _, raw := range rawPatterns {
+			re, err := regexp.Compile(prefix + raw)
+			if err != nil {
+				continue
+			}
+			regexes = append(regexes, re)
+		}
+		if len(regexes) > 0 {
+			compiledPatterns[name] = regexes
+		}
+	}
+	return compiledPatterns, nil
+}
+
+// getFallbackGFPatterns returns hardcoded regexes for offline execution or when ~/.gf is empty.
+func getFallbackGFPatterns(allowlist map[string]bool) map[string][]*regexp.Regexp {
+	fallbacks := map[string]string{
+		"aws-keys": `(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}`,
+		"api-keys": `(?i)(api_key|apikey|secret|token|auth|password|key|credentials)[=:]["'][a-zA-Z0-9_\-\.\~]{10,80}["']`,
+		"jwt":      `eyJhbGciOi`,
+		"firebase": `firebaseio\.com`,
+		"github":   `(?i)github_token[=:]["'][a-zA-Z0-9]{35,40}["']`,
+		"domxss":   `\.(innerHTML|outerHTML|location|href|write|writeln|src|location\.href)`,
+		"js-sinks": `(eval|setTimeout|setInterval|Function)\(`,
+		"execs":    `exec\(`,
+	}
+
+	compiled := make(map[string][]*regexp.Regexp)
+	for name, pattern := range fallbacks {
+		if allowlist != nil && !allowlist[name] {
+			continue
+		}
+		re, err := regexp.Compile(pattern)
+		if err == nil {
+			compiled[name] = []*regexp.Regexp{re}
+		}
+	}
+	return compiled
+}
+
+// localUserAgents contains common, high-frequency browser User-Agent strings.
+var localUserAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
+}
+
+// runInMemoryJSSecretScan concurrently downloads JS files and runs regex matches on them.
+func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatterns, secretPatterns map[string][]*regexp.Regexp) (int, int, int64, []string, error) {
+	threads := 10
+	if c.Cfg != nil && c.Cfg.Httpx.Threads > 0 {
+		threads = c.Cfg.Httpx.Threads / 5
+		if threads < 5 {
+			threads = 5
+		}
+		if threads > 15 {
+			threads = 15
+		}
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig:     utils.ModernBrowserTLSConfig(),
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+	}
+	if c.Proxy != "" {
+		if proxyURL, err := url.Parse(c.Proxy); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
+
+	// Dynamic rate limiting setup (bound to GlobalRPS)
+	var rateLimiter *time.Ticker
+	if c.Tb.RateLimits != nil && c.Tb.RateLimits.GlobalRPS > 0 {
+		interval := time.Second / time.Duration(c.Tb.RateLimits.GlobalRPS)
+		rateLimiter = time.NewTicker(interval)
+		defer rateLimiter.Stop()
+	}
+
+	jobs := make(chan string, len(urls))
+	for _, u := range urls {
+		jobs <- u
+	}
+	close(jobs)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	var jsMatches []string
+	var secretMatches []string
+	var totalBytes int64
+	seenHostsWithSecrets := make(map[string]bool)
+
+	for i := 0; i < threads; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for target := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				if rateLimiter != nil {
+					select {
+					case <-ctx.Done():
+						return
+					case <-rateLimiter.C:
+					}
+				}
+
+				req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
+				if err != nil {
+					continue
+				}
+
+				// User agent setup
+				ua := localUserAgents[rand.Intn(len(localUserAgents))]
+				if c.Tb.General != nil && c.Tb.General.UserAgent != "" {
+					ua = c.Tb.General.UserAgent
+				}
+				req.Header.Set("User-Agent", ua)
+
+				// Inject Custom Cookies
+				if c.Tb.CustomCookie != "" {
+					req.Header.Set("Cookie", c.Tb.CustomCookie)
+				}
+				// Inject Custom Headers
+				for _, h := range c.Tb.CustomHeaders {
+					parts := strings.SplitN(h, ":", 2)
+					if len(parts) == 2 {
+						req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+					}
+				}
+
+				resp, err := client.Do(req)
+				if err != nil {
+					continue
+				}
+
+				// Max 10MB per file to protect memory
+				body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+				resp.Body.Close()
+				if err != nil {
+					continue
+				}
+
+				mu.Lock()
+				totalBytes += int64(len(body))
+				mu.Unlock()
+
+				lines := strings.Split(string(body), "\n")
+				var localJSMatches []string
+				var localSecretMatches []string
+				foundSecret := false
+
+				for _, line := range lines {
+					lineTrimmed := strings.TrimSpace(line)
+					if lineTrimmed == "" {
+						continue
+					}
+
+					// Scan JS patterns
+					for name, regexes := range jsPatterns {
+						for _, re := range regexes {
+							if re.MatchString(lineTrimmed) {
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+								localJSMatches = append(localJSMatches, matchLine)
+								break
+							}
+						}
+					}
+
+					// Scan Secret patterns
+					for name, regexes := range secretPatterns {
+						for _, re := range regexes {
+							if re.MatchString(lineTrimmed) {
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+								localSecretMatches = append(localSecretMatches, matchLine)
+								foundSecret = true
+								break
+							}
+						}
+					}
+				}
+
+				if len(localJSMatches) > 0 || len(localSecretMatches) > 0 {
+					mu.Lock()
+					jsMatches = append(jsMatches, localJSMatches...)
+					secretMatches = append(secretMatches, localSecretMatches...)
+					if foundSecret {
+						if parsedURL, err := url.Parse(target); err == nil && parsedURL.Hostname() != "" {
+							seenHostsWithSecrets[strings.ToLower(parsedURL.Hostname())] = true
+						}
+					}
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		return 0, 0, 0, nil, ctx.Err()
+	}
+
+	if len(jsMatches) > 0 {
+		content := strings.Join(jsMatches, "\n") + "\n"
+		_ = os.WriteFile(c.F.GFJSMatches, []byte(content), 0644)
+	} else {
+		writeEmptyFile(c.F.GFJSMatches)
+	}
+
+	if len(secretMatches) > 0 {
+		content := strings.Join(secretMatches, "\n") + "\n"
+		_ = os.WriteFile(c.F.GFSecretsMatches, []byte(content), 0644)
+	} else {
+		writeEmptyFile(c.F.GFSecretsMatches)
+	}
+
+	var secretHosts []string
+	for host := range seenHostsWithSecrets {
+		secretHosts = append(secretHosts, host)
+	}
+
+	return len(jsMatches), len(secretMatches), totalBytes, secretHosts, nil
+}
+
 func stepJSSecretScan(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_secret_scan") {
 		logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets) [RESUMED — skipping]")
@@ -412,7 +714,6 @@ func stepJSSecretScan(c *Ctx) bool {
 	}
 
 	logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets)")
-	writeEmptyFile(c.F.JSCombinedFile)
 	writeEmptyFile(c.F.GFJSMatches)
 	writeEmptyFile(c.F.GFSecretsMatches)
 	writeEmptyFile(c.F.GFSecretsFinal)
@@ -429,55 +730,34 @@ func stepJSSecretScan(c *Ctx) bool {
 	}
 	logger.Info("  Selected %d JavaScript URL(s) for fetching", jsCount)
 
-	if err := os.RemoveAll(c.F.JSDownloadsDir); err != nil {
-		logger.Warning("Failed to reset JS download directory: %v", err)
+	urls := loadLineSlice(c.F.JSURLsFile, 0)
+
+	jsPatterns, err := loadGFPatterns(jsGFPatterns)
+	if err != nil || len(jsPatterns) == 0 {
+		jsPatterns = getFallbackGFPatterns(jsGFPatterns)
 	}
-	if err := os.MkdirAll(c.F.JSDownloadsDir, 0755); err != nil {
-		logger.Warning("Could not create JS download directory: %v", err)
-		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
-		return c.cancelled()
+	secretPatterns, err := loadGFPatterns(secretGFPatterns)
+	if err != nil || len(secretPatterns) == 0 {
+		secretPatterns = getFallbackGFPatterns(secretGFPatterns)
 	}
 
-	logger.SubStep("Fetching JavaScript files with httpx...")
-	if err := runWithSkip(c, "httpx (JS fetch)", func(sCtx context.Context) error {
-		return c.Tb.RunHttpxFetchJS(sCtx, c.F.JSURLsFile, c.F.JSDownloadsDir)
-	}); err != nil {
-		if err == ErrToolSkipped {
-			logger.Info("  JS fetching skipped; continuing with any downloaded content")
+	var jsMatchCount, secretMatchCount int
+	var combinedBytes int64
+	var secretHosts []string
+
+	logger.SubStep("Fetching & scanning JS files in-memory...")
+	scanErr := runWithSkip(c, "JS In-Memory Secret Scan", func(sCtx context.Context) error {
+		var err error
+		jsMatchCount, secretMatchCount, combinedBytes, secretHosts, err = runInMemoryJSSecretScan(sCtx, c, urls, jsPatterns, secretPatterns)
+		return err
+	})
+
+	if scanErr != nil {
+		if scanErr == ErrToolSkipped {
+			logger.Info("  JS scanning skipped by user")
 		} else {
-			logger.Warning("JS fetching encountered an error: %v", err)
+			logger.Warning("JS scanning failed: %v", scanErr)
 		}
-	}
-
-	downloadedFiles, combinedBytes, err := concatenateDownloadedFiles(c.F.JSDownloadsDir, c.F.JSCombinedFile)
-	if err != nil {
-		logger.Warning("Failed to combine downloaded JS content: %v", err)
-		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
-		return c.cancelled()
-	}
-	if combinedBytes == 0 {
-		logger.Info("  No JS content retrieved")
-		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
-		return c.cancelled()
-	}
-	logger.Info("  Combined %d downloaded JS response file(s)", downloadedFiles)
-
-	logger.SubStep("Running gf JavaScript patterns on downloaded content...")
-	var jsMatchCount int
-	if err := runWithSkip(c, "gf JS patterns", func(sCtx context.Context) error {
-		jsMatchCount = collectGFMatches(sCtx, c.Tb, c.F.JSCombinedFile, c.F.GFJSMatches, jsGFPatterns, 0)
-		return nil
-	}); err != nil && err != ErrToolSkipped {
-		logger.Warning("gf JS pattern scan failed: %v", err)
-	}
-
-	logger.SubStep("Running gf secret patterns on downloaded content...")
-	var secretMatchCount int
-	if err := runWithSkip(c, "gf secret patterns", func(sCtx context.Context) error {
-		secretMatchCount = collectGFMatches(sCtx, c.Tb, c.F.JSCombinedFile, c.F.GFSecretsMatches, secretGFPatterns, 0)
-		return nil
-	}); err != nil && err != ErrToolSkipped {
-		logger.Warning("gf secret pattern scan failed: %v", err)
 	}
 
 	if err := utils.MergeAndDeduplicate(existingFiles(c.F.GFJSMatches, c.F.GFSecretsMatches), c.F.GFSecretsFinal); err != nil {
@@ -490,33 +770,22 @@ func stepJSSecretScan(c *Ctx) bool {
 	if totalFindings > 0 {
 		logger.Info("  Found %d JS/secret findings (%d JS matches, %d secret matches)", totalFindings, jsMatchCount, secretMatchCount)
 
-		// Flag hosts that served JS with secrets for ROI scoring
-		if c.ScanID > 0 && secretMatchCount > 0 {
-			hosts := extractHostsFromURLFile(c.F.JSURLsFile)
-			if len(hosts) > 0 {
-				if err := database.MarkHostsJSSecrets(c.ScanID, hosts); err != nil {
-					logger.Warning("Failed to flag JS-secret hosts: %v", err)
-				} else {
-					logger.Info("  Flagged %d hosts with JS secrets for ROI boost", len(hosts))
-				}
+		if c.ScanID > 0 && len(secretHosts) > 0 {
+			if err := database.MarkHostsJSSecrets(c.ScanID, secretHosts); err != nil {
+				logger.Warning("Failed to flag JS-secret hosts: %v", err)
+			} else {
+				logger.Info("  Flagged %d hosts with JS secrets for ROI boost", len(secretHosts))
 			}
 		}
 	} else {
-		logger.Info("  No JS or secret findings matched installed gf patterns")
+		logger.Info("  No JS or secret findings matched installed/fallback gf patterns")
 	}
 
-	// Prepend the size of the combined file to the top of the secrets file
-	// (only when there are actual findings — avoids a comment-only file in final_files/)
 	if totalFindings > 0 {
 		if content, err := os.ReadFile(c.F.GFSecretsFinal); err == nil {
 			header := fmt.Sprintf("// Scan Metadata | JS Combined File Size: %.4f GB\n", float64(combinedBytes)/(1024*1024*1024))
 			_ = os.WriteFile(c.F.GFSecretsFinal, append([]byte(header), content...), 0644)
 		}
-	}
-
-	// Free up massive amounts of storage by deleting the combined file after the scan finishes
-	if err := os.Remove(c.F.JSCombinedFile); err == nil {
-		logger.Info("  Cleaned up %s to free storage", c.F.JSCombinedFile)
 	}
 
 	c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
