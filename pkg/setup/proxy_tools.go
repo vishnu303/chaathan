@@ -19,7 +19,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/vishnu303/chaathan/pkg/progress"
 )
@@ -133,14 +132,13 @@ func installProxyScraperChecker() error {
 	}
 	writeSetupLog("Installed proxy-scraper-checker to %s (%d bytes)", binPath, len(binBytes))
 
-	// Smoke-test: verify the binary executes.
-	out, err := exec.Command(binPath, "--version").CombinedOutput()
-	if err != nil {
-		if _, err2 := exec.Command(binPath, "--help").CombinedOutput(); err2 != nil {
-			return fmt.Errorf("binary verification failed: %v (output: %s)", err, strings.TrimSpace(string(out)))
-		}
+	// Verify the file is non-empty — proxy-scraper-checker is a TUI binary
+	// with no --version/--help flags, so exec-based smoke-testing always fails.
+	info, err := os.Stat(binPath)
+	if err != nil || info.Size() == 0 {
+		return fmt.Errorf("binary verification failed: file missing or empty at %s", binPath)
 	}
-	writeSetupLog("Verified proxy-scraper-checker: %s", strings.TrimSpace(string(out)))
+	writeSetupLog("Verified proxy-scraper-checker: %s (%d bytes)", binPath, info.Size())
 	return nil
 }
 
