@@ -1,7 +1,7 @@
 // Phase 0 — Proxy Scraping
 //
 // Automated proxy scraping, validation, and IP rotation setup.
-// This step runs proxybroker2 to collect and validate free proxies,
+// This step fetches free proxy lists, validates them with mubeng,
 // then starts mubeng as a background rotating proxy server so all
 // subsequent tools route through different IP addresses.
 //
@@ -48,7 +48,7 @@ func stepProxyScraping(c *Ctx) bool {
 		return c.cancelled()
 	}
 
-	logger.StepHeader("Proxy Scraping (proxy-scraper-checker + mubeng)")
+	logger.StepHeader("Proxy Scraping + Rotation (mubeng)")
 
 	// ── Read config values ──────────────────────────────────
 	timeoutMin := 10
