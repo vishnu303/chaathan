@@ -5,7 +5,6 @@ package proxy_scraping
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -93,12 +92,32 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	cmd := exec.Command(binPath)
 	cmd.Dir = workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PROXY_SCRAPER_CHECKER_CONFIG=%s", configPath))
 
-	// Capture output for logging
-	var stdoutStderr bytes.Buffer
-	cmd.Stdout = &stdoutStderr
-	cmd.Stderr = &stdoutStderr
+	// Force non-TUI mode: the pre-built binary has ratatui TUI compiled in.
+	// When stdout is piped to a buffer, ratatui/crossterm hangs on terminal
+	// init because there's no real TTY. Setting TERM=dumb and redirecting
+	// stdout/stderr to a file makes is_terminal() return false, so the tool
+	// falls back to its non-interactive logging mode.
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("PROXY_SCRAPER_CHECKER_CONFIG=%s", configPath),
+		"TERM=dumb",
+		"NO_COLOR=1",
+	)
+
+	// Redirect stdout/stderr to a log file instead of piping to a buffer.
+	// Piping creates non-TTY file descriptors, but ratatui may still attempt
+	// raw mode on pipes. A file redirect is cleaner and lets us read logs after.
+	logPath := filepath.Join(workDir, "proxy-scraper-checker.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create proxy-scraper-checker log file: %w", err)
+	}
+	defer logFile.Close()
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	// Close stdin so the tool cannot read terminal input.
+	cmd.Stdin = nil
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -140,7 +159,11 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 
 	if runErr != nil {
 		logger.Warning("proxy-scraper-checker exited with error: %v", runErr)
-		logger.FileDebug("proxy-scraper-checker output: %s", stdoutStderr.String())
+		// Close and read the log file for debug output.
+		logFile.Close()
+		if logData, readErr := os.ReadFile(logPath); readErr == nil {
+			logger.FileDebug("proxy-scraper-checker output: %s", string(logData))
+		}
 	}
 
 	// Parse output — proxy-scraper-checker writes to out/ subdirectory
