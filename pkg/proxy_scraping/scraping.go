@@ -73,7 +73,7 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	}
 
 	configContent := generateConfig(checkURL, maxConcurrent, workDir)
-	configPath := filepath.Join(cfg.OutputDir, "proxy_scraping_config.toml")
+	configPath := filepath.Join(workDir, "config.toml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		return nil, fmt.Errorf("cannot write proxy scraping config: %w", err)
 	}
@@ -90,9 +90,10 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	logger.SubStep("Running proxy-scraper-checker (binary: %s)", binPath)
 	logger.FileDebug("proxy-scraper-checker config: %s", configPath)
 
-	cmd := exec.Command(binPath, "--config", configPath)
+	cmd := exec.Command(binPath)
 	cmd.Dir = workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PROXY_SCRAPER_CHECKER_CONFIG=%s", configPath))
 
 	// Capture output for logging
 	var stdoutStderr bytes.Buffer
