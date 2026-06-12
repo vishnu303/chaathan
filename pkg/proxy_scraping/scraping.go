@@ -72,7 +72,7 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 		maxConcurrent = 256
 	}
 
-	configContent := generateConfig(checkURL, maxConcurrent, workDir)
+	configContent := generateConfig(checkURL, maxConcurrent, workDir, cfg.ProxyTypes)
 	configPath := filepath.Join(workDir, "config.toml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		return nil, fmt.Errorf("cannot write proxy scraping config: %w", err)
@@ -185,11 +185,29 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	}, nil
 }
 
+// contains checks if a string is present in a slice (case-insensitive).
+// If the slice is empty, it returns true to enable all protocols by default.
+func contains(slice []string, val string) bool {
+	if len(slice) == 0 {
+		return true
+	}
+	for _, item := range slice {
+		if strings.EqualFold(item, val) {
+			return true
+		}
+	}
+	return false
+}
+
 // generateConfig creates a config.toml for proxy-scraper-checker.
-func generateConfig(checkURL string, maxConcurrent int, outputDir string) string {
+func generateConfig(checkURL string, maxConcurrent int, outputDir string, proxyTypes []string) string {
 	outPath := filepath.Join(outputDir, "out")
 	// Use forward slashes for TOML path compatibility
 	outPath = filepath.ToSlash(outPath)
+
+	httpEnabled := contains(proxyTypes, "http")
+	socks4Enabled := contains(proxyTypes, "socks4")
+	socks5Enabled := contains(proxyTypes, "socks5")
 
 	return fmt.Sprintf(`#:schema ./config-schema.json
 
@@ -213,7 +231,47 @@ max_concurrent_checks = %d
 timeout = 10.0
 connect_timeout = 5.0
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-`, outPath, checkURL, maxConcurrent)
+
+[scraping]
+max_proxies_per_source = 100000
+timeout = 10.0
+connect_timeout = 5.0
+proxy = ""
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+
+[scraping.http]
+enabled = %t
+urls = [
+  "https://api.proxyscrape.com/v3/free-proxy-list/get?request=getproxies&protocol=http",
+  "https://api.proxyscrape.com/v3/free-proxy-list/get?request=getproxies&protocol=https",
+  "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt",
+  "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/http/data.txt",
+  "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/https/data.txt",
+  "https://raw.githubusercontent.com/roosterkid/openproxylist/refs/heads/main/HTTPS_RAW.txt",
+  "https://raw.githubusercontent.com/sunny9577/proxy-scraper/refs/heads/master/generated/http_proxies.txt",
+]
+
+[scraping.socks4]
+enabled = %t
+urls = [
+  "https://api.proxyscrape.com/v3/free-proxy-list/get?request=getproxies&protocol=socks4",
+  "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks4.txt",
+  "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks4/data.txt",
+  "https://raw.githubusercontent.com/roosterkid/openproxylist/refs/heads/main/SOCKS4_RAW.txt",
+  "https://raw.githubusercontent.com/sunny9577/proxy-scraper/refs/heads/master/generated/socks4_proxies.txt",
+]
+
+[scraping.socks5]
+enabled = %t
+urls = [
+  "https://api.proxyscrape.com/v3/free-proxy-list/get?request=getproxies&protocol=socks5",
+  "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks5.txt",
+  "https://raw.githubusercontent.com/hookzof/socks5_list/refs/heads/master/proxy.txt",
+  "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks5/data.txt",
+  "https://raw.githubusercontent.com/roosterkid/openproxylist/refs/heads/main/SOCKS5_RAW.txt",
+  "https://raw.githubusercontent.com/sunny9577/proxy-scraper/refs/heads/master/generated/socks5_proxies.txt",
+]
+`, outPath, checkURL, maxConcurrent, httpEnabled, socks4Enabled, socks5Enabled)
 }
 
 // parseProxyOutput reads the JSON output files from proxy-scraper-checker.
