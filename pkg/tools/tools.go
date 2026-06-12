@@ -411,6 +411,7 @@ func (t *ToolBox) RunAmass(ctx context.Context, domain string, outputFile string
 
 func (t *ToolBox) RunGau(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain, "--providers", "wayback", "--subs", "--o", outputFile}
+	args = t.appendProxy(args, "--proxy")
 	_, err := t.Runner.Run(ctx, "gau", args)
 	return err
 }
@@ -775,6 +776,8 @@ func (t *ToolBox) RunWaybackurls(ctx context.Context, domain string, outputFile 
 // RunGoLinkFinder extracts endpoints from JavaScript files found at the given URL.
 func (t *ToolBox) RunGoLinkFinder(ctx context.Context, url string, outputFile string) error {
 	args := []string{"-d", url, "-o", outputFile}
+	// GoLinkFinder does not have a built-in proxy flag, but if it runs in docker we could pass HTTP_PROXY.
+	// We'll pass it as a runner env var later if needed, but for now it's skipped as there's no native flag.
 	_, err := t.Runner.Run(ctx, "GoLinkFinder", args)
 	return err
 }
@@ -787,6 +790,9 @@ func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile str
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
 	args = t.appendArjunUA(args)
+	// Arjun supports proxy via --http-proxy flag (see arjun --help)
+	// It only supports HTTP/HTTPS proxies, but mubeng provides an HTTP proxy interface.
+	args = t.appendProxy(args, "--http-proxy")
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -799,6 +805,7 @@ func (t *ToolBox) RunArjunWithWordlist(ctx context.Context, inputFile string, ou
 		args = append(args, "-w", wordlist)
 	}
 	args = t.appendArjunUA(args)
+	args = t.appendProxy(args, "--http-proxy")
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -811,6 +818,7 @@ func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, output
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
 	args = t.appendArjunUA(args)
+	args = t.appendProxy(args, "--http-proxy")
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -1042,6 +1050,7 @@ func (t *ToolBox) RunTlsx(ctx context.Context, inputFile string, outputFile stri
 		"-c", "50",
 		"-timeout", "5", // seconds per TLS handshake; prevents hanging on blocked hosts
 	}
+	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err
 }
@@ -1056,6 +1065,7 @@ func (t *ToolBox) RunTlsxHost(ctx context.Context, host string, outputFile strin
 		"-nc",
 		"-duc",
 	}
+	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err
 }

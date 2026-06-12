@@ -163,7 +163,7 @@ Chaathan orchestrates complex multi-stage recon chains, consolidating raw output
 
 | Phase | Steps | Key Tools Used | Central Artifact Generated |
 | :--- | :--- | :--- | :--- |
-| **Phase 0: Proxy Scraping** | 1 | `proxy-scraper-checker`, `mubeng` | `proxy_pool.txt` + rotating proxy server |
+| **Phase 0: Proxy Scraping** | 1 | `mubeng` | `proxy_pool.txt` + rotating proxy server |
 | **Phase 1: Asset Discovery** | 2–6 | `subfinder`, `assetfinder`, `amass`, `uncover`, `github-subdomains` | `all_subdomains.txt` |
 | **Phase 2: Validation** | 7–11 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_hosts.txt` |
 | **Phase 3: Content Discovery** | 12–18 | `katana`, `gospider`, `waybackurls`, `gau`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls_live.txt` |
@@ -175,7 +175,7 @@ Chaathan orchestrates complex multi-stage recon chains, consolidating raw output
 
 | Step | Engine | Purpose / Action | Skip Trigger Flag |
 | :--- | :--- | :--- | :--- |
-| 1 | `proxy-scraper-checker`, `mubeng` | Auto-scrape free proxies, validate against target, start rotating proxy | `--auto-proxy` to enable |
+| 1 | `mubeng` | Auto-scrape free proxies, validate against target, start rotating proxy | `--auto-proxy` to enable |
 | 2 | `subfinder`, `assetfinder`, `sublist3r` | Passive domain enumeration | - |
 | 3 | `amass` | High-depth active DNS brute-forcing | `--skip-amass` |
 | 4 | `github-subdomains` | Scraping Github public repos for references | Needs `--github-token` |
@@ -229,7 +229,7 @@ Modern web applications sit behind front-end shields like Cloudflare, Akamai, an
 ### 🕴️ Complete Anonymization & Routing
 - **User-Agent Rotation:** Enabled natively by default (`ua_rotation: true` in config). Chaathan dynamically swaps standard command-line user-agent headers for authentic, rotating desktop and mobile browser signatures (Chrome, Firefox, Safari) on every request, evading signature-based blocking.
 - **Proxy Cascading:** Pipe all underlying scanning traffic through an external gateway. Pass SOCKS5 (e.g., Tor) or HTTP (e.g., Burp Suite) configurations to route execution, audit logs, or debugging sessions.
-- **Automated Proxy Rotation (`--auto-proxy`):** Automatically scrapes and validates free proxies from 100+ public sources against the target domain using `proxy-scraper-checker`, then starts `mubeng` as a local rotating proxy server. Every outgoing request from every tool uses a different exit IP address — no manual proxy configuration needed. Dead proxies are automatically removed from the pool.
+- **Automated Proxy Rotation (`--auto-proxy`):** Automatically scrapes and validates free proxies from public sources against the target domain, then starts `mubeng` as a local rotating proxy server. Every outgoing request from every tool uses a different exit IP address — no manual proxy configuration needed. Dead proxies are automatically removed from the pool.
 
 ---
 

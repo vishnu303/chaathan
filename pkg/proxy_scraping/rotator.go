@@ -71,8 +71,6 @@ func StartRotator(ctx context.Context, cfg RotatorConfig) (*Rotator, error) {
 		"-a", listenAddr,
 		"-r", fmt.Sprintf("%d", rotateEvery),
 		"-m", method,
-		"--remove-on-error",
-		"--rotate-on-error",
 		"-t", "30s",
 	}
 	if cfg.Verbose {
