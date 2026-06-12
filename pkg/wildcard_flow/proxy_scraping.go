@@ -52,7 +52,7 @@ func stepProxyScraping(c *Ctx) bool {
 
 	// ── Read config values ──────────────────────────────────
 	timeoutMin := 10
-	maxConcurrent := 256
+	maxConcurrent := 512
 	proxyTypes := []string{"socks5", "http", "socks4"}
 	rotateMethod := "random"
 	rotateEvery := 1

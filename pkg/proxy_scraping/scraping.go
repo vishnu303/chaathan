@@ -228,14 +228,14 @@ include_geolocation = false
 [checking]
 check_url = "%s"
 max_concurrent_checks = %d
-timeout = 10.0
-connect_timeout = 5.0
+timeout = 5.0
+connect_timeout = 2.0
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
 [scraping]
 max_proxies_per_source = 100000
-timeout = 10.0
-connect_timeout = 5.0
+timeout = 5.0
+connect_timeout = 2.0
 proxy = ""
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
