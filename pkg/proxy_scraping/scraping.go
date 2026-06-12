@@ -37,12 +37,14 @@ type HarvestResult struct {
 // Source URLs from the original proxy-scraper-checker template
 var httpSources = []string{
 	"https://api.proxyscrape.com/v3/free-proxy-list/get?request=getproxies&protocol=http",
-	"https://api.proxyscrape.com/v3/free-proxy-list/get?request=getproxies&protocol=https",
 	"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt",
 	"https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/http/data.txt",
-	"https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/https/data.txt",
 	"https://raw.githubusercontent.com/roosterkid/openproxylist/refs/heads/main/HTTPS_RAW.txt",
 	"https://raw.githubusercontent.com/sunny9577/proxy-scraper/refs/heads/master/generated/http_proxies.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+	"https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
+	"https://raw.githubusercontent.com/mertguvencli/http-proxy-list/main/proxy-list/data.txt",
+	"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
 }
 
 var socks4Sources = []string{
@@ -51,6 +53,9 @@ var socks4Sources = []string{
 	"https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks4/data.txt",
 	"https://raw.githubusercontent.com/roosterkid/openproxylist/refs/heads/main/SOCKS4_RAW.txt",
 	"https://raw.githubusercontent.com/sunny9577/proxy-scraper/refs/heads/master/generated/socks4_proxies.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt",
+	"https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks4.txt",
+	"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks4.txt",
 }
 
 var socks5Sources = []string{
@@ -60,6 +65,9 @@ var socks5Sources = []string{
 	"https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks5/data.txt",
 	"https://raw.githubusercontent.com/roosterkid/openproxylist/refs/heads/main/SOCKS5_RAW.txt",
 	"https://raw.githubusercontent.com/sunny9577/proxy-scraper/refs/heads/master/generated/socks5_proxies.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+	"https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
+	"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt",
 }
 
 // contains checks if a string is present in a slice (case-insensitive).

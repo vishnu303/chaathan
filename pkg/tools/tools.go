@@ -144,12 +144,12 @@ func (t *ToolBox) appendDalfoxUA(args []string) []string {
 	return append(args, "--header", "User-Agent: "+t.getUA())
 }
 
-// appendGoSpiderUA appends --user-agent "..." for gospider.
+// appendGoSpiderUA appends -u "..." for gospider.
 func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	if !t.uaEnabled() {
 		return args
 	}
-	return append(args, "--user-agent", t.getUA())
+	return append(args, "-u", t.getUA())
 }
 
 // appendArjunUA appends --headers '{"User-Agent":"..."}' for arjun.
@@ -790,9 +790,6 @@ func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile str
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
 	args = t.appendArjunUA(args)
-	// Arjun supports proxy via --http-proxy flag (see arjun --help)
-	// It only supports HTTP/HTTPS proxies, but mubeng provides an HTTP proxy interface.
-	args = t.appendProxy(args, "--http-proxy")
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -805,7 +802,6 @@ func (t *ToolBox) RunArjunWithWordlist(ctx context.Context, inputFile string, ou
 		args = append(args, "-w", wordlist)
 	}
 	args = t.appendArjunUA(args)
-	args = t.appendProxy(args, "--http-proxy")
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -818,7 +814,6 @@ func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, output
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
 	args = t.appendArjunUA(args)
-	args = t.appendProxy(args, "--http-proxy")
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -1050,7 +1045,6 @@ func (t *ToolBox) RunTlsx(ctx context.Context, inputFile string, outputFile stri
 		"-c", "50",
 		"-timeout", "5", // seconds per TLS handshake; prevents hanging on blocked hosts
 	}
-	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err
 }
@@ -1063,9 +1057,7 @@ func (t *ToolBox) RunTlsxHost(ctx context.Context, host string, outputFile strin
 		"-json",
 		"-silent",
 		"-nc",
-		"-duc",
 	}
-	args = t.appendProxy(args, "-proxy")
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err
 }
