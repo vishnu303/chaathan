@@ -33,6 +33,7 @@ func stepDNSConsolidation(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 6: Consolidating Subdomains")
+	writeEmptyFile(c.F.DnsxOut)
 
 	passiveSources := existingFiles(
 		c.F.SubfinderOut,
@@ -66,6 +67,15 @@ func stepDNSConsolidation(c *Ctx) bool {
 		}
 	}
 
+	// Sync consolidated subdomains to DB
+	if c.ScanID > 0 {
+		if count, err := utils.ParseSubdomainsFile(c.ScanID, c.F.ConsolidatedSubs, "consolidated"); err != nil {
+			logger.Warning("Failed to sync consolidated subdomains to database: %v", err)
+		} else {
+			logger.FileDebug("synced %d consolidated subdomains to database", count)
+		}
+	}
+
 	logger.SubStep("Running DNSx for resolution...")
 	logger.FileDebug("dnsx input: %s (%d lines) out=%s", c.F.ConsolidatedSubs, subCount, c.F.DnsxOut)
 	if err := runWithSkip(c, "dnsx", func(sCtx context.Context) error {
@@ -78,9 +88,10 @@ func stepDNSConsolidation(c *Ctx) bool {
 			logger.Error("DNSx failed: %v", err)
 		}
 	} else {
+		uniqueHosts, _ := utils.CountUniqueDNSxHosts(c.F.DnsxOut)
 		resolvedCount, _ := utils.CountFileLines(c.F.DnsxOut)
-		logger.Info("  Resolved %d subdomains via DNS", resolvedCount)
-		logger.FileDebug("dnsx output: %d resolved records -> %s", resolvedCount, c.F.DnsxOut)
+		logger.Info("  Resolved %d hosts (%d DNS records)", uniqueHosts, resolvedCount)
+		logger.FileDebug("dnsx output: %d hosts (%d resolved records) -> %s", uniqueHosts, resolvedCount, c.F.DnsxOut)
 	}
 	c.StateMgr.MarkStepComplete(c.State, "dns_resolution")
 	return c.cancelled()
@@ -166,27 +177,40 @@ func stepHTTPProbing(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 8: Live Web Server Probing")
+	writeEmptyFile(c.F.HttpxOut)
+	writeEmptyFile(c.F.HttpxLiveHosts)
 	logger.SubStep("Running Httpx...")
 	hostInputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
 	logger.FileDebug("httpx input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, hostInputCount, c.F.HttpxOut)
 
+	var httpxSkipped bool
 	if err := runWithSkip(c, "httpx", func(sCtx context.Context) error {
 		return c.Tb.RunHttpx(sCtx, c.F.ConsolidatedSubs, c.F.HttpxOut)
 	}); err != nil {
 		if err == ErrToolSkipped {
+			httpxSkipped = true
 			// Logged internally by runWithSkip
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "http_probing", err)
 			logger.Error("Httpx failed: %v", err)
 		}
 	}
-	// Parse and log results regardless of skip/success — partial output may exist
+	// Parse results — but guard against stale files from prior scans.
+	// After a skip, only parse if the file was actually modified during this scan.
 	if c.ScanID > 0 && utils.FileExists(c.F.HttpxOut) {
-		count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
-		if count > 0 {
-			logger.Info("  Found %d live hosts", count)
+		if httpxSkipped && !fileModifiedAfter(c.F.HttpxOut, c.StartTime) {
+			logger.Info("  Httpx skipped — no live host data from this scan")
+		} else {
+			count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
+			if count > 0 {
+				label := ""
+				if httpxSkipped {
+					label = " (partial)"
+				}
+				logger.Info("  Found %d live hosts%s", count, label)
+			}
+			logger.FileDebug("httpx output: %d live hosts -> %s", count, c.F.HttpxOut)
 		}
-		logger.FileDebug("httpx output: %d live hosts -> %s", count, c.F.HttpxOut)
 	}
 
 	// Trigger active WAF bypass Origin IP resolution
@@ -215,6 +239,7 @@ func stepTLSAnalysis(c *Ctx) bool {
 		logger.StepHeader("Step 9: TLS Certificate Analysis (tlsx) [RESUMED — skipping]")
 	} else if !c.SkipTlsx {
 		logger.StepHeader("Step 9: TLS Certificate Analysis (tlsx)")
+		writeEmptyFile(c.F.TlsxOut)
 		logger.SubStep("Running tlsx — extracting SANs and checking cert issues...")
 		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
 		logger.FileDebug("tlsx input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, inputCount, c.F.TlsxOut)
@@ -284,6 +309,7 @@ func stepPortScanning(c *Ctx) bool {
 		logger.StepHeader("Step 10: Port Scanning [RESUMED — skipping]")
 	} else if !c.SkipNaabu {
 		logger.StepHeader("Step 10: Port Scanning")
+		writeEmptyFile(c.F.NaabuOut)
 		logger.SubStep("Running Naabu on all discovered subdomains...")
 		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
 		logger.FileDebug("naabu input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, inputCount, c.F.NaabuOut)

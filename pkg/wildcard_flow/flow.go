@@ -559,7 +559,10 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "search_engine_recon":
 		return countLines(c.F.UncoverOut)
 	case "dns_resolution":
-		return countLines(c.F.DnsxOut)
+		if cnt, err := utils.CountUniqueDNSxHosts(c.F.DnsxOut); err == nil {
+			return cnt
+		}
+		return 0
 	case "dns_bruteforce":
 		return countLines(c.F.ShufflednsOut)
 	case "http_probing":

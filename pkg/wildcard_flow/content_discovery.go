@@ -48,6 +48,8 @@ func stepURLDiscovery(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 11: Historical URL Discovery")
+	writeEmptyFile(c.F.WaybackOut)
+	writeEmptyFile(c.F.GauOut)
 
 	// Track individual tool results so we can detect total failure.
 	var waybackOK, gauOK bool
@@ -106,14 +108,14 @@ func stepURLDiscovery(c *Ctx) bool {
 	})
 
 	if err == ErrToolSkipped {
-		// Skipped by user — log partial results from any tool that wrote output before the skip
+		// Skipped by user — log partial results only from files modified during this scan
 		if c.ScanID > 0 {
-			if utils.FileExists(c.F.WaybackOut) {
+			if utils.FileExists(c.F.WaybackOut) && fileModifiedAfter(c.F.WaybackOut, c.StartTime) {
 				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls"); count > 0 {
 					logger.Info("  Waybackurls partial: %d URLs", count)
 				}
 			}
-			if utils.FileExists(c.F.GauOut) {
+			if utils.FileExists(c.F.GauOut) && fileModifiedAfter(c.F.GauOut, c.StartTime) {
 				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau"); count > 0 {
 					logger.Info("  GAU partial: %d URLs", count)
 				}
@@ -145,10 +147,17 @@ func stepWebCrawling(c *Ctx) bool {
 	}
 
 	logger.StepHeader("Step 12: Web Crawling")
+	writeEmptyFile(c.F.KatanaOut)
+	writeEmptyFile(c.F.GospiderOut)
 	var katanaOK, gospiderOK bool
 	var crawlMu sync.Mutex
 
 	liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
+	if liveHostCount == 0 {
+		logger.Warning("No live hosts found — skipping web crawling")
+		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
+		return c.cancelled()
+	}
 	logger.FileDebug("web_crawling input: %s (%d live hosts)", c.F.HttpxLiveHosts, liveHostCount)
 
 	err := runWithSkip(c, "web crawling", func(sCtx context.Context) error {
@@ -201,14 +210,14 @@ func stepWebCrawling(c *Ctx) bool {
 		return nil
 	})
 
-	// Log partial results when skipped — tools may have written output before cancel
+	// Log partial results when skipped — but only from files modified during this scan
 	if err == ErrToolSkipped && c.ScanID > 0 {
-		if utils.FileExists(c.F.KatanaOut) {
+		if utils.FileExists(c.F.KatanaOut) && fileModifiedAfter(c.F.KatanaOut, c.StartTime) {
 			if count, _ := utils.CountFileLines(c.F.KatanaOut); count > 0 {
 				logger.Info("  Katana partial: %d URLs", count)
 			}
 		}
-		if utils.FileExists(c.F.GospiderOut) {
+		if utils.FileExists(c.F.GospiderOut) && fileModifiedAfter(c.F.GospiderOut, c.StartTime) {
 			if count, _ := utils.CountFileLines(c.F.GospiderOut); count > 0 {
 				logger.Info("  GoSpider partial: %d URLs", count)
 			}
@@ -237,6 +246,7 @@ func stepJSAnalysis(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 13: JavaScript Analysis")
+	writeEmptyFile(c.F.GoLinkFinderOut)
 	logger.SubStep("Running GoLinkFinder...")
 
 	if err := runWithSkip(c, "GoLinkFinder", func(sCtx context.Context) error {
@@ -274,6 +284,16 @@ func stepParamDiscovery(c *Ctx) bool {
 		return c.cancelled()
 	} else if !c.SkipArjun {
 		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
+		writeEmptyFile(c.F.ArjunOut)
+		writeEmptyFile(c.F.ArjunURLsOut)
+
+		// Preflight check
+		liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
+		if liveHostCount == 0 {
+			logger.Warning("No live hosts found — skipping Arjun parameter discovery")
+			c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+			return c.cancelled()
+		}
 		logger.SubStep("Running Arjun on live hosts...")
 
 		// Validate parameters wordlist if configured (same pattern as ffuf/shuffledns).
@@ -335,6 +355,8 @@ func stepURLConsolidation(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 15: URL Consolidation & Live Check")
+	writeEmptyFile(c.F.AllURLsRaw)
+	_ = os.Remove(c.F.AllURLsLive)
 
 	sources := c.urlSources()
 	logger.SubStep("Merging URLs from %d sources...", len(sources))
@@ -357,15 +379,19 @@ func stepURLConsolidation(c *Ctx) bool {
 	logger.SubStep("Running httpx to live-check all URLs...")
 	rawCount2, _ := utils.CountFileLines(c.F.AllURLsRaw)
 	logger.FileDebug("httpx_url_check input: %s (%d URLs) out=%s", c.F.AllURLsRaw, rawCount2, c.F.AllURLsLive)
+	var urlCheckSkipped bool
 	if err := runWithSkip(c, "httpx (URL check)", func(sCtx context.Context) error {
 		return c.Tb.RunHttpxURLCheck(sCtx, c.F.AllURLsRaw, c.F.AllURLsLive)
 	}); err != nil {
-		if err != ErrToolSkipped {
+		if err == ErrToolSkipped {
+			urlCheckSkipped = true
+		} else {
 			c.StateMgr.MarkStepFailed(c.State, "url_consolidation", err)
 			logger.Warning("URL live-check failed: %v", err)
 		}
-		// Fallback: use raw URLs if live-check fails/is skipped
-		if !utils.FileExists(c.F.AllURLsLive) {
+		// Fallback: use raw URLs if live-check fails/is skipped and no
+		// fresh output exists from this scan session.
+		if !utils.FileExists(c.F.AllURLsLive) || !fileModifiedAfter(c.F.AllURLsLive, c.StartTime) {
 			logger.Info("  Using raw URLs as fallback")
 			copyFile(c.F.AllURLsRaw, c.F.AllURLsLive)
 		}
@@ -381,7 +407,11 @@ func stepURLConsolidation(c *Ctx) bool {
 		if dbCount, err := utils.ParseLiveURLsFile(c.ScanID, c.F.AllURLsLive, "httpx-url-check"); err != nil {
 			logger.Warning("Failed to persist live URLs to DB: %v", err)
 		} else if dbCount > 0 {
-			logger.Info("  Stored %d live URLs in database", dbCount)
+			label := ""
+			if urlCheckSkipped {
+				label = " (from fallback)"
+			}
+			logger.Info("  Stored %d live URLs in database%s", dbCount, label)
 		}
 	}
 
@@ -836,6 +866,7 @@ func stepDirFuzzing(c *Ctx) bool {
 
 	if c.WordlistPath != "" {
 		logger.StepHeader("Step 17: Directory Fuzzing (ffuf)")
+		writeEmptyFile(c.F.FfufOut)
 
 		// Validate wordlist file exists before invoking ffuf.
 		// The path may come from config defaults (e.g. seclists) that aren't installed.

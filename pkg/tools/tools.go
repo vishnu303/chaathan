@@ -153,14 +153,41 @@ func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	return append(args, "-H", "User-Agent: "+t.getUA())
 }
 
-// appendArjunUA appends --headers '{"User-Agent":"..."}' for arjun.
-func (t *ToolBox) appendArjunUA(args []string) []string {
-	if !t.uaEnabled() {
+// appendArjunHeaders appends --headers '{"Key":"Value",...}' for Arjun.
+// Arjun expects a JSON object for --headers, not the "Key: Value" plain
+// format used by httpx/nuclei. This method merges the User-Agent and any
+// custom headers into a single JSON string.
+func (t *ToolBox) appendArjunHeaders(args []string) []string {
+	headers := make(map[string]string)
+
+	// Add User-Agent
+	if t.uaEnabled() {
+		headers["User-Agent"] = t.getUA()
+	}
+
+	// Merge custom headers (from --header / -H CLI flags)
+	for _, h := range t.CustomHeaders {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) == 2 {
+			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+
+	// Merge custom cookie as a header
+	if t.CustomCookie != "" {
+		headers["Cookie"] = t.CustomCookie
+	}
+
+	if len(headers) == 0 {
 		return args
 	}
-	headers := map[string]string{"User-Agent": t.getUA()}
-	headersJSON, _ := json.Marshal(headers)
-	return append(args, "--headers", string(headersJSON))
+
+	// Marshal to JSON — Arjun parses this with json.loads()
+	hJSON, err := json.Marshal(headers)
+	if err != nil {
+		return args
+	}
+	return append(args, "--headers", string(hJSON))
 }
 
 // --- Proxy helpers ---
@@ -413,8 +440,15 @@ func (t *ToolBox) RunAmass(ctx context.Context, domain string, outputFile string
 func (t *ToolBox) RunGau(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain, "--providers", "wayback", "--subs", "--o", outputFile}
 	args = t.appendProxy(args, "--proxy")
-	_, err := t.Runner.Run(ctx, "gau", args)
-	return err
+	output, err := t.Runner.Run(ctx, "gau", args)
+	if err != nil {
+		// On skip/cancel: save whatever partial output landed in the stdout buffer.
+		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
+			_ = writeToFile(outputFile, output)
+		}
+		return err
+	}
+	return nil
 }
 
 // --- DNS & Brute Force ---
@@ -516,7 +550,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 // --- Web Crawling & Fuzzing ---
 
 func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-m", "10"} // -m = per-request timeout (seconds)
+	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-t", "10"} // -t = per-request timeout (seconds)
 	args = t.appendGoSpiderUA(args)
 	args = t.appendProxy(args, "--proxy")
 	output, err := t.Runner.Run(ctx, "gospider", args)
@@ -525,7 +559,14 @@ func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile 
 			return writeErr
 		}
 	}
-	return err
+	if err != nil {
+		// On skip/cancel: preserve any partial output already written
+		if ctx.Err() != nil {
+			return err
+		}
+		return err
+	}
+	return nil
 }
 
 func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile string) error {
@@ -790,7 +831,7 @@ func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile str
 	if t.General != nil && t.General.Wordlists.Parameters != "" {
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
-	args = t.appendArjunUA(args)
+	args = t.appendArjunHeaders(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -802,7 +843,7 @@ func (t *ToolBox) RunArjunWithWordlist(ctx context.Context, inputFile string, ou
 	if wordlist != "" {
 		args = append(args, "-w", wordlist)
 	}
-	args = t.appendArjunUA(args)
+	args = t.appendArjunHeaders(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -814,7 +855,7 @@ func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, output
 	if t.General != nil && t.General.Wordlists.Parameters != "" {
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
-	args = t.appendArjunUA(args)
+	args = t.appendArjunHeaders(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }

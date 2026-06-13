@@ -113,6 +113,17 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0644)
 }
 
+// fileModifiedAfter returns true if the file at path was modified after the
+// given time. Used to distinguish partial output written during this scan
+// from stale files left over from a previous run.
+func fileModifiedAfter(path string, after time.Time) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.ModTime().After(after)
+}
+
 
 // collectLiveHostTargetsFromHttpx reads a JSONL httpx output file and
 // writes unique host URLs to outputFile. Returns the number written.

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -251,4 +252,37 @@ func DeduplicateSlice(in []string) []string {
 		}
 	}
 	return out
+}
+
+// CountUniqueDNSxHosts reads a DNSx JSONL output file and counts the unique hosts resolved
+func CountUniqueDNSxHosts(jsonPath string) (int, error) {
+	file, err := os.Open(jsonPath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	type dnsxRecord struct {
+		Host string `json:"host"`
+	}
+
+	seen := make(map[string]bool)
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 4*1024*1024)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec dnsxRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if rec.Host != "" {
+			seen[strings.ToLower(strings.TrimSpace(rec.Host))] = true
+		}
+	}
+	return len(seen), scanner.Err()
 }
