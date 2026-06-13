@@ -149,7 +149,8 @@ func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	if !t.uaEnabled() {
 		return args
 	}
-	return append(args, "-u", t.getUA())
+	// Pass User-Agent as a header to avoid parsing issues with long strings containing spaces
+	return append(args, "-H", "User-Agent: "+t.getUA())
 }
 
 // appendArjunUA appends --headers '{"User-Agent":"..."}' for arjun.
@@ -515,7 +516,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 // --- Web Crawling & Fuzzing ---
 
 func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-t", "10"} // -t = per-request timeout (seconds)
+	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-m", "10"} // -m = per-request timeout (seconds)
 	args = t.appendGoSpiderUA(args)
 	args = t.appendProxy(args, "--proxy")
 	output, err := t.Runner.Run(ctx, "gospider", args)
