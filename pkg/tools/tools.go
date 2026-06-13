@@ -182,12 +182,14 @@ func (t *ToolBox) appendArjunHeaders(args []string) []string {
 		return args
 	}
 
-	// Marshal to JSON — Arjun parses this with json.loads()
-	hJSON, err := json.Marshal(headers)
-	if err != nil {
-		return args
+	// Format headers as "Key: Value\n" separated string for Arjun
+	var headerLines []string
+	for k, v := range headers {
+		headerLines = append(headerLines, fmt.Sprintf("%s: %s", k, v))
 	}
-	return append(args, "--headers", string(hJSON))
+	
+	hString := strings.Join(headerLines, "\n")
+	return append(args, "--headers", hString)
 }
 
 // --- Proxy helpers ---
@@ -552,7 +554,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-t", "10"} // -t = per-request timeout (seconds)
 	args = t.appendGoSpiderUA(args)
-	args = t.appendProxy(args, "--proxy")
+	args = t.appendProxy(args, "-p")
 	output, err := t.Runner.Run(ctx, "gospider", args)
 	if strings.TrimSpace(output) != "" {
 		if writeErr := writeToFile(outputFile, output); writeErr != nil {
