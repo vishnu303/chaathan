@@ -402,6 +402,7 @@ func GetScansByTarget(target string) ([]Scan, error) {
 // Subdomain operations
 
 func AddSubdomain(scanID int64, domain, source string) error {
+	domain = strings.ToLower(strings.TrimSpace(domain))
 	_, err := DB.Exec(
 		`INSERT OR IGNORE INTO subdomains (scan_id, domain, source) VALUES (?, ?, ?)`,
 		scanID, domain, source,
@@ -423,6 +424,7 @@ func AddSubdomains(scanID int64, domains []string, source string) error {
 	defer stmt.Close()
 
 	for _, domain := range domains {
+		domain = strings.ToLower(strings.TrimSpace(domain))
 		if _, err := stmt.Exec(scanID, domain, source); err != nil {
 			return err
 		}
@@ -432,6 +434,7 @@ func AddSubdomains(scanID int64, domains []string, source string) error {
 }
 
 func UpdateSubdomainLive(scanID int64, domain string, isLive bool, ipAddress string) error {
+	domain = strings.ToLower(strings.TrimSpace(domain))
 	_, err := DB.Exec(
 		`UPDATE subdomains SET is_live = ?, ip_address = ? WHERE scan_id = ? AND domain = ?`,
 		isLive, ipAddress, scanID, domain,

@@ -59,6 +59,9 @@ var AllTools = []ToolInfo{
 	// Utility
 	{"anew", "Util", "Append unique lines to file", false, "github.com/tomnomnom/anew@latest"},
 	{"gf", "Util", "Pattern-based URL/param filtering", false, "github.com/tomnomnom/gf@latest"},
+
+	// Proxy Automation
+	{"mubeng", "Proxy", "Proxy scraper, checker & IP rotator (Go)", false, "github.com/mubeng/mubeng@latest"},
 }
 
 // GoInstallableTools returns the subset of AllTools that have a non-empty

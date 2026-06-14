@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -144,22 +143,52 @@ func (t *ToolBox) appendDalfoxUA(args []string) []string {
 	return append(args, "--header", "User-Agent: "+t.getUA())
 }
 
-// appendGoSpiderUA appends --user-agent "..." for gospider.
+// appendGoSpiderUA appends -u "..." for gospider.
 func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	if !t.uaEnabled() {
 		return args
 	}
-	return append(args, "--user-agent", t.getUA())
+	// Pass User-Agent as a header to avoid parsing issues with long strings containing spaces
+	return append(args, "-H", "User-Agent: "+t.getUA())
 }
 
-// appendArjunUA appends --headers '{"User-Agent":"..."}' for arjun.
-func (t *ToolBox) appendArjunUA(args []string) []string {
-	if !t.uaEnabled() {
+// appendArjunHeaders appends --headers '{"Key":"Value",...}' for Arjun.
+// Arjun expects a JSON object for --headers, not the "Key: Value" plain
+// format used by httpx/nuclei. This method merges the User-Agent and any
+// custom headers into a single JSON string.
+func (t *ToolBox) appendArjunHeaders(args []string) []string {
+	headers := make(map[string]string)
+
+	// Add User-Agent
+	if t.uaEnabled() {
+		headers["User-Agent"] = t.getUA()
+	}
+
+	// Merge custom headers (from --header / -H CLI flags)
+	for _, h := range t.CustomHeaders {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) == 2 {
+			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+
+	// Merge custom cookie as a header
+	if t.CustomCookie != "" {
+		headers["Cookie"] = t.CustomCookie
+	}
+
+	if len(headers) == 0 {
 		return args
 	}
-	headers := map[string]string{"User-Agent": t.getUA()}
-	headersJSON, _ := json.Marshal(headers)
-	return append(args, "--headers", string(headersJSON))
+
+	// Format headers as "Key: Value\n" separated string for Arjun
+	var headerLines []string
+	for k, v := range headers {
+		headerLines = append(headerLines, fmt.Sprintf("%s: %s", k, v))
+	}
+	
+	hString := strings.Join(headerLines, "\n")
+	return append(args, "--headers", hString)
 }
 
 // --- Proxy helpers ---
@@ -411,8 +440,16 @@ func (t *ToolBox) RunAmass(ctx context.Context, domain string, outputFile string
 
 func (t *ToolBox) RunGau(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain, "--providers", "wayback", "--subs", "--o", outputFile}
-	_, err := t.Runner.Run(ctx, "gau", args)
-	return err
+	args = t.appendProxy(args, "--proxy")
+	output, err := t.Runner.Run(ctx, "gau", args)
+	if err != nil {
+		// On skip/cancel: save whatever partial output landed in the stdout buffer.
+		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
+			_ = writeToFile(outputFile, output)
+		}
+		return err
+	}
+	return nil
 }
 
 // --- DNS & Brute Force ---
@@ -516,14 +553,20 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-t", "10"} // -t = per-request timeout (seconds)
 	args = t.appendGoSpiderUA(args)
-	args = t.appendProxy(args, "--proxy")
 	output, err := t.Runner.Run(ctx, "gospider", args)
 	if strings.TrimSpace(output) != "" {
 		if writeErr := writeToFile(outputFile, output); writeErr != nil {
 			return writeErr
 		}
 	}
-	return err
+	if err != nil {
+		// On skip/cancel: preserve any partial output already written
+		if ctx.Err() != nil {
+			return err
+		}
+		return err
+	}
+	return nil
 }
 
 func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile string) error {
@@ -539,7 +582,6 @@ func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile st
 	if t.CustomCookie != "" {
 		args = append(args, "-H", "Cookie: "+t.CustomCookie)
 	}
-	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate-limit", strconv.Itoa(rps))
 	}
@@ -729,7 +771,6 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 	// We bypass the Runner here so we can wire stdin correctly.
 	// hakrawler is a local binary — no network auth, no Docker concern.
 	args := []string{"-subs", "-u", "-d", "3"}
-	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		// hakrawler has no rate-limit flag; skip silently
 	}
@@ -775,6 +816,8 @@ func (t *ToolBox) RunWaybackurls(ctx context.Context, domain string, outputFile 
 // RunGoLinkFinder extracts endpoints from JavaScript files found at the given URL.
 func (t *ToolBox) RunGoLinkFinder(ctx context.Context, url string, outputFile string) error {
 	args := []string{"-d", url, "-o", outputFile}
+	// GoLinkFinder does not have a built-in proxy flag, but if it runs in docker we could pass HTTP_PROXY.
+	// We'll pass it as a runner env var later if needed, but for now it's skipped as there's no native flag.
 	_, err := t.Runner.Run(ctx, "GoLinkFinder", args)
 	return err
 }
@@ -786,7 +829,7 @@ func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile str
 	if t.General != nil && t.General.Wordlists.Parameters != "" {
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
-	args = t.appendArjunUA(args)
+	args = t.appendArjunHeaders(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -798,7 +841,7 @@ func (t *ToolBox) RunArjunWithWordlist(ctx context.Context, inputFile string, ou
 	if wordlist != "" {
 		args = append(args, "-w", wordlist)
 	}
-	args = t.appendArjunUA(args)
+	args = t.appendArjunHeaders(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -810,7 +853,7 @@ func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, output
 	if t.General != nil && t.General.Wordlists.Parameters != "" {
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
-	args = t.appendArjunUA(args)
+	args = t.appendArjunHeaders(args)
 	_, err := t.Runner.Run(ctx, "arjun", args)
 	return err
 }
@@ -1054,7 +1097,6 @@ func (t *ToolBox) RunTlsxHost(ctx context.Context, host string, outputFile strin
 		"-json",
 		"-silent",
 		"-nc",
-		"-duc",
 	}
 	_, err := t.Runner.Run(ctx, "tlsx", args)
 	return err

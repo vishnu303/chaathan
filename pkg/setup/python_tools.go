@@ -1,6 +1,9 @@
 // Python Tools Installation
 //
-// Installs pip-based Python security tools (sublist3r, arjun, cloud_enum).
+// Installs pip-based Python security tools:
+//   sublist3r, arjun, cloud_enum — recon tools
+//   proxybroker2 (proxybroker CLI) — proxy scraper & checker
+//
 // Creates shell shims in ~/.local/bin/ for pip packages that don't ship a
 // stand-alone binary.
 package setup

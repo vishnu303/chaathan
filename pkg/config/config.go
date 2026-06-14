@@ -63,6 +63,9 @@ type GeneralConfig struct {
 
 	// JS Download Limit for Secret Scanning
 	JSLimit int `yaml:"js_limit"`
+
+	// Automated proxy scraping and rotation
+	ProxyScraping ProxyScrapingConfig `yaml:"proxy_scraping"`
 }
 
 type WordlistsConfig struct {
@@ -212,6 +215,25 @@ type RateLimitConfig struct {
 	GlobalRPS int `yaml:"global_rps"`
 }
 
+// ProxyScrapingConfig controls the automated proxy scraping and rotation step.
+type ProxyScrapingConfig struct {
+	// Max runtime for proxy scraping in minutes (default: 10).
+	// Covers both scraping from public sources and checking against the target domain.
+	TimeoutMin int `yaml:"timeout_min"`
+
+	// Number of proxies to check simultaneously (default: 256)
+	MaxConcurrent int `yaml:"max_concurrent"`
+
+	// Preferred proxy protocol order (default: ["socks5","http","socks4"])
+	ProxyTypes []string `yaml:"proxy_types"`
+
+	// Mubeng rotation method: "random" or "sequent" (default: "random")
+	RotateMethod string `yaml:"rotate_method"`
+
+	// Rotate proxy after every N requests (default: 1 = every request)
+	RotateEvery int `yaml:"rotate_every"`
+}
+
 
 // Global config instance
 var Cfg *Config
@@ -294,6 +316,13 @@ func DefaultConfig() *Config {
 				Parameters:  filepath.Join(resolveSeclistsBase(), "Discovery", "Web-Content", "burp-parameter-names.txt"),
 			},
 			JSLimit: 2000,
+			ProxyScraping: ProxyScrapingConfig{
+				TimeoutMin:    10,
+				MaxConcurrent: 256,
+				ProxyTypes:    []string{"socks5", "http", "socks4"},
+				RotateMethod:  "random",
+				RotateEvery:   1,
+			},
 		},
 		APIKeys: APIKeysConfig{
 			GitHub: os.Getenv("GITHUB_TOKEN"),
@@ -386,6 +415,22 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Notifications.MinSeverity == "" {
 		cfg.Notifications.MinSeverity = "high"
+	}
+	// Proxy scraping defaults
+	if cfg.General.ProxyScraping.TimeoutMin == 0 {
+		cfg.General.ProxyScraping.TimeoutMin = 10
+	}
+	if cfg.General.ProxyScraping.MaxConcurrent == 0 {
+		cfg.General.ProxyScraping.MaxConcurrent = 256
+	}
+	if len(cfg.General.ProxyScraping.ProxyTypes) == 0 {
+		cfg.General.ProxyScraping.ProxyTypes = []string{"socks5", "http", "socks4"}
+	}
+	if cfg.General.ProxyScraping.RotateMethod == "" {
+		cfg.General.ProxyScraping.RotateMethod = "random"
+	}
+	if cfg.General.ProxyScraping.RotateEvery == 0 {
+		cfg.General.ProxyScraping.RotateEvery = 1
 	}
 }
 

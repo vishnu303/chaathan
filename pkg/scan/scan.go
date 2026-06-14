@@ -51,6 +51,8 @@ type Step struct {
 //	Phase 4 (Vuln Scanning):     vuln_scanning, vuln_scanning_urls, takeover_detection, xss_scanning
 //	Phase 5 (Fingerprinting):    tech_waf_fingerprinting
 var WildcardSteps = []Step{
+	// Phase 0 — Proxy Scraping
+	{Name: "proxy_scraping", Description: "Proxy Scraping & IP Rotation Setup", Required: false, Tool: "mubeng"},
 	// Phase 1 — Asset Discovery
 	{Name: "passive_enum", Description: "Passive Subdomain Enumeration", Required: true, Tool: "subfinder,assetfinder,sublist3r"},
 	{Name: "active_enum", Description: "Active Subdomain Enumeration", Required: false, Tool: "amass"},

@@ -8,7 +8,9 @@ package setup
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -64,6 +66,9 @@ func installGoToolsSection() (installed, skipped, failed int) {
 				tracker.Fail(tool.name, err.Error())
 			} else {
 				tracker.Complete(tool.name)
+				if tool.name == "nuclei" {
+					_ = downloadNucleiTemplates() // best effort
+				}
 			}
 		}(t)
 	}
@@ -85,4 +90,35 @@ func installGoTool(name, url string) error {
 
 	cmd := exec.CommandContext(ctx, "go", "install", "-v", url)
 	return captureCommandOutput(cmd, name)
+}
+
+// downloadNucleiTemplates runs nuclei -update-templates to populate the templates directory.
+func downloadNucleiTemplates() error {
+	// Find nuclei binary path
+	nucleiPath, err := exec.LookPath("nuclei")
+	if err != nil {
+		// Try to find it in the standard GOPATH/bin as a fallback
+		gopath := os.Getenv("GOPATH")
+		if gopath == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				gopath = filepath.Join(home, "go")
+			}
+		}
+		if gopath != "" {
+			candidate := filepath.Join(gopath, "bin", "nuclei")
+			if _, err := os.Stat(candidate); err == nil {
+				nucleiPath = candidate
+			}
+		}
+	}
+
+	if nucleiPath == "" {
+		return fmt.Errorf("nuclei binary not found")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, nucleiPath, "-update-templates")
+	return cmd.Run()
 }

@@ -76,7 +76,7 @@ func installPrerequisites() {
 
 	if runtime.GOOS != "linux" {
 		progress.ItemInfo("Auto-install only supported on Linux (Debian/Ubuntu, Arch/CachyOS).")
-		progress.ItemInfo("Please ensure: go, pip3, gem, git, make, gcc, libpcap")
+		progress.ItemInfo("Please ensure: go, pip3, git, make, gcc, libpcap")
 		return
 	}
 
@@ -101,7 +101,6 @@ func installPrerequisites() {
 	prereqs := []prereq{
 		{"Go", "go", "golang-go", "go", "", ""},
 		{"pip3", "pip3", "python3-pip", "python-pip", "", ""},
-		{"Ruby gem", "gem", "ruby-full", "ruby", "", ""},
 		{"Git", "git", "git", "git", "", ""},
 		{"Make", "make", "make", "make", "", ""},
 		{"GCC", "gcc", "gcc", "gcc", "", ""},

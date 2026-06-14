@@ -19,12 +19,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vishnu303/chaathan/pkg/database"
 	"github.com/vishnu303/chaathan/pkg/logger"
@@ -44,11 +48,14 @@ func stepURLDiscovery(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 11: Historical URL Discovery")
+	writeEmptyFile(c.F.WaybackOut)
+	writeEmptyFile(c.F.GauOut)
 
 	// Track individual tool results so we can detect total failure.
 	var waybackOK, gauOK bool
 	var resultMu sync.Mutex
 
+	var urlDiscoverySkipped bool
 	err := runWithSkip(c, "url discovery", func(sCtx context.Context) error {
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -67,11 +74,6 @@ func stepURLDiscovery(c *Ctx) bool {
 				waybackOK = true
 				resultMu.Unlock()
 				logger.SubStep("[Done] Waybackurls")
-				if c.ScanID > 0 {
-					count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls")
-					logger.Info("  Found %d URLs", count)
-					logger.FileDebug("waybackurls output: %d URLs -> %s", count, c.F.WaybackOut)
-				}
 			}
 		}()
 
@@ -89,11 +91,6 @@ func stepURLDiscovery(c *Ctx) bool {
 				gauOK = true
 				resultMu.Unlock()
 				logger.SubStep("[Done] GAU")
-				if c.ScanID > 0 {
-					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau")
-					logger.Info("  Found %d URLs", count)
-					logger.FileDebug("gau output: %d URLs -> %s", count, c.F.GauOut)
-				}
 			}
 		}()
 
@@ -102,24 +99,44 @@ func stepURLDiscovery(c *Ctx) bool {
 	})
 
 	if err == ErrToolSkipped {
-		// Skipped by user — log partial results from any tool that wrote output before the skip
-		if c.ScanID > 0 {
-			if utils.FileExists(c.F.WaybackOut) {
-				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls"); count > 0 {
-					logger.Info("  Waybackurls partial: %d URLs", count)
+		urlDiscoverySkipped = true
+	}
+
+	if c.ScanID > 0 {
+		if utils.FileExists(c.F.WaybackOut) {
+			count, _ := utils.ParseURLsFile(c.ScanID, c.F.WaybackOut, "waybackurls")
+			if count > 0 {
+				label := ""
+				if urlDiscoverySkipped {
+					label = " (partial)"
 				}
-			}
-			if utils.FileExists(c.F.GauOut) {
-				if count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau"); count > 0 {
-					logger.Info("  GAU partial: %d URLs", count)
-				}
+				logger.Info("  Waybackurls found %d URLs%s", count, label)
+			} else if urlDiscoverySkipped {
+				logger.Info("  Waybackurls skipped — no URLs found")
+			} else {
+				logger.Info("  Waybackurls found 0 URLs")
 			}
 		}
+		if utils.FileExists(c.F.GauOut) {
+			count, _ := utils.ParseURLsFile(c.ScanID, c.F.GauOut, "gau")
+			if count > 0 {
+				label := ""
+				if urlDiscoverySkipped {
+					label = " (partial)"
+				}
+				logger.Info("  GAU found %d URLs%s", count, label)
+			} else if urlDiscoverySkipped {
+				logger.Info("  GAU skipped — no URLs found")
+			} else {
+				logger.Info("  GAU found 0 URLs")
+			}
+		}
+	}
+
+	if urlDiscoverySkipped || waybackOK || gauOK {
 		c.StateMgr.MarkStepComplete(c.State, "url_discovery")
-	} else if !waybackOK && !gauOK {
-		c.StateMgr.MarkStepFailed(c.State, "url_discovery", fmt.Errorf("both Waybackurls and GAU failed"))
 	} else {
-		c.StateMgr.MarkStepComplete(c.State, "url_discovery")
+		c.StateMgr.MarkStepFailed(c.State, "url_discovery", fmt.Errorf("both Waybackurls and GAU failed"))
 	}
 	return c.cancelled()
 }
@@ -141,12 +158,20 @@ func stepWebCrawling(c *Ctx) bool {
 	}
 
 	logger.StepHeader("Step 12: Web Crawling")
+	writeEmptyFile(c.F.KatanaOut)
+	writeEmptyFile(c.F.GospiderOut)
 	var katanaOK, gospiderOK bool
 	var crawlMu sync.Mutex
 
 	liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
+	if liveHostCount == 0 {
+		logger.Warning("No live hosts found — skipping web crawling")
+		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
+		return c.cancelled()
+	}
 	logger.FileDebug("web_crawling input: %s (%d live hosts)", c.F.HttpxLiveHosts, liveHostCount)
 
+	var crawlSkipped bool
 	err := runWithSkip(c, "web crawling", func(sCtx context.Context) error {
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -164,11 +189,6 @@ func stepWebCrawling(c *Ctx) bool {
 				katanaOK = true
 				crawlMu.Unlock()
 				logger.SubStep("[Done] Katana")
-				if c.ScanID > 0 {
-					count, _ := utils.ParseURLsFile(c.ScanID, c.F.KatanaOut, "katana")
-					logger.Info("  Katana found %d URLs", count)
-					logger.FileDebug("katana output: %d URLs -> %s", count, c.F.KatanaOut)
-				}
 			}
 		}()
 
@@ -185,11 +205,6 @@ func stepWebCrawling(c *Ctx) bool {
 				gospiderOK = true
 				crawlMu.Unlock()
 				logger.SubStep("[Done] GoSpider")
-				if c.ScanID > 0 {
-					count, _ := utils.ParseURLsFile(c.ScanID, c.F.GospiderOut, "gospider")
-					logger.Info("  GoSpider found %d URLs", count)
-					logger.FileDebug("gospider output: %d URLs -> %s", count, c.F.GospiderOut)
-				}
 			}
 		}()
 
@@ -197,23 +212,44 @@ func stepWebCrawling(c *Ctx) bool {
 		return nil
 	})
 
-	// Log partial results when skipped — tools may have written output before cancel
-	if err == ErrToolSkipped && c.ScanID > 0 {
+	if err == ErrToolSkipped {
+		crawlSkipped = true
+	}
+
+	if c.ScanID > 0 {
 		if utils.FileExists(c.F.KatanaOut) {
-			if count, _ := utils.CountFileLines(c.F.KatanaOut); count > 0 {
-				logger.Info("  Katana partial: %d URLs", count)
+			count, _ := utils.ParseURLsFile(c.ScanID, c.F.KatanaOut, "katana")
+			if count > 0 {
+				label := ""
+				if crawlSkipped {
+					label = " (partial)"
+				}
+				logger.Info("  Katana found %d URLs%s", count, label)
+			} else if crawlSkipped {
+				logger.Info("  Katana skipped — no URLs found")
+			} else {
+				logger.Info("  Katana found 0 URLs")
 			}
 		}
 		if utils.FileExists(c.F.GospiderOut) {
-			if count, _ := utils.CountFileLines(c.F.GospiderOut); count > 0 {
-				logger.Info("  GoSpider partial: %d URLs", count)
+			count, _ := utils.ParseURLsFile(c.ScanID, c.F.GospiderOut, "gospider")
+			if count > 0 {
+				label := ""
+				if crawlSkipped {
+					label = " (partial)"
+				}
+				logger.Info("  GoSpider found %d URLs%s", count, label)
+			} else if crawlSkipped {
+				logger.Info("  GoSpider skipped — no URLs found")
+			} else {
+				logger.Info("  GoSpider found 0 URLs")
 			}
 		}
 	}
 
 	// Mark step based on outcome: complete if at least one crawler succeeded
 	// or the step was skipped; failed only if both crawlers failed.
-	if err == ErrToolSkipped || katanaOK || gospiderOK {
+	if crawlSkipped || katanaOK || gospiderOK {
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 	} else {
 		c.StateMgr.MarkStepFailed(c.State, "web_crawling", fmt.Errorf("both Katana and GoSpider failed"))
@@ -233,23 +269,45 @@ func stepJSAnalysis(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 13: JavaScript Analysis")
+	writeEmptyFile(c.F.GoLinkFinderOut)
 	logger.SubStep("Running GoLinkFinder...")
 
+	var golinkfinderSkipped bool
 	if err := runWithSkip(c, "GoLinkFinder", func(sCtx context.Context) error {
 		return c.Tb.RunGoLinkFinder(sCtx, "https://"+c.Domain, c.F.GoLinkFinderOut)
 	}); err != nil {
 		if err == ErrToolSkipped {
-			// Skipped steps are still marked complete so resume skips them
-			c.StateMgr.MarkStepComplete(c.State, "js_analysis")
+			golinkfinderSkipped = true
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "js_analysis", err)
 			logger.Warning("GoLinkFinder failed: %v", err)
 		}
-	} else {
-		if c.ScanID > 0 {
-			count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.GoLinkFinderOut, "golinkfinder")
-			logger.Info("  Found %d endpoints", count)
+	}
+
+	if c.ScanID > 0 && utils.FileExists(c.F.GoLinkFinderOut) {
+		count, _ := utils.ParseEndpointsFile(c.ScanID, c.F.GoLinkFinderOut, "golinkfinder")
+		if count > 0 {
+			label := ""
+			if golinkfinderSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Found %d endpoints%s", count, label)
+		} else if golinkfinderSkipped {
+			logger.Info("  GoLinkFinder skipped — no endpoints found")
+		} else {
+			logger.Info("  Found 0 endpoints")
 		}
+	}
+
+	// Only mark complete if not failed
+	hasFailure := false
+	for _, fs := range c.State.FailedSteps {
+		if fs.Name == "js_analysis" {
+			hasFailure = true
+			break
+		}
+	}
+	if !hasFailure {
 		c.StateMgr.MarkStepComplete(c.State, "js_analysis")
 	}
 	return c.cancelled()
@@ -270,6 +328,16 @@ func stepParamDiscovery(c *Ctx) bool {
 		return c.cancelled()
 	} else if !c.SkipArjun {
 		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
+		writeEmptyFile(c.F.ArjunOut)
+		writeEmptyFile(c.F.ArjunURLsOut)
+
+		// Preflight check
+		liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
+		if liveHostCount == 0 {
+			logger.Warning("No live hosts found — skipping Arjun parameter discovery")
+			c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+			return c.cancelled()
+		}
 		logger.SubStep("Running Arjun on live hosts...")
 
 		// Validate parameters wordlist if configured (same pattern as ffuf/shuffledns).
@@ -286,29 +354,44 @@ func stepParamDiscovery(c *Ctx) bool {
 			}
 		}
 
+		var arjunSkipped bool
 		if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
 			return c.Tb.RunArjunWithWordlist(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut, paramWordlist)
 		}); err != nil {
 			if err == ErrToolSkipped {
-				// User-skipped counts as intentional — mark complete so resume skips it too.
-				c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+				arjunSkipped = true
 			} else {
 				c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
 				logger.Warning("Arjun failed: %v", err)
-				// Do NOT fall through to MarkStepComplete — failure must persist for resume.
 			}
-		} else {
-			logger.SubStep("[Done] Arjun parameter discovery")
-			// Convert Arjun JSON output into parameterized URLs for downstream use
-			if count := convertArjunToURLs(c.F.ArjunOut, c.F.ArjunURLsOut); count > 0 {
-				logger.Info("  Generated %d parameterized URLs from Arjun output", count)
-			}
-			// Store discovered parameter counts for ROI scoring
-			if c.ScanID > 0 {
-				if stored := storeArjunParamCounts(c.ScanID, c.F.ArjunOut); stored > 0 {
-					logger.Info("  Stored Arjun param counts for %d URLs", stored)
+		}
+
+		if c.ScanID > 0 && utils.FileExists(c.F.ArjunOut) {
+			count := convertArjunToURLs(c.F.ArjunOut, c.F.ArjunURLsOut)
+			stored := storeArjunParamCounts(c.ScanID, c.F.ArjunOut)
+			if count > 0 || stored > 0 {
+				label := ""
+				if arjunSkipped {
+					label = " (partial)"
 				}
+				logger.Info("  Generated %d parameterized URLs from Arjun output%s", count, label)
+				logger.Info("  Stored Arjun param counts for %d URLs%s", stored, label)
+			} else if arjunSkipped {
+				logger.Info("  Arjun skipped — no parameters found")
+			} else {
+				logger.Info("  Generated 0 parameterized URLs from Arjun output")
 			}
+		}
+
+		// Only mark complete if not failed
+		hasFailure := false
+		for _, fs := range c.State.FailedSteps {
+			if fs.Name == "param_discovery" {
+				hasFailure = true
+				break
+			}
+		}
+		if !hasFailure {
 			c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		}
 	} else {
@@ -331,6 +414,8 @@ func stepURLConsolidation(c *Ctx) bool {
 		return c.cancelled()
 	}
 	logger.StepHeader("Step 15: URL Consolidation & Live Check")
+	writeEmptyFile(c.F.AllURLsRaw)
+	_ = os.Remove(c.F.AllURLsLive)
 
 	sources := c.urlSources()
 	logger.SubStep("Merging URLs from %d sources...", len(sources))
@@ -353,15 +438,19 @@ func stepURLConsolidation(c *Ctx) bool {
 	logger.SubStep("Running httpx to live-check all URLs...")
 	rawCount2, _ := utils.CountFileLines(c.F.AllURLsRaw)
 	logger.FileDebug("httpx_url_check input: %s (%d URLs) out=%s", c.F.AllURLsRaw, rawCount2, c.F.AllURLsLive)
+	var urlCheckSkipped bool
 	if err := runWithSkip(c, "httpx (URL check)", func(sCtx context.Context) error {
 		return c.Tb.RunHttpxURLCheck(sCtx, c.F.AllURLsRaw, c.F.AllURLsLive)
 	}); err != nil {
-		if err != ErrToolSkipped {
+		if err == ErrToolSkipped {
+			urlCheckSkipped = true
+		} else {
 			c.StateMgr.MarkStepFailed(c.State, "url_consolidation", err)
 			logger.Warning("URL live-check failed: %v", err)
 		}
-		// Fallback: use raw URLs if live-check fails/is skipped
-		if !utils.FileExists(c.F.AllURLsLive) {
+		// Fallback: use raw URLs if live-check fails/is skipped and no
+		// fresh output exists from this scan session.
+		if !utils.FileExists(c.F.AllURLsLive) || !fileModifiedAfter(c.F.AllURLsLive, c.StartTime) {
 			logger.Info("  Using raw URLs as fallback")
 			copyFile(c.F.AllURLsRaw, c.F.AllURLsLive)
 		}
@@ -376,8 +465,12 @@ func stepURLConsolidation(c *Ctx) bool {
 	if c.ScanID > 0 && utils.FileExists(c.F.AllURLsLive) {
 		if dbCount, err := utils.ParseLiveURLsFile(c.ScanID, c.F.AllURLsLive, "httpx-url-check"); err != nil {
 			logger.Warning("Failed to persist live URLs to DB: %v", err)
-		} else if dbCount > 0 {
-			logger.Info("  Stored %d live URLs in database", dbCount)
+		} else {
+			label := ""
+			if urlCheckSkipped {
+				label = " (from fallback)"
+			}
+			logger.Info("  Stored %d live URLs in database%s", dbCount, label)
 		}
 	}
 
@@ -395,7 +488,17 @@ func stepURLConsolidation(c *Ctx) bool {
 		}
 	}
 
-	c.StateMgr.MarkStepComplete(c.State, "url_consolidation")
+	// Only mark complete if not failed
+	hasFailure := false
+	for _, fs := range c.State.FailedSteps {
+		if fs.Name == "url_consolidation" {
+			hasFailure = true
+			break
+		}
+	}
+	if !hasFailure {
+		c.StateMgr.MarkStepComplete(c.State, "url_consolidation")
+	}
 	return c.cancelled()
 }
 
@@ -405,6 +508,305 @@ func stepURLConsolidation(c *Ctx) bool {
 
 // stepJSSecretScan downloads a capped set of JS files, scans their content
 // with installed gf JS/secret patterns, and writes merged findings.
+type gfPatternFile struct {
+	Pattern  string   `json:"pattern"`
+	Patterns []string `json:"patterns"`
+	Flags    string   `json:"flags"`
+}
+
+// loadGFPatterns reads patterns from ~/.gf/ and compiles them to regular expressions.
+func loadGFPatterns(allowlist map[string]bool) (map[string][]*regexp.Regexp, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	gfDir := filepath.Join(home, ".gf")
+	entries, err := os.ReadDir(gfDir)
+	if err != nil {
+		return nil, err
+	}
+
+	compiledPatterns := make(map[string][]*regexp.Regexp)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".json")
+		if allowlist != nil && !allowlist[name] {
+			continue
+		}
+
+		filePath := filepath.Join(gfDir, entry.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		var pf gfPatternFile
+		if err := json.Unmarshal(data, &pf); err != nil {
+			continue
+		}
+
+		var rawPatterns []string
+		if pf.Pattern != "" {
+			rawPatterns = append(rawPatterns, pf.Pattern)
+		}
+		rawPatterns = append(rawPatterns, pf.Patterns...)
+
+		// Determine Go regex flags
+		prefix := ""
+		caseInsensitive := strings.Contains(pf.Flags, "i")
+		multiline := strings.Contains(pf.Flags, "m")
+		if caseInsensitive || multiline {
+			prefix = "(?"
+			if caseInsensitive {
+				prefix += "i"
+			}
+			if multiline {
+				prefix += "m"
+			}
+			prefix += ")"
+		}
+
+		var regexes []*regexp.Regexp
+		for _, raw := range rawPatterns {
+			re, err := regexp.Compile(prefix + raw)
+			if err != nil {
+				continue
+			}
+			regexes = append(regexes, re)
+		}
+		if len(regexes) > 0 {
+			compiledPatterns[name] = regexes
+		}
+	}
+	return compiledPatterns, nil
+}
+
+// getFallbackGFPatterns returns hardcoded regexes for offline execution or when ~/.gf is empty.
+func getFallbackGFPatterns(allowlist map[string]bool) map[string][]*regexp.Regexp {
+	fallbacks := map[string]string{
+		"aws-keys": `(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}`,
+		"api-keys": `(?i)(api_key|apikey|secret|token|auth|password|key|credentials)[=:]["'][a-zA-Z0-9_\-\.\~]{10,80}["']`,
+		"jwt":      `eyJhbGciOi`,
+		"firebase": `firebaseio\.com`,
+		"github":   `(?i)github_token[=:]["'][a-zA-Z0-9]{35,40}["']`,
+		"domxss":   `\.(innerHTML|outerHTML|location|href|write|writeln|src|location\.href)`,
+		"js-sinks": `(eval|setTimeout|setInterval|Function)\(`,
+		"execs":    `exec\(`,
+	}
+
+	compiled := make(map[string][]*regexp.Regexp)
+	for name, pattern := range fallbacks {
+		if allowlist != nil && !allowlist[name] {
+			continue
+		}
+		re, err := regexp.Compile(pattern)
+		if err == nil {
+			compiled[name] = []*regexp.Regexp{re}
+		}
+	}
+	return compiled
+}
+
+// localUserAgents contains common, high-frequency browser User-Agent strings.
+var localUserAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
+}
+
+// runInMemoryJSSecretScan concurrently downloads JS files and runs regex matches on them.
+func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatterns, secretPatterns map[string][]*regexp.Regexp) (int, int, int64, []string, error) {
+	threads := 10
+	if c.Cfg != nil && c.Cfg.Tools.Httpx.Threads > 0 {
+		threads = c.Cfg.Tools.Httpx.Threads / 5
+		if threads < 5 {
+			threads = 5
+		}
+		if threads > 15 {
+			threads = 15
+		}
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig:     utils.ModernBrowserTLSConfig(),
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+	}
+	if c.Proxy != "" {
+		if proxyURL, err := url.Parse(c.Proxy); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
+
+	// Dynamic rate limiting setup (bound to GlobalRPS)
+	var rateLimiter *time.Ticker
+	if c.Tb.RateLimits != nil && c.Tb.RateLimits.GlobalRPS > 0 {
+		interval := time.Second / time.Duration(c.Tb.RateLimits.GlobalRPS)
+		rateLimiter = time.NewTicker(interval)
+		defer rateLimiter.Stop()
+	}
+
+	jobs := make(chan string, len(urls))
+	for _, u := range urls {
+		jobs <- u
+	}
+	close(jobs)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	var jsMatches []string
+	var secretMatches []string
+	var totalBytes int64
+	seenHostsWithSecrets := make(map[string]bool)
+
+	for i := 0; i < threads; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for target := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				if rateLimiter != nil {
+					select {
+					case <-ctx.Done():
+						return
+					case <-rateLimiter.C:
+					}
+				}
+
+				req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
+				if err != nil {
+					continue
+				}
+
+				// User agent setup
+				ua := localUserAgents[rand.Intn(len(localUserAgents))]
+				if c.Tb.General != nil && c.Tb.General.UserAgent != "" {
+					ua = c.Tb.General.UserAgent
+				}
+				req.Header.Set("User-Agent", ua)
+
+				// Inject Custom Cookies
+				if c.Tb.CustomCookie != "" {
+					req.Header.Set("Cookie", c.Tb.CustomCookie)
+				}
+				// Inject Custom Headers
+				for _, h := range c.Tb.CustomHeaders {
+					parts := strings.SplitN(h, ":", 2)
+					if len(parts) == 2 {
+						req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+					}
+				}
+
+				resp, err := client.Do(req)
+				if err != nil {
+					continue
+				}
+
+				// Max 10MB per file to protect memory
+				body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+				resp.Body.Close()
+				if err != nil {
+					continue
+				}
+
+				mu.Lock()
+				totalBytes += int64(len(body))
+				mu.Unlock()
+
+				lines := strings.Split(string(body), "\n")
+				var localJSMatches []string
+				var localSecretMatches []string
+				foundSecret := false
+
+				for _, line := range lines {
+					lineTrimmed := strings.TrimSpace(line)
+					if lineTrimmed == "" {
+						continue
+					}
+
+					// Scan JS patterns
+					for name, regexes := range jsPatterns {
+						for _, re := range regexes {
+							if re.MatchString(lineTrimmed) {
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+								localJSMatches = append(localJSMatches, matchLine)
+								break
+							}
+						}
+					}
+
+					// Scan Secret patterns
+					for name, regexes := range secretPatterns {
+						for _, re := range regexes {
+							if re.MatchString(lineTrimmed) {
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+								localSecretMatches = append(localSecretMatches, matchLine)
+								foundSecret = true
+								break
+							}
+						}
+					}
+				}
+
+				if len(localJSMatches) > 0 || len(localSecretMatches) > 0 {
+					mu.Lock()
+					jsMatches = append(jsMatches, localJSMatches...)
+					secretMatches = append(secretMatches, localSecretMatches...)
+					if foundSecret {
+						if parsedURL, err := url.Parse(target); err == nil && parsedURL.Hostname() != "" {
+							seenHostsWithSecrets[strings.ToLower(parsedURL.Hostname())] = true
+						}
+					}
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		return 0, 0, 0, nil, ctx.Err()
+	}
+
+	if len(jsMatches) > 0 {
+		content := strings.Join(jsMatches, "\n") + "\n"
+		_ = os.WriteFile(c.F.GFJSMatches, []byte(content), 0644)
+	} else {
+		writeEmptyFile(c.F.GFJSMatches)
+	}
+
+	if len(secretMatches) > 0 {
+		content := strings.Join(secretMatches, "\n") + "\n"
+		_ = os.WriteFile(c.F.GFSecretsMatches, []byte(content), 0644)
+	} else {
+		writeEmptyFile(c.F.GFSecretsMatches)
+	}
+
+	var secretHosts []string
+	for host := range seenHostsWithSecrets {
+		secretHosts = append(secretHosts, host)
+	}
+
+	return len(jsMatches), len(secretMatches), totalBytes, secretHosts, nil
+}
+
 func stepJSSecretScan(c *Ctx) bool {
 	if c.State.IsStepCompleted("js_secret_scan") {
 		logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets) [RESUMED — skipping]")
@@ -412,7 +814,6 @@ func stepJSSecretScan(c *Ctx) bool {
 	}
 
 	logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets)")
-	writeEmptyFile(c.F.JSCombinedFile)
 	writeEmptyFile(c.F.GFJSMatches)
 	writeEmptyFile(c.F.GFSecretsMatches)
 	writeEmptyFile(c.F.GFSecretsFinal)
@@ -429,55 +830,36 @@ func stepJSSecretScan(c *Ctx) bool {
 	}
 	logger.Info("  Selected %d JavaScript URL(s) for fetching", jsCount)
 
-	if err := os.RemoveAll(c.F.JSDownloadsDir); err != nil {
-		logger.Warning("Failed to reset JS download directory: %v", err)
+	urls := loadLineSlice(c.F.JSURLsFile, 0)
+
+	jsPatterns, err := loadGFPatterns(jsGFPatterns)
+	if err != nil || len(jsPatterns) == 0 {
+		jsPatterns = getFallbackGFPatterns(jsGFPatterns)
 	}
-	if err := os.MkdirAll(c.F.JSDownloadsDir, 0755); err != nil {
-		logger.Warning("Could not create JS download directory: %v", err)
-		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
-		return c.cancelled()
+	secretPatterns, err := loadGFPatterns(secretGFPatterns)
+	if err != nil || len(secretPatterns) == 0 {
+		secretPatterns = getFallbackGFPatterns(secretGFPatterns)
 	}
 
-	logger.SubStep("Fetching JavaScript files with httpx...")
-	if err := runWithSkip(c, "httpx (JS fetch)", func(sCtx context.Context) error {
-		return c.Tb.RunHttpxFetchJS(sCtx, c.F.JSURLsFile, c.F.JSDownloadsDir)
-	}); err != nil {
-		if err == ErrToolSkipped {
-			logger.Info("  JS fetching skipped; continuing with any downloaded content")
+	var jsMatchCount, secretMatchCount int
+	var combinedBytes int64
+	var secretHosts []string
+
+	var scanSkipped bool
+	logger.SubStep("Fetching & scanning JS files in-memory...")
+	scanErr := runWithSkip(c, "JS In-Memory Secret Scan", func(sCtx context.Context) error {
+		var err error
+		jsMatchCount, secretMatchCount, combinedBytes, secretHosts, err = runInMemoryJSSecretScan(sCtx, c, urls, jsPatterns, secretPatterns)
+		return err
+	})
+
+	if scanErr != nil {
+		if scanErr == ErrToolSkipped {
+			scanSkipped = true
+			logger.Info("  JS scanning skipped by user")
 		} else {
-			logger.Warning("JS fetching encountered an error: %v", err)
+			logger.Warning("JS scanning failed: %v", scanErr)
 		}
-	}
-
-	downloadedFiles, combinedBytes, err := concatenateDownloadedFiles(c.F.JSDownloadsDir, c.F.JSCombinedFile)
-	if err != nil {
-		logger.Warning("Failed to combine downloaded JS content: %v", err)
-		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
-		return c.cancelled()
-	}
-	if combinedBytes == 0 {
-		logger.Info("  No JS content retrieved")
-		c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
-		return c.cancelled()
-	}
-	logger.Info("  Combined %d downloaded JS response file(s)", downloadedFiles)
-
-	logger.SubStep("Running gf JavaScript patterns on downloaded content...")
-	var jsMatchCount int
-	if err := runWithSkip(c, "gf JS patterns", func(sCtx context.Context) error {
-		jsMatchCount = collectGFMatches(sCtx, c.Tb, c.F.JSCombinedFile, c.F.GFJSMatches, jsGFPatterns, 0)
-		return nil
-	}); err != nil && err != ErrToolSkipped {
-		logger.Warning("gf JS pattern scan failed: %v", err)
-	}
-
-	logger.SubStep("Running gf secret patterns on downloaded content...")
-	var secretMatchCount int
-	if err := runWithSkip(c, "gf secret patterns", func(sCtx context.Context) error {
-		secretMatchCount = collectGFMatches(sCtx, c.Tb, c.F.JSCombinedFile, c.F.GFSecretsMatches, secretGFPatterns, 0)
-		return nil
-	}); err != nil && err != ErrToolSkipped {
-		logger.Warning("gf secret pattern scan failed: %v", err)
 	}
 
 	if err := utils.MergeAndDeduplicate(existingFiles(c.F.GFJSMatches, c.F.GFSecretsMatches), c.F.GFSecretsFinal); err != nil {
@@ -488,35 +870,32 @@ func stepJSSecretScan(c *Ctx) bool {
 
 	totalFindings, _ := utils.CountFileLines(c.F.GFSecretsFinal)
 	if totalFindings > 0 {
-		logger.Info("  Found %d JS/secret findings (%d JS matches, %d secret matches)", totalFindings, jsMatchCount, secretMatchCount)
+		label := ""
+		if scanSkipped {
+			label = " (partial)"
+		}
+		logger.Info("  Found %d JS/secret findings (%d JS matches, %d secret matches)%s", totalFindings, jsMatchCount, secretMatchCount, label)
 
-		// Flag hosts that served JS with secrets for ROI scoring
-		if c.ScanID > 0 && secretMatchCount > 0 {
-			hosts := extractHostsFromURLFile(c.F.JSURLsFile)
-			if len(hosts) > 0 {
-				if err := database.MarkHostsJSSecrets(c.ScanID, hosts); err != nil {
-					logger.Warning("Failed to flag JS-secret hosts: %v", err)
-				} else {
-					logger.Info("  Flagged %d hosts with JS secrets for ROI boost", len(hosts))
-				}
+		if c.ScanID > 0 && len(secretHosts) > 0 {
+			if err := database.MarkHostsJSSecrets(c.ScanID, secretHosts); err != nil {
+				logger.Warning("Failed to flag JS-secret hosts: %v", err)
+			} else {
+				logger.Info("  Flagged %d hosts with JS secrets for ROI boost", len(secretHosts))
 			}
 		}
 	} else {
-		logger.Info("  No JS or secret findings matched installed gf patterns")
+		if scanSkipped {
+			logger.Info("  JS scanning skipped — no findings matched installed/fallback gf patterns")
+		} else {
+			logger.Info("  No JS or secret findings matched installed/fallback gf patterns")
+		}
 	}
 
-	// Prepend the size of the combined file to the top of the secrets file
-	// (only when there are actual findings — avoids a comment-only file in final_files/)
 	if totalFindings > 0 {
 		if content, err := os.ReadFile(c.F.GFSecretsFinal); err == nil {
 			header := fmt.Sprintf("// Scan Metadata | JS Combined File Size: %.4f GB\n", float64(combinedBytes)/(1024*1024*1024))
 			_ = os.WriteFile(c.F.GFSecretsFinal, append([]byte(header), content...), 0644)
 		}
-	}
-
-	// Free up massive amounts of storage by deleting the combined file after the scan finishes
-	if err := os.Remove(c.F.JSCombinedFile); err == nil {
-		logger.Info("  Cleaned up %s to free storage", c.F.JSCombinedFile)
 	}
 
 	c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
@@ -566,6 +945,7 @@ func stepDirFuzzing(c *Ctx) bool {
 
 	if c.WordlistPath != "" {
 		logger.StepHeader("Step 17: Directory Fuzzing (ffuf)")
+		writeEmptyFile(c.F.FfufOut)
 
 		// Validate wordlist file exists before invoking ffuf.
 		// The path may come from config defaults (e.g. seclists) that aren't installed.
@@ -578,23 +958,36 @@ func stepDirFuzzing(c *Ctx) bool {
 			logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
 			logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
 
+			var ffufSkipped bool
 			if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
 				return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
 			}); err != nil {
 				if err == ErrToolSkipped {
-					// Logged internally by runWithSkip
+					ffufSkipped = true
 				} else {
 					c.StateMgr.MarkStepFailed(c.State, "dir_fuzzing", err)
 					logger.Warning("ffuf failed: %v", err)
 				}
 			} else {
 				logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
-				if c.ScanID > 0 {
-					count, err := utils.ParseFfufOutput(c.ScanID, c.F.FfufOut)
-					if err != nil {
-						logger.Warning("Failed to parse ffuf results: %v", err)
-					} else if count > 0 {
-						logger.Info("  Stored %d ffuf discoveries for ROI ranking", count)
+			}
+
+			if c.ScanID > 0 && utils.FileExists(c.F.FfufOut) {
+				count, err := utils.ParseFfufOutput(c.ScanID, c.F.FfufOut)
+				if err != nil {
+					logger.Warning("Failed to parse ffuf results: %v", err)
+				} else {
+					if count > 0 {
+						c.FfufTotalFindings = count
+						label := ""
+						if ffufSkipped {
+							label = " (partial)"
+						}
+						logger.Info("  Stored %d ffuf discoveries for ROI ranking%s", count, label)
+					} else if ffufSkipped {
+						logger.Info("  ffuf skipped — no discoveries found")
+					} else {
+						logger.Info("  Stored 0 ffuf discoveries for ROI ranking")
 					}
 				}
 			}
@@ -604,7 +997,17 @@ func stepDirFuzzing(c *Ctx) bool {
 		logger.Info("Provide --wordlist to enable ffuf")
 	}
 
-	c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
+	// Only mark complete if not failed
+	hasFailure := false
+	for _, fs := range c.State.FailedSteps {
+		if fs.Name == "dir_fuzzing" {
+			hasFailure = true
+			break
+		}
+	}
+	if !hasFailure {
+		c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
+	}
 	return c.cancelled()
 }
 

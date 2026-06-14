@@ -67,12 +67,20 @@ go vet ./...
 go build -buildvcs=false -o chaathan .
 ```
 
+If developing on Windows, use WSL for all commands:
+```bash
+wsl go test ./...
+wsl go vet ./...
+wsl go build -buildvcs=false -o chaathan .
+```
+
 Then verify presentation paths (if sample DB exists):
 ```bash
 ./chaathan query subdomains <id> --json
 ./chaathan query roi <id> --json
 ./chaathan report generate <id> --format json
 ./chaathan report generate <id> --format markdown
+# On Windows, prefix with wsl: wsl ./chaathan query subdomains <id> --json
 ```
 
 If no sample DB is available, rely on compile-time checks and code inspection.
