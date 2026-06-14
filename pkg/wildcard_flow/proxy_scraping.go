@@ -86,6 +86,8 @@ func stepProxyScraping(c *Ctx) bool {
 		OutputDir:     filepath.Join(c.ResultDir, "intermediate_files"),
 	}
 
+	logger.Info("Scraping proxies and validating against %s (timeout: %dm)...", c.Domain, timeoutMin)
+
 	var result *proxy_scraping.HarvestResult
 	var harvestErr error
 	var harvestSkipped bool
