@@ -164,26 +164,28 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	var runErr error
 	select {
 	case runErr = <-done:
-		if runErr != nil && ctx.Err() != nil {
-			return nil, fmt.Errorf("cancelled: %w", ctx.Err())
-		}
+		// completed naturally
 	case <-harvestCtx.Done():
 		if ctx.Err() != nil {
-			// Parent context cancelled
-			logger.Info("Proxy check cancelled — stopping...")
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			logger.Info("Proxy check cancelled/skipped — saving checked proxies...")
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
 			<-done
-			return nil, fmt.Errorf("cancelled: %w", ctx.Err())
-		}
+		} else {
+			logger.Info("Proxy check reached timeout — stopping gracefully...")
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
+			}
 
-		logger.Info("Proxy check reached timeout — stopping gracefully...")
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
-
-		select {
-		case runErr = <-done:
-		case <-time.After(5 * time.Second):
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			runErr = <-done
+			select {
+			case runErr = <-done:
+			case <-time.After(5 * time.Second):
+				if cmd.Process != nil {
+					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				}
+				runErr = <-done
+			}
 		}
 	}
 

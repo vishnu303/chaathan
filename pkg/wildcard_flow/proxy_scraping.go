@@ -11,6 +11,7 @@
 package wildcard_flow
 
 import (
+	"context"
 	"path/filepath"
 	"time"
 
@@ -85,19 +86,35 @@ func stepProxyScraping(c *Ctx) bool {
 		OutputDir:     filepath.Join(c.ResultDir, "intermediate_files"),
 	}
 
-	logger.Info("Scraping proxies and validating against %s (timeout: %dm)...", c.Domain, timeoutMin)
+	var result *proxy_scraping.HarvestResult
+	var harvestErr error
+	var harvestSkipped bool
 
-	result, err := proxy_scraping.RunHarvest(c.GoCtx, harvestCfg)
-	if err != nil {
-		logger.Warning("Proxy scraping failed: %v — continuing without proxy", err)
+	err := runWithSkip(c, "mubeng proxy check", func(sCtx context.Context) error {
+		res, hErr := proxy_scraping.RunHarvest(sCtx, harvestCfg)
+		result = res
+		harvestErr = hErr
+		return hErr
+	})
+
+	if err == ErrToolSkipped {
+		harvestSkipped = true
+	}
+
+	if harvestErr != nil && !harvestSkipped {
+		logger.Warning("Proxy scraping failed: %v — continuing without proxy", harvestErr)
 		if c.StateMgr != nil {
 			c.StateMgr.MarkStepComplete(c.State, stepName)
 		}
 		return c.cancelled()
 	}
 
-	if result.TotalValid == 0 {
-		logger.Warning("No valid proxies found — continuing without proxy")
+	if result == nil || result.TotalValid == 0 {
+		if harvestSkipped {
+			logger.Info("  Proxy scraping skipped — no valid proxies found")
+		} else {
+			logger.Warning("No valid proxies found — continuing without proxy")
+		}
 		if c.StateMgr != nil {
 			c.StateMgr.MarkStepComplete(c.State, stepName)
 		}
@@ -109,8 +126,12 @@ func stepProxyScraping(c *Ctx) bool {
 	c.ProxyTotalScraped = result.TotalScraped
 	c.ProxyTotalValid = result.TotalValid
 
-	logger.Success("Scraped %d proxies, %d passed WAF check (took %s)",
-		result.TotalScraped, result.TotalValid,
+	label := ""
+	if harvestSkipped {
+		label = " (partial)"
+	}
+	logger.Success("Scraped %d proxies, %d passed WAF check%s (took %s)",
+		result.TotalScraped, result.TotalValid, label,
 		result.Duration.Round(time.Second))
 
 	// ── Phase B: Start mubeng rotating proxy server ─────────
