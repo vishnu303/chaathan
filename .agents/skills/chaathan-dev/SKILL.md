@@ -73,10 +73,18 @@ go vet ./...        # static analysis
 go build -buildvcs=false -o chaathan .  # build check
 ```
 
+If developing on Windows, use WSL for all commands:
+```bash
+wsl go test ./...       # all tests
+wsl go vet ./...        # static analysis
+wsl go build -buildvcs=false -o chaathan .  # build check
+```
+
 If CLI wiring changed:
 ```bash
 ./chaathan --help
 ./chaathan <subcommand> --help
+# On Windows, prefix with wsl: wsl ./chaathan --help
 ```
 
 ## Avoid

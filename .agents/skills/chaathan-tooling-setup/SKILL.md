@@ -77,10 +77,17 @@ go test ./...
 go build -buildvcs=false -o chaathan .
 ```
 
+If developing on Windows, use WSL for all commands:
+```bash
+wsl go test ./...
+wsl go build -buildvcs=false -o chaathan .
+```
+
 If environment allows:
 ```bash
 ./chaathan tools check
 ./chaathan setup --help
+# On Windows, prefix with wsl: wsl ./chaathan tools check
 ```
 
 ## Avoid

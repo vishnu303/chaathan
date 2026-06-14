@@ -194,6 +194,13 @@ go vet ./...
 go build -buildvcs=false -o chaathan .
 ```
 
+If developing on Windows, use WSL for all commands:
+```bash
+wsl go test ./...
+wsl go vet ./...
+wsl go build -buildvcs=false -o chaathan .
+```
+
 Then inspect for: compile errors from struct changes, missing skip flag propagation, stale step counts, artifact filename mismatches, downstream readers assuming non-empty files.
 
 ## Avoid

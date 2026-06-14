@@ -62,8 +62,18 @@ go vet ./...
 go build -buildvcs=false -o chaathan .
 ```
 
-If a change affects CLI behavior, also inspect the relevant `--help` output.
+If developing on Windows, use WSL for all commands:
+```bash
+wsl go test ./...
+wsl go vet ./...
+wsl go build -buildvcs=false -o chaathan .
+```
 
+If a change affects CLI behavior, also inspect the relevant `--help` output.
+```bash
+./chaathan --help
+# On Windows: wsl ./chaathan --help
+```
 ## Agent-specific notes
 
 - Antigravity and Codex agents: deep-dive skills are in `.agents/skills/`.
