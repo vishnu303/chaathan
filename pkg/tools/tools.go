@@ -553,7 +553,6 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-t", "10"} // -t = per-request timeout (seconds)
 	args = t.appendGoSpiderUA(args)
-	args = t.appendProxy(args, "-p")
 	output, err := t.Runner.Run(ctx, "gospider", args)
 	if strings.TrimSpace(output) != "" {
 		if writeErr := writeToFile(outputFile, output); writeErr != nil {
@@ -583,7 +582,6 @@ func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile st
 	if t.CustomCookie != "" {
 		args = append(args, "-H", "Cookie: "+t.CustomCookie)
 	}
-	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate-limit", strconv.Itoa(rps))
 	}
@@ -773,7 +771,6 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 	// We bypass the Runner here so we can wire stdin correctly.
 	// hakrawler is a local binary — no network auth, no Docker concern.
 	args := []string{"-subs", "-u", "-d", "3"}
-	args = t.appendProxy(args, "-proxy")
 	if rps := t.globalRPS(); rps > 0 {
 		// hakrawler has no rate-limit flag; skip silently
 	}
