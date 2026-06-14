@@ -78,22 +78,47 @@ func stepDNSConsolidation(c *Ctx) bool {
 
 	logger.SubStep("Running DNSx for resolution...")
 	logger.FileDebug("dnsx input: %s (%d lines) out=%s", c.F.ConsolidatedSubs, subCount, c.F.DnsxOut)
+	
+	var dnsxSkipped bool
 	if err := runWithSkip(c, "dnsx", func(sCtx context.Context) error {
 		return c.Tb.RunDnsx(sCtx, c.F.ConsolidatedSubs, c.F.DnsxOut)
 	}); err != nil {
 		if err == ErrToolSkipped {
-			// Logged internally by runWithSkip
+			dnsxSkipped = true
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "dns_resolution", err)
 			logger.Error("DNSx failed: %v", err)
 		}
-	} else {
+	}
+
+	if utils.FileExists(c.F.DnsxOut) {
 		uniqueHosts, _ := utils.CountUniqueDNSxHosts(c.F.DnsxOut)
 		resolvedCount, _ := utils.CountFileLines(c.F.DnsxOut)
-		logger.Info("  Resolved %d hosts (%d DNS records)", uniqueHosts, resolvedCount)
-		logger.FileDebug("dnsx output: %d hosts (%d resolved records) -> %s", uniqueHosts, resolvedCount, c.F.DnsxOut)
+		if uniqueHosts > 0 || resolvedCount > 0 {
+			label := ""
+			if dnsxSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Resolved %d hosts (%d DNS records)%s", uniqueHosts, resolvedCount, label)
+			logger.FileDebug("dnsx output: %d hosts (%d resolved records) -> %s", uniqueHosts, resolvedCount, c.F.DnsxOut)
+		} else if dnsxSkipped {
+			logger.Info("  DNSx skipped — no hosts resolved")
+		} else {
+			logger.Info("  Resolved 0 hosts (0 DNS records)")
+		}
 	}
-	c.StateMgr.MarkStepComplete(c.State, "dns_resolution")
+
+	// Only mark complete if not failed
+	hasFailure := false
+	for _, fs := range c.State.FailedSteps {
+		if fs.Name == "dns_resolution" {
+			hasFailure = true
+			break
+		}
+	}
+	if !hasFailure {
+		c.StateMgr.MarkStepComplete(c.State, "dns_resolution")
+	}
 	return c.cancelled()
 }
 
@@ -108,6 +133,7 @@ func stepDNSBruteforce(c *Ctx) bool {
 		logger.StepHeader("Step 7: DNS Brute-force (ShuffleDNS) [RESUMED — skipping]")
 	} else if !c.SkipShuffleDNS && c.DNSWordlistPath != "" {
 		logger.StepHeader("Step 7: DNS Brute-force (ShuffleDNS)")
+		writeEmptyFile(c.F.ShufflednsOut)
 
 		// Validate DNS wordlist exists (may be a default config path like seclists)
 		if !utils.FileExists(c.DNSWordlistPath) {
@@ -126,21 +152,17 @@ func stepDNSBruteforce(c *Ctx) bool {
 			logger.FileDebug("shuffledns input: domain=%s wordlist=%s resolvers=%s out=%s",
 				c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
 
+			var shufflednsSkipped bool
 			if err := runWithSkip(c, "shuffledns", func(sCtx context.Context) error {
 				return c.Tb.RunShuffleDNS(sCtx, c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
 			}); err != nil {
 				if err == ErrToolSkipped {
-					// Logged internally by runWithSkip
+					shufflednsSkipped = true
 				} else {
 					c.StateMgr.MarkStepFailed(c.State, "dns_bruteforce", err)
 					logger.Warning("ShuffleDNS failed: %v", err)
 				}
 			} else {
-				if c.ScanID > 0 {
-					count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.ShufflednsOut, "shuffledns")
-					logger.Info("  Found %d subdomains via DNS brute-force", count)
-					logger.FileDebug("shuffledns output: %d subdomains -> %s", count, c.F.ShufflednsOut)
-				}
 				// Merge brute-forced subs back into the consolidated list
 				utils.MergeAndDeduplicate(
 					[]string{c.F.ConsolidatedSubs, c.F.ShufflednsOut},
@@ -150,7 +172,34 @@ func stepDNSBruteforce(c *Ctx) bool {
 					logger.FileDebug("consolidated subs after shuffledns merge: %d", merged)
 				}
 			}
-			c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
+
+			if c.ScanID > 0 && utils.FileExists(c.F.ShufflednsOut) {
+				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.ShufflednsOut, "shuffledns")
+				if count > 0 {
+					label := ""
+					if shufflednsSkipped {
+						label = " (partial)"
+					}
+					logger.Info("  Found %d subdomains via DNS brute-force%s", count, label)
+					logger.FileDebug("shuffledns output: %d subdomains -> %s", count, c.F.ShufflednsOut)
+				} else if shufflednsSkipped {
+					logger.Info("  ShuffleDNS skipped — no subdomains found")
+				} else {
+					logger.Info("  Found 0 subdomains via DNS brute-force")
+				}
+			}
+
+			// Only mark complete if not failed
+			hasFailure := false
+			for _, fs := range c.State.FailedSteps {
+				if fs.Name == "dns_bruteforce" {
+					hasFailure = true
+					break
+				}
+			}
+			if !hasFailure {
+				c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
+			}
 		}
 	} else if c.SkipShuffleDNS {
 		logger.StepHeader("Step 7: Skipping ShuffleDNS (--skip-shuffledns)")
@@ -189,27 +238,25 @@ func stepHTTPProbing(c *Ctx) bool {
 	}); err != nil {
 		if err == ErrToolSkipped {
 			httpxSkipped = true
-			// Logged internally by runWithSkip
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "http_probing", err)
 			logger.Error("Httpx failed: %v", err)
 		}
 	}
-	// Parse results — but guard against stale files from prior scans.
-	// After a skip, only parse if the file was actually modified during this scan.
+
 	if c.ScanID > 0 && utils.FileExists(c.F.HttpxOut) {
-		if httpxSkipped && !fileModifiedAfter(c.F.HttpxOut, c.StartTime) {
+		count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
+		if count > 0 {
+			label := ""
+			if httpxSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Found %d live hosts%s", count, label)
+			logger.FileDebug("httpx output: %d live hosts -> %s", count, c.F.HttpxOut)
+		} else if httpxSkipped {
 			logger.Info("  Httpx skipped — no live host data from this scan")
 		} else {
-			count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
-			if count > 0 {
-				label := ""
-				if httpxSkipped {
-					label = " (partial)"
-				}
-				logger.Info("  Found %d live hosts%s", count, label)
-			}
-			logger.FileDebug("httpx output: %d live hosts -> %s", count, c.F.HttpxOut)
+			logger.Info("  Found 0 live hosts")
 		}
 	}
 
@@ -224,7 +271,17 @@ func stepHTTPProbing(c *Ctx) bool {
 		}
 	}
 
-	c.StateMgr.MarkStepComplete(c.State, "http_probing")
+	// Only mark complete if not failed
+	hasFailure := false
+	for _, fs := range c.State.FailedSteps {
+		if fs.Name == "http_probing" {
+			hasFailure = true
+			break
+		}
+	}
+	if !hasFailure {
+		c.StateMgr.MarkStepComplete(c.State, "http_probing")
+	}
 	return c.cancelled()
 }
 
@@ -244,27 +301,49 @@ func stepTLSAnalysis(c *Ctx) bool {
 		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
 		logger.FileDebug("tlsx input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, inputCount, c.F.TlsxOut)
 
+		var tlsxSkipped bool
 		if err := runWithSkip(c, "tlsx", func(sCtx context.Context) error {
 			return c.Tb.RunTlsx(sCtx, c.F.ConsolidatedSubs, c.F.TlsxOut)
 		}); err != nil {
 			if err == ErrToolSkipped {
-				// Logged internally by runWithSkip
+				tlsxSkipped = true
 			} else {
 				c.StateMgr.MarkStepFailed(c.State, "tls_analysis", err)
 				logger.Warning("tlsx failed: %v", err)
 			}
-		} else {
-			if c.ScanID > 0 {
-				newSubs, certVulns, _ := utils.ParseTlsxOutput(c.ScanID, c.F.TlsxOut, c.Domain)
+		}
+
+		if c.ScanID > 0 && utils.FileExists(c.F.TlsxOut) {
+			newSubs, certVulns, _ := utils.ParseTlsxOutput(c.ScanID, c.F.TlsxOut, c.Domain)
+			label := ""
+			if tlsxSkipped {
+				label = " (partial)"
+			}
+			if newSubs > 0 || certVulns > 0 {
 				if newSubs > 0 {
-					logger.Info("  Discovered %d new subdomains from certificate SANs", newSubs)
+					logger.Info("  Discovered %d new subdomains from certificate SANs%s", newSubs, label)
 				}
 				if certVulns > 0 {
-					logger.Info("  Found %d certificate issues (expired/self-signed/mismatch)", certVulns)
+					logger.Info("  Found %d certificate issues (expired/self-signed/mismatch)%s", certVulns, label)
 				}
+			} else if tlsxSkipped {
+				logger.Info("  Tlsx skipped — no new subdomains or certificate issues found")
+			} else {
+				logger.Info("  Discovered 0 new subdomains and 0 certificate issues")
 			}
 		}
-		c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
+
+		// Only mark complete if not failed
+		hasFailure := false
+		for _, fs := range c.State.FailedSteps {
+			if fs.Name == "tls_analysis" {
+				hasFailure = true
+				break
+			}
+		}
+		if !hasFailure {
+			c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
+		}
 	} else {
 		logger.StepHeader("Step 9: Skipping tlsx (--skip-tlsx)")
 		c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
@@ -280,10 +359,7 @@ func stepTLSAnalysis(c *Ctx) bool {
 				logger.Warning("Host metadata enrichment failed: %v", err)
 			} else if count > 0 {
 				logger.Info("  Stored metadata for %d live hosts", count)
-				// Ensure these hosts are marked live in the subdomains table,
-				// even if httpx was skipped and ParseHttpxOutput never ran.
-				// hostTargets contains full URLs (e.g. https://host); extract the
-				// plain hostname so the UPDATE matches the domain column correctly.
+				// Ensure these hosts are marked live in the subdomains table
 				for _, h := range hostTargets {
 					host := h
 					if parsed, err := neturl.Parse(h); err == nil && parsed.Hostname() != "" {
@@ -314,11 +390,12 @@ func stepPortScanning(c *Ctx) bool {
 		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
 		logger.FileDebug("naabu input: %s (%d hosts) out=%s", c.F.ConsolidatedSubs, inputCount, c.F.NaabuOut)
 
+		var naabuSkipped bool
 		if err := runWithSkip(c, "naabu", func(sCtx context.Context) error {
 			return c.Tb.RunNaabuList(sCtx, c.F.ConsolidatedSubs, c.F.NaabuOut)
 		}); err != nil {
 			if err == ErrToolSkipped {
-				// Logged internally by runWithSkip
+				naabuSkipped = true
 			} else {
 				c.StateMgr.MarkStepFailed(c.State, "port_scanning", err)
 				logger.Error("Naabu failed: %v", err)
@@ -328,10 +405,29 @@ func stepPortScanning(c *Ctx) bool {
 		if c.ScanID > 0 && utils.FileExists(c.F.NaabuOut) {
 			count, _ := utils.ParseNaabuOutput(c.ScanID, c.F.NaabuOut)
 			if count > 0 {
-				logger.Info("  Found %d open ports", count)
+				label := ""
+				if naabuSkipped {
+					label = " (partial)"
+				}
+				logger.Info("  Found %d open ports%s", count, label)
+			} else if naabuSkipped {
+				logger.Info("  Naabu skipped — no open ports found")
+			} else {
+				logger.Info("  Found 0 open ports")
 			}
 		}
-		c.StateMgr.MarkStepComplete(c.State, "port_scanning")
+
+		// Only mark complete if not failed
+		hasFailure := false
+		for _, fs := range c.State.FailedSteps {
+			if fs.Name == "port_scanning" {
+				hasFailure = true
+				break
+			}
+		}
+		if !hasFailure {
+			c.StateMgr.MarkStepComplete(c.State, "port_scanning")
+		}
 	} else {
 		logger.StepHeader("Step 10: Skipping Naabu (--skip-naabu)")
 		c.StateMgr.MarkStepComplete(c.State, "port_scanning")

@@ -37,6 +37,7 @@ func stepFingerprinting(c *Ctx) bool {
 
 	// 1. HTTPX Tech Detection
 	if utils.FileExists(c.F.HttpxLiveHosts) {
+		writeEmptyFile(c.F.HttpxTechOut)
 		logger.SubStep("Running HTTPX Tech Detection on live hosts...")
 		if err := runWithSkip(c, "httpx-tech", func(sCtx context.Context) error {
 			return c.Tb.RunHttpxFingerprint(sCtx, c.F.HttpxLiveHosts, c.F.HttpxTechOut)
@@ -58,28 +59,37 @@ func stepFingerprinting(c *Ctx) bool {
 		// Snapshot known vulnerabilities to avoid duplicate notifications on resume
 		knownVulnIDs := snapshotVulnIDs(c.ScanID)
 
+		var wafSkipped bool
 		if err := runWithSkip(c, "nuclei-waf", func(sCtx context.Context) error {
 			return c.Tb.RunNucleiWAF(sCtx, c.F.HttpxLiveHosts, c.F.NucleiWafOut)
 		}); err != nil {
-			if err != ErrToolSkipped {
+			if err == ErrToolSkipped {
+				wafSkipped = true
+			} else {
 				logger.Warning("Nuclei WAF Detection failed: %v", err)
 			}
-		} else {
-			if c.ScanID > 0 {
-				count, _ := utils.ParseNucleiOutput(c.ScanID, c.F.NucleiWafOut)
-				if count > 0 {
-					logger.Success("  🛡️ Found %d WAF detections!", count)
+		}
 
-					if c.Notifier != nil {
-						sendWafNotifications(c, notify.Finding{
-							Target:    c.Domain,
-							Type:      "waf",
-							Timestamp: time.Now(),
-						}, knownVulnIDs)
-					}
-				} else {
-					logger.Info("  No WAFs detected")
+		if c.ScanID > 0 && (utils.FileExists(c.F.NucleiWafOut) || wafSkipped) {
+			count, _ := utils.ParseNucleiOutput(c.ScanID, c.F.NucleiWafOut)
+			if count > 0 {
+				label := ""
+				if wafSkipped {
+					label = " (partial)"
 				}
+				logger.Success("  🛡️ Found %d WAF detections!%s", count, label)
+
+				if c.Notifier != nil {
+					sendWafNotifications(c, notify.Finding{
+						Target:    c.Domain,
+						Type:      "waf",
+						Timestamp: time.Now(),
+					}, knownVulnIDs)
+				}
+			} else if wafSkipped {
+				logger.Info("  Nuclei WAF Detection scan skipped")
+			} else {
+				logger.Info("  No WAFs detected")
 			}
 		}
 	}
