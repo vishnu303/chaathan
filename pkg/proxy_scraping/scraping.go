@@ -100,6 +100,11 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 		return nil, fmt.Errorf("cannot create proxy scraping work dir: %w", err)
 	}
 
+	// Clean up stale files from previous runs to prevent reusing old results
+	_ = os.Remove(filepath.Join(workDir, "raw_proxies.txt"))
+	_ = os.Remove(filepath.Join(workDir, "live_proxies.txt"))
+	_ = os.Remove(filepath.Join(cfg.OutputDir, "proxy_pool.txt"))
+
 	// 3. Apply timeout
 	timeoutMin := cfg.TimeoutMin
 	if timeoutMin <= 0 {
