@@ -35,6 +35,29 @@ func installGFPatternsSection(ctx *SetupContext) (installed, skipped, failed int
 		return 0, 0, 1
 	}
 
+	if !ctx.IsForceUpdate() {
+		hasPatterns := false
+		if files, err := os.ReadDir(gfDir); err == nil {
+			for _, f := range files {
+				if !f.IsDir() && filepath.Ext(f.Name()) == ".json" {
+					hasPatterns = true
+					break
+				}
+			}
+		}
+		if hasPatterns {
+			progress.ItemInfo("gf pattern pack already present")
+			files, _ := os.ReadDir(gfDir)
+			skipped := 0
+			for _, f := range files {
+				if !f.IsDir() && filepath.Ext(f.Name()) == ".json" {
+					skipped++
+				}
+			}
+			return 0, skipped, 0
+		}
+	}
+
 	tempDir, err := os.MkdirTemp("", "chaathan-gf-*")
 	if err != nil {
 		progress.ItemFail("gf patterns", "failed to create temp directory")

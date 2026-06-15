@@ -12,7 +12,10 @@ import (
 	"github.com/vishnu303/chaathan/pkg/logger"
 	"github.com/vishnu303/chaathan/pkg/paths"
 	"github.com/vishnu303/chaathan/pkg/scan"
+	"github.com/vishnu303/chaathan/pkg/tui"
 )
+
+var showPlainStatus bool
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -26,10 +29,20 @@ var statusCmd = &cobra.Command{
 }
 
 func init() {
+	statusCmd.Flags().BoolVar(&showPlainStatus, "plain", false, "Output plain text instead of starting the interactive TUI dashboard")
 	rootCmd.AddCommand(statusCmd)
 }
 
 func runStatus(cmd *cobra.Command, args []string) {
+	if !showPlainStatus {
+		if err := tui.StartDashboard(); err != nil {
+			logger.Error("Failed to start TUI dashboard: %v", err)
+			// Fallback to plain text status on dashboard failure
+		} else {
+			return
+		}
+	}
+
 	logger.ScanHeader("Status", "Dashboard", 0)
 
 	// ── Recent Scans ──
