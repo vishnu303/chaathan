@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -181,41 +180,36 @@ func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	return append(args, "-u", t.getUA())
 }
 
-// appendArjunHeaders appends --headers '{"Key":"Value",...}' for Arjun.
-// Arjun expects a JSON object for --headers, not the "Key: Value" plain
-// format used by httpx/nuclei. This method merges the User-Agent and any
-// custom headers into a single JSON string.
+// appendArjunHeaders appends --headers for Arjun.
+// Arjun expects a newline-separated string for --headers, not the JSON format.
+// This method merges the User-Agent and any custom headers and cookies,
+// then joins them with actual newline characters.
 func (t *ToolBox) appendArjunHeaders(args []string) []string {
-	headers := make(map[string]string)
+	var headerLines []string
 
 	// Add User-Agent
 	if t.uaEnabled() {
-		headers["User-Agent"] = t.getUA()
+		headerLines = append(headerLines, "User-Agent: "+t.getUA())
 	}
 
 	// Merge custom headers (from --header / -H CLI flags)
 	for _, h := range t.CustomHeaders {
-		parts := strings.SplitN(h, ":", 2)
-		if len(parts) == 2 {
-			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		if strings.Contains(h, ":") {
+			headerLines = append(headerLines, h)
 		}
 	}
 
 	// Merge custom cookie as a header
 	if t.CustomCookie != "" {
-		headers["Cookie"] = t.CustomCookie
+		headerLines = append(headerLines, "Cookie: "+t.CustomCookie)
 	}
 
-	if len(headers) == 0 {
+	if len(headerLines) == 0 {
 		return args
 	}
 
-	// Format headers as JSON object string for Arjun
-	jsonData, err := json.Marshal(headers)
-	if err != nil {
-		return args
-	}
-	return append(args, "--headers", string(jsonData))
+	// Format headers as newline-separated string for Arjun
+	return append(args, "--headers", strings.Join(headerLines, "\n"))
 }
 
 // --- Proxy helpers ---

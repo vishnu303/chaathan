@@ -86,17 +86,21 @@ func TestArjunHeaders(t *testing.T) {
 		t.Errorf("expected command 'arjun', got %q", dr.LastCmd)
 	}
 
-	// Verify that "--headers" is followed by a valid JSON string containing our headers
+	// Verify that "--headers" is followed by a valid newline-separated string containing our headers
 	foundHeaders := false
 	for i, arg := range dr.LastArgs {
 		if arg == "--headers" && i+1 < len(dr.LastArgs) {
 			foundHeaders = true
-			jsonStr := dr.LastArgs[i+1]
-			if !strings.Contains(jsonStr, `"Cookie":"my_cookie_val"`) {
-				t.Errorf("expected JSON to contain Cookie, got %q", jsonStr)
+			headerStr := dr.LastArgs[i+1]
+			if !strings.Contains(headerStr, "Cookie: my_cookie_val") {
+				t.Errorf("expected headers to contain Cookie, got %q", headerStr)
 			}
-			if !strings.Contains(jsonStr, `"X-My-Header":"header_val"`) {
-				t.Errorf("expected JSON to contain X-My-Header, got %q", jsonStr)
+			if !strings.Contains(headerStr, "X-My-Header: header_val") {
+				t.Errorf("expected headers to contain X-My-Header, got %q", headerStr)
+			}
+			// Verify that multiple headers are separated by a newline
+			if !strings.Contains(headerStr, "\n") {
+				t.Errorf("expected headers to be separated by newline, got %q", headerStr)
 			}
 			break
 		}
