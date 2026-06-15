@@ -22,9 +22,8 @@ import (
 
 // stepFingerprinting runs httpx for tech-detect and nuclei for WAF detection.
 func stepFingerprinting(c *Ctx) bool {
-	if c.State.IsStepCompleted("tech_waf_fingerprinting") {
-		logger.StepHeader("Step 22: Technology & WAF Fingerprinting [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("tech_waf_fingerprinting", "Step 22: Technology & WAF Fingerprinting"); skipped {
+		return cancelled
 	}
 
 	if c.SkipFingerprint {
@@ -32,8 +31,6 @@ func stepFingerprinting(c *Ctx) bool {
 		c.StateMgr.MarkStepComplete(c.State, "tech_waf_fingerprinting")
 		return c.cancelled()
 	}
-
-	logger.StepHeader("Step 22: Technology & WAF Fingerprinting")
 
 	// 1. HTTPX Tech Detection
 	if utils.FileExists(c.F.HttpxLiveHosts) {

@@ -370,6 +370,9 @@ func GetRecentScans(limit int) ([]Scan, error) {
 		}
 		scans = append(scans, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return scans, nil
 }
 
@@ -395,6 +398,9 @@ func GetScansByTarget(target string) ([]Scan, error) {
 			s.CompletedAt = &completedAt.Time
 		}
 		scans = append(scans, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return scans, nil
 }
@@ -465,6 +471,9 @@ func GetSubdomains(scanID int64) ([]Subdomain, error) {
 		}
 		subs = append(subs, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return subs, nil
 }
 
@@ -490,6 +499,9 @@ func GetLiveSubdomains(scanID int64) ([]Subdomain, error) {
 			s.IPAddress = ip.String
 		}
 		subs = append(subs, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return subs, nil
 }
@@ -564,6 +576,9 @@ func GetPorts(scanID int64) ([]Port, error) {
 		}
 		ports = append(ports, p)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return ports, nil
 }
 
@@ -623,6 +638,9 @@ func GetURLs(scanID int64) ([]URL, error) {
 			u.Tech = tech.String
 		}
 		urls = append(urls, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return urls, nil
 }
@@ -695,6 +713,9 @@ func scanVulnRows(rows *sql.Rows) ([]Vulnerability, error) {
 		}
 		vulns = append(vulns, v)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return vulns, nil
 }
 
@@ -716,6 +737,9 @@ func CountVulnerabilities(scanID int64) (map[string]int, error) {
 			return nil, err
 		}
 		counts[severity] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return counts, nil
 }
@@ -778,6 +802,9 @@ func GetEndpoints(scanID int64) ([]Endpoint, error) {
 			e.Method = method.String
 		}
 		endpoints = append(endpoints, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return endpoints, nil
 }
@@ -875,6 +902,10 @@ func DeleteScansByTarget(target string) (int, error) {
 		}
 		scanIDs = append(scanIDs, id)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
 	rows.Close() // explicitly closed before delete transactions begin
 
 	if len(scanIDs) == 0 {
@@ -908,6 +939,9 @@ func GetAllTargets() ([]string, error) {
 		}
 		targets = append(targets, target)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return targets, nil
 }
 
@@ -936,6 +970,10 @@ func GetTargetStats(target string) (map[string]int, error) {
 			return nil, err
 		}
 		scanIDs = append(scanIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
 	}
 	rows.Close()
 
@@ -1008,6 +1046,10 @@ func PurgeOldScans(daysOld int) (int, error) {
 			return 0, err
 		}
 		scanIDs = append(scanIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
 	}
 	rows.Close() // explicitly closed before delete transactions begin
 

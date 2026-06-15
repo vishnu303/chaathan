@@ -61,7 +61,8 @@ utils/               → file I/O, parsers, export helpers, validation, formatti
 - External tools are host dependencies; do not replace with in-process logic.
 - Keep user-visible counts accurate: 22 steps across 5 phases for wildcard, 3 steps for company.
 - Every step function must return `c.cancelled()`, never `return false`.
-- Never call `MarkStepComplete` after `MarkStepFailed` in the same error path.
+- Never call `MarkStepComplete` after `MarkStepFailed` in the same error path. Use `c.markStepCompleteIfNoFailure(stepName)` on step exit to ensure state consistency.
+- Start steps with `if resume, skip := c.resumeOrSkip(stepName, stepHeader); skip { return resume }` to standardize skip/resume checks and step logging headers.
 - `WildcardSteps` in `pkg/scan/scan.go` must match execution order in `flow.go`.
 - `SaveLog` (`--log` flag) mirrors scan output to `~/.chaathan/logs/<domain>_<scanID>_<timestamp>.log`. The log path is stored on `Ctx.LogFilePath` and shown in next-steps hints. Any new logging option follows the same pattern: add to `RunConfig`, open file in `Run()`, store path on `Ctx`.
 

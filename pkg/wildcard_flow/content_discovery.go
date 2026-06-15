@@ -43,11 +43,9 @@ import (
 // stepURLDiscovery runs Waybackurls and GAU in parallel on the target domain.
 // Returns true if the scan should be cancelled.
 func stepURLDiscovery(c *Ctx) bool {
-	if c.State.IsStepCompleted("url_discovery") {
-		logger.StepHeader("Step 11: Historical URL Discovery [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("url_discovery", "Step 11: Historical URL Discovery"); skipped {
+		return cancelled
 	}
-	logger.StepHeader("Step 11: Historical URL Discovery")
 	writeEmptyFile(c.F.WaybackOut)
 	writeEmptyFile(c.F.GauOut)
 
@@ -148,16 +146,15 @@ func stepURLDiscovery(c *Ctx) bool {
 // stepWebCrawling runs Katana and GoSpider in parallel.
 // Returns true if the scan should be cancelled.
 func stepWebCrawling(c *Ctx) bool {
-	if c.State.IsStepCompleted("web_crawling") {
-		logger.StepHeader("Step 12: Web Crawling [RESUMED — skipping]")
-		return c.cancelled()
-	} else if c.SkipCrawl {
+	if skipped, cancelled := c.resumeOrSkip("web_crawling", "Step 12: Web Crawling"); skipped {
+		return cancelled
+	}
+
+	if c.SkipCrawl {
 		logger.StepHeader("Step 12: Skipping Web Crawling (--skip-crawl)")
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 		return c.cancelled()
 	}
-
-	logger.StepHeader("Step 12: Web Crawling")
 	writeEmptyFile(c.F.KatanaOut)
 	writeEmptyFile(c.F.GospiderOut)
 	var katanaOK, gospiderOK bool
@@ -264,11 +261,9 @@ func stepWebCrawling(c *Ctx) bool {
 // stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
 // Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
-	if c.State.IsStepCompleted("js_analysis") {
-		logger.StepHeader("Step 13: JavaScript Analysis [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("js_analysis", "Step 13: JavaScript Analysis"); skipped {
+		return cancelled
 	}
-	logger.StepHeader("Step 13: JavaScript Analysis")
 	writeEmptyFile(c.F.GoLinkFinderOut)
 	logger.SubStep("Running GoLinkFinder...")
 
@@ -299,17 +294,7 @@ func stepJSAnalysis(c *Ctx) bool {
 		}
 	}
 
-	// Only mark complete if not failed
-	hasFailure := false
-	for _, fs := range c.State.FailedSteps {
-		if fs.Name == "js_analysis" {
-			hasFailure = true
-			break
-		}
-	}
-	if !hasFailure {
-		c.StateMgr.MarkStepComplete(c.State, "js_analysis")
-	}
+	c.markStepCompleteIfNoFailure("js_analysis")
 	return c.cancelled()
 }
 
@@ -323,81 +308,72 @@ func stepJSAnalysis(c *Ctx) bool {
 // downstream scanners (Nuclei/Dalfox).
 // Returns true if the scan should be cancelled.
 func stepParamDiscovery(c *Ctx) bool {
-	if c.State.IsStepCompleted("param_discovery") {
-		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun) [RESUMED — skipping]")
-		return c.cancelled()
-	} else if !c.SkipArjun {
-		logger.StepHeader("Step 14: HTTP Parameter Discovery (Arjun)")
-		writeEmptyFile(c.F.ArjunOut)
-		writeEmptyFile(c.F.ArjunURLsOut)
+	if skipped, cancelled := c.resumeOrSkip("param_discovery", "Step 14: HTTP Parameter Discovery (Arjun)"); skipped {
+		return cancelled
+	}
 
-		// Preflight check
-		liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
-		if liveHostCount == 0 {
-			logger.Warning("No live hosts found — skipping Arjun parameter discovery")
-			c.StateMgr.MarkStepComplete(c.State, "param_discovery")
-			return c.cancelled()
-		}
-		logger.SubStep("Running Arjun on live hosts...")
-
-		// Validate parameters wordlist if configured (same pattern as ffuf/shuffledns).
-		// If the file doesn't exist, run Arjun without -w so it uses its built-in default.
-		paramWordlist := ""
-		if c.Cfg != nil && c.Cfg.General.Wordlists.Parameters != "" {
-			if utils.FileExists(c.Cfg.General.Wordlists.Parameters) {
-				paramWordlist = c.Cfg.General.Wordlists.Parameters
-			} else {
-				logger.Warning("Arjun parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
-				logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or set a valid wordlist in config.yaml")
-				logger.Info("  Falling back to Arjun's built-in parameter list")
-				logger.FileDebug("arjun: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
-			}
-		}
-
-		var arjunSkipped bool
-		if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
-			return c.Tb.RunArjunWithWordlist(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut, paramWordlist)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				arjunSkipped = true
-			} else {
-				c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
-				logger.Warning("Arjun failed: %v", err)
-			}
-		}
-
-		if c.ScanID > 0 && utils.FileExists(c.F.ArjunOut) {
-			count := convertArjunToURLs(c.F.ArjunOut, c.F.ArjunURLsOut)
-			stored := storeArjunParamCounts(c.ScanID, c.F.ArjunOut)
-			if count > 0 || stored > 0 {
-				label := ""
-				if arjunSkipped {
-					label = " (partial)"
-				}
-				logger.Info("  Generated %d parameterized URLs from Arjun output%s", count, label)
-				logger.Info("  Stored Arjun param counts for %d URLs%s", stored, label)
-			} else if arjunSkipped {
-				logger.Info("  Arjun skipped — no parameters found")
-			} else {
-				logger.Info("  Generated 0 parameterized URLs from Arjun output")
-			}
-		}
-
-		// Only mark complete if not failed
-		hasFailure := false
-		for _, fs := range c.State.FailedSteps {
-			if fs.Name == "param_discovery" {
-				hasFailure = true
-				break
-			}
-		}
-		if !hasFailure {
-			c.StateMgr.MarkStepComplete(c.State, "param_discovery")
-		}
-	} else {
+	if c.SkipArjun {
 		logger.StepHeader("Step 14: Skipping Arjun (--skip-arjun)")
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+		return c.cancelled()
 	}
+
+	writeEmptyFile(c.F.ArjunOut)
+	writeEmptyFile(c.F.ArjunURLsOut)
+
+	// Preflight check
+	liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
+	if liveHostCount == 0 {
+		logger.Warning("No live hosts found — skipping Arjun parameter discovery")
+		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+		return c.cancelled()
+	}
+	logger.SubStep("Running Arjun on live hosts...")
+
+	// Validate parameters wordlist if configured (same pattern as ffuf/shuffledns).
+	// If the file doesn't exist, run Arjun without -w so it uses its built-in default.
+	paramWordlist := ""
+	if c.Cfg != nil && c.Cfg.General.Wordlists.Parameters != "" {
+		if utils.FileExists(c.Cfg.General.Wordlists.Parameters) {
+			paramWordlist = c.Cfg.General.Wordlists.Parameters
+		} else {
+			logger.Warning("Arjun parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
+			logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or set a valid wordlist in config.yaml")
+			logger.Info("  Falling back to Arjun's built-in parameter list")
+			logger.FileDebug("arjun: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
+		}
+	}
+
+	var arjunSkipped bool
+	if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
+		return c.Tb.RunArjunWithWordlist(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut, paramWordlist)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			arjunSkipped = true
+		} else {
+			c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
+			logger.Warning("Arjun failed: %v", err)
+		}
+	}
+
+	if c.ScanID > 0 && utils.FileExists(c.F.ArjunOut) {
+		count := convertArjunToURLs(c.F.ArjunOut, c.F.ArjunURLsOut)
+		stored := storeArjunParamCounts(c.ScanID, c.F.ArjunOut)
+		if count > 0 || stored > 0 {
+			label := ""
+			if arjunSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Generated %d parameterized URLs from Arjun output%s", count, label)
+			logger.Info("  Stored Arjun param counts for %d URLs%s", stored, label)
+		} else if arjunSkipped {
+			logger.Info("  Arjun skipped — no parameters found")
+		} else {
+			logger.Info("  Generated 0 parameterized URLs from Arjun output")
+		}
+	}
+
+	c.markStepCompleteIfNoFailure("param_discovery")
 	return c.cancelled()
 }
 
@@ -409,11 +385,9 @@ func stepParamDiscovery(c *Ctx) bool {
 // and enriches ROI metadata for high-value targets.
 // Returns true if the scan should be cancelled.
 func stepURLConsolidation(c *Ctx) bool {
-	if c.State.IsStepCompleted("url_consolidation") {
-		logger.StepHeader("Step 15: URL Consolidation & Live Check [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("url_consolidation", "Step 15: URL Consolidation & Live Check"); skipped {
+		return cancelled
 	}
-	logger.StepHeader("Step 15: URL Consolidation & Live Check")
 	writeEmptyFile(c.F.AllURLsRaw)
 	_ = os.Remove(c.F.AllURLsLive)
 
@@ -488,17 +462,7 @@ func stepURLConsolidation(c *Ctx) bool {
 		}
 	}
 
-	// Only mark complete if not failed
-	hasFailure := false
-	for _, fs := range c.State.FailedSteps {
-		if fs.Name == "url_consolidation" {
-			hasFailure = true
-			break
-		}
-	}
-	if !hasFailure {
-		c.StateMgr.MarkStepComplete(c.State, "url_consolidation")
-	}
+	c.markStepCompleteIfNoFailure("url_consolidation")
 	return c.cancelled()
 }
 
@@ -808,12 +772,10 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 }
 
 func stepJSSecretScan(c *Ctx) bool {
-	if c.State.IsStepCompleted("js_secret_scan") {
-		logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets) [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("js_secret_scan", "Step 16: JS Secret Scan (gf JS + Secrets)"); skipped {
+		return cancelled
 	}
 
-	logger.StepHeader("Step 16: JS Secret Scan (gf JS + Secrets)")
 	writeEmptyFile(c.F.GFJSMatches)
 	writeEmptyFile(c.F.GFSecretsMatches)
 	writeEmptyFile(c.F.GFSecretsFinal)
@@ -898,7 +860,7 @@ func stepJSSecretScan(c *Ctx) bool {
 		}
 	}
 
-	c.StateMgr.MarkStepComplete(c.State, "js_secret_scan")
+	c.markStepCompleteIfNoFailure("js_secret_scan")
 	return c.cancelled()
 }
 
@@ -938,76 +900,68 @@ func extractHostsFromURLFile(filePath string) []string {
 // stepDirFuzzing runs ffuf when a wordlist is provided via --wordlist.
 // Returns true if the scan should be cancelled.
 func stepDirFuzzing(c *Ctx) bool {
-	if c.State.IsStepCompleted("dir_fuzzing") {
-		logger.StepHeader("Step 17: Directory Fuzzing (ffuf) [RESUMED — skipping]")
+	if skipped, cancelled := c.resumeOrSkip("dir_fuzzing", "Step 17: Directory Fuzzing (ffuf)"); skipped {
+		return cancelled
+	}
+
+	if c.WordlistPath == "" {
+		logger.StepHeader("Step 17: Skipping ffuf (no --wordlist provided)")
+		logger.Info("Provide --wordlist to enable ffuf")
+		c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
 		return c.cancelled()
 	}
 
-	if c.WordlistPath != "" {
-		logger.StepHeader("Step 17: Directory Fuzzing (ffuf)")
-		writeEmptyFile(c.F.FfufOut)
+	writeEmptyFile(c.F.FfufOut)
 
-		// Validate wordlist file exists before invoking ffuf.
-		// The path may come from config defaults (e.g. seclists) that aren't installed.
-		if !utils.FileExists(c.WordlistPath) {
-			logger.Warning("ffuf wordlist not found: %s", c.WordlistPath)
-			logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --wordlist path")
-			logger.FileDebug("ffuf skipped: wordlist does not exist at %s", c.WordlistPath)
+	// Validate wordlist file exists before invoking ffuf.
+	// The path may come from config defaults (e.g. seclists) that aren't installed.
+	if !utils.FileExists(c.WordlistPath) {
+		logger.Warning("ffuf wordlist not found: %s", c.WordlistPath)
+		logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --wordlist path")
+		logger.FileDebug("ffuf skipped: wordlist does not exist at %s", c.WordlistPath)
+		c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
+		return c.cancelled()
+	}
+
+	targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
+	logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
+	logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
+
+	var ffufSkipped bool
+	if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
+		return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			ffufSkipped = true
 		} else {
-			targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
-			logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
-			logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
-
-			var ffufSkipped bool
-			if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
-				return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
-			}); err != nil {
-				if err == ErrToolSkipped {
-					ffufSkipped = true
-				} else {
-					c.StateMgr.MarkStepFailed(c.State, "dir_fuzzing", err)
-					logger.Warning("ffuf failed: %v", err)
-				}
-			} else {
-				logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
-			}
-
-			if c.ScanID > 0 && utils.FileExists(c.F.FfufOut) {
-				count, err := utils.ParseFfufOutput(c.ScanID, c.F.FfufOut)
-				if err != nil {
-					logger.Warning("Failed to parse ffuf results: %v", err)
-				} else {
-					if count > 0 {
-						c.FfufTotalFindings = count
-						label := ""
-						if ffufSkipped {
-							label = " (partial)"
-						}
-						logger.Info("  Stored %d ffuf discoveries for ROI ranking%s", count, label)
-					} else if ffufSkipped {
-						logger.Info("  ffuf skipped — no discoveries found")
-					} else {
-						logger.Info("  Stored 0 ffuf discoveries for ROI ranking")
-					}
-				}
-			}
+			c.StateMgr.MarkStepFailed(c.State, "dir_fuzzing", err)
+			logger.Warning("ffuf failed: %v", err)
 		}
 	} else {
-		logger.StepHeader("Step 17: Skipping ffuf (no --wordlist provided)")
-		logger.Info("Provide --wordlist to enable ffuf")
+		logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
 	}
 
-	// Only mark complete if not failed
-	hasFailure := false
-	for _, fs := range c.State.FailedSteps {
-		if fs.Name == "dir_fuzzing" {
-			hasFailure = true
-			break
+	if c.ScanID > 0 && utils.FileExists(c.F.FfufOut) {
+		count, err := utils.ParseFfufOutput(c.ScanID, c.F.FfufOut)
+		if err != nil {
+			logger.Warning("Failed to parse ffuf results: %v", err)
+		} else {
+			if count > 0 {
+				c.FfufTotalFindings = count
+				label := ""
+				if ffufSkipped {
+					label = " (partial)"
+				}
+				logger.Info("  Stored %d ffuf discoveries for ROI ranking%s", count, label)
+			} else if ffufSkipped {
+				logger.Info("  ffuf skipped — no discoveries found")
+			} else {
+				logger.Info("  Stored 0 ffuf discoveries for ROI ranking")
+			}
 		}
 	}
-	if !hasFailure {
-		c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
-	}
+
+	c.markStepCompleteIfNoFailure("dir_fuzzing")
 	return c.cancelled()
 }
 

@@ -5,20 +5,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vishnu303/chaathan/pkg/logger"
 )
 
 // ── ANSI codes ───────────────────────────────────────────────────────────────
 
 const (
-	Reset   = "\033[0m"
-	Bold    = "\033[1m"
-	Dim     = "\033[2m"
-	Red     = "\033[31m"
-	Green   = "\033[32m"
-	Yellow  = "\033[33m"
-	Blue    = "\033[34m"
-	Cyan    = "\033[36m"
-	White   = "\033[97m"
+	Reset   = logger.Reset
+	Bold    = logger.Bold
+	Dim     = logger.Dim
+	Red     = logger.Red
+	Green   = logger.Green
+	Yellow  = logger.Yellow
+	Blue    = logger.Blue
+	Cyan    = logger.Cyan
+	White   = logger.White
 	ClearLn = "\033[2K"
 )
 
@@ -260,13 +262,7 @@ func (t *Tracker) Stats() (installed, skipped, failed int) {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 func fmtDuration(d time.Duration) string {
-	d = d.Round(time.Second)
-	m := int(d.Minutes())
-	s := int(d.Seconds()) % 60
-	if m > 0 {
-		return fmt.Sprintf("%dm%02ds", m, s)
-	}
-	return fmt.Sprintf("%ds", s)
+	return logger.FmtDuration(d)
 }
 
 func fmtShort(d time.Duration) string {

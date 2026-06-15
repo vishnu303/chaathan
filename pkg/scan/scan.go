@@ -175,10 +175,8 @@ func (m *Manager) MarkStepComplete(state *State, stepName string) error {
 	}
 
 	// Avoid double-counting steps (common when resume/skip paths re-mark).
-	for _, s := range state.CompletedSteps {
-		if s == stepName {
-			return m.UpdateState(state)
-		}
+	if state.IsStepCompleted(stepName) {
+		return m.UpdateState(state)
 	}
 	state.CompletedSteps = append(state.CompletedSteps, stepName)
 	// Keep CurrentStep aligned to the number of unique completed steps.

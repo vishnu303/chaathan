@@ -1,10 +1,12 @@
 package scope
 
 import (
-	"github.com/vishnu303/chaathan/pkg/config"
+	"fmt"
 	"net"
 	"regexp"
 	"strings"
+
+	"github.com/vishnu303/chaathan/pkg/config"
 )
 
 // Scope manages in-scope and out-of-scope targets
@@ -21,39 +23,24 @@ func New(cfg *config.ScopeConfig) (*Scope, error) {
 		allowedPorts: make(map[int]bool),
 	}
 
+	var err error
 	// Compile in-scope patterns
-	for _, pattern := range cfg.InScope {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, err
-		}
-		s.inScopePatterns = append(s.inScopePatterns, re)
+	s.inScopePatterns, err = compilePatterns(cfg.InScope)
+	if err != nil {
+		return nil, err
 	}
 
 	// Compile out-of-scope patterns
-	for _, pattern := range cfg.OutOfScope {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, err
-		}
-		s.outScopePatterns = append(s.outScopePatterns, re)
+	s.outScopePatterns, err = compilePatterns(cfg.OutOfScope)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse excluded IP ranges
 	for _, cidr := range cfg.ExcludeIPs {
-		_, ipNet, err := net.ParseCIDR(cidr)
+		ipNet, err := parseIPOrCIDR(cidr)
 		if err != nil {
-			// Try parsing as single IP
-			ip := net.ParseIP(cidr)
-			if ip != nil {
-				if ip.To4() != nil {
-					_, ipNet, _ = net.ParseCIDR(cidr + "/32")
-				} else {
-					_, ipNet, _ = net.ParseCIDR(cidr + "/128")
-				}
-			} else {
-				return nil, err
-			}
+			return nil, err
 		}
 		if ipNet != nil {
 			s.excludeNets = append(s.excludeNets, ipNet)
@@ -66,6 +53,41 @@ func New(cfg *config.ScopeConfig) (*Scope, error) {
 	}
 
 	return s, nil
+}
+
+// parseIPOrCIDR parses a string which can be a single IP or CIDR network.
+func parseIPOrCIDR(input string) (*net.IPNet, error) {
+	input = strings.TrimSpace(input)
+	_, ipNet, err := net.ParseCIDR(input)
+	if err == nil {
+		return ipNet, nil
+	}
+
+	ip := net.ParseIP(input)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid IP or CIDR: %q", input)
+	}
+
+	bits := 32
+	if ip.To4() == nil {
+		bits = 128
+	}
+
+	_, ipNet, err = net.ParseCIDR(fmt.Sprintf("%s/%d", input, bits))
+	return ipNet, err
+}
+
+// compilePatterns is a helper that compiles a slice of string regex patterns.
+func compilePatterns(patterns []string) ([]*regexp.Regexp, error) {
+	regexes := make([]*regexp.Regexp, 0, len(patterns))
+	for _, pattern := range patterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, err
+		}
+		regexes = append(regexes, re)
+	}
+	return regexes, nil
 }
 
 // IsInScope checks if a domain/host is in scope
@@ -133,7 +155,7 @@ func (s *Scope) FilterDomains(domains []string) []string {
 
 	var filtered []string
 	for _, domain := range domains {
-		if s.IsInScope(domain) && !s.IsOutOfScope(domain) {
+		if s.IsInScope(domain) {
 			filtered = append(filtered, domain)
 		}
 	}
@@ -201,11 +223,7 @@ func WildcardScope(domain string) (*Scope, error) {
 // ValidateTarget checks if a target should be scanned based on scope rules
 func (s *Scope) ValidateTarget(domain string, ip string, port int) bool {
 	// Check domain scope
-	if domain != "" && s.IsOutOfScope(domain) {
-		return false
-	}
-
-	if len(s.inScopePatterns) > 0 && domain != "" && !s.IsInScope(domain) {
+	if domain != "" && !s.IsInScope(domain) {
 		return false
 	}
 

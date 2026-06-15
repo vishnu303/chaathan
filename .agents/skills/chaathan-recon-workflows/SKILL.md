@@ -111,7 +111,10 @@ Phase 5 — Fingerprinting       (Step 23)     in: live hosts     out: Tech/WAF 
 Every step function must return `c.cancelled()` — never hard-code `return false`. This ensures Ctrl+C propagates through `executeStep` in `flow.go` and triggers `finalizeScan("cancelled")`. Resume early-returns must also return `c.cancelled()`.
 
 ### Error vs completion
-When a step calls `MarkStepFailed`, do **not** call `MarkStepComplete` afterward — it clears the failure. Either return early after failure, or call `MarkStepComplete` only in the success branch.
+When a step calls `MarkStepFailed`, do **not** call `MarkStepComplete` afterward — it clears the failure. To ensure compliance with this invariant, always use the `c.markStepCompleteIfNoFailure(stepName)` helper on step exit instead of calling `MarkStepComplete` directly.
+
+### Step Initialization
+Always start workflow step functions with `if resume, skip := c.resumeOrSkip(stepName, stepHeader); skip { return resume }`. This standardizes logging headers, state checking, and resume logic.
 
 ### State keys
 Resume state uses **string-based** keys (e.g. `"url_discovery"`, `"web_crawling"`), not step numbers. Renumbering logger labels does NOT break resume.

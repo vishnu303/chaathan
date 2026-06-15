@@ -100,9 +100,9 @@ func retryRun(ctx context.Context, command string, maxRetries int, retryDelay ti
 	return "", lastErr
 }
 
-// ── NativeRunner ────────────────────────────────────────────────────────────
-
-func (r *NativeRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
+// executeWithRetry abstracts the option processing, per-tool timeout context creation,
+// and retry loop execution shared by both NativeRunner and DockerRunner.
+func executeWithRetry(ctx context.Context, command string, maxRetries int, retryDelay time.Duration, opts []Option, runOnceFn func(context.Context, *RunOptions) (string, error)) (string, error) {
 	options := &RunOptions{}
 	for _, o := range opts {
 		o(options)
@@ -116,7 +116,15 @@ func (r *NativeRunner) Run(ctx context.Context, command string, args []string, o
 		defer cancel()
 	}
 
-	return retryRun(runCtx, command, r.MaxRetries, r.RetryDelay, func(rCtx context.Context) (string, error) {
+	return retryRun(runCtx, command, maxRetries, retryDelay, func(rCtx context.Context) (string, error) {
+		return runOnceFn(rCtx, options)
+	})
+}
+
+// ── NativeRunner ────────────────────────────────────────────────────────────
+
+func (r *NativeRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
+	return executeWithRetry(ctx, command, r.MaxRetries, r.RetryDelay, opts, func(rCtx context.Context, options *RunOptions) (string, error) {
 		return r.runOnce(rCtx, command, args, options)
 	})
 }
@@ -167,20 +175,7 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 // ── DockerRunner ────────────────────────────────────────────────────────────
 
 func (r *DockerRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
-	options := &RunOptions{}
-	for _, o := range opts {
-		o(options)
-	}
-
-	// Apply per-tool timeout if configured
-	runCtx := ctx
-	if options.Timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, options.Timeout)
-		defer cancel()
-	}
-
-	return retryRun(runCtx, command, r.MaxRetries, r.RetryDelay, func(rCtx context.Context) (string, error) {
+	return executeWithRetry(ctx, command, r.MaxRetries, r.RetryDelay, opts, func(rCtx context.Context, options *RunOptions) (string, error) {
 		return r.runOnce(rCtx, command, args, options)
 	})
 }

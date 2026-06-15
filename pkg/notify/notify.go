@@ -14,6 +14,46 @@ import (
 	"github.com/vishnu303/chaathan/pkg/config"
 )
 
+var telegramEscaper = strings.NewReplacer(
+	"_", "\\_",
+	"*", "\\*",
+	"[", "\\[",
+	"]", "\\]",
+	"`", "\\`",
+	"~", "\\~",
+	">", "\\>",
+	"#", "\\#",
+	"+", "\\+",
+	"-", "\\-",
+	"=", "\\=",
+	"|", "\\|",
+	"{", "\\{",
+	"}", "\\}",
+	".", "\\.",
+	"!", "\\!",
+	"(", "\\(",
+	")", "\\)",
+)
+
+// getOrderedStatsKeys returns the stats keys ordered by preference for display.
+func getOrderedStatsKeys(stats map[string]int) []string {
+	preferred := []string{"subdomains", "live", "urls", "endpoints", "ports", "vulnerabilities"}
+	var keys []string
+	seen := make(map[string]bool)
+	for _, k := range preferred {
+		if _, ok := stats[k]; ok {
+			keys = append(keys, k)
+			seen[k] = true
+		}
+	}
+	for k := range stats {
+		if !seen[k] {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 // Severity levels for comparison
 var severityLevels = map[string]int{
 	"info":     1,
@@ -305,9 +345,9 @@ func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
 		{"name": "Duration", "value": scan.Duration.String(), "inline": true},
 	}
 
-	for k, v := range scan.Stats {
+	for _, k := range getOrderedStatsKeys(scan.Stats) {
 		fields = append(fields, map[string]any{
-			"name": k, "value": fmt.Sprintf("%d", v), "inline": true,
+			"name": titleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "inline": true,
 		})
 	}
 
@@ -393,9 +433,9 @@ func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
 		{"title": "Duration", "value": scan.Duration.String(), "short": true},
 	}
 
-	for k, v := range scan.Stats {
+	for _, k := range getOrderedStatsKeys(scan.Stats) {
 		fields = append(fields, map[string]any{
-			"title": k, "value": fmt.Sprintf("%d", v), "short": true,
+			"title": titleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "short": true,
 		})
 	}
 
@@ -491,20 +531,9 @@ func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
 		scan.ScanID,
 	)
 
-	// Display stats with per-metric emojis in a preferred order
-	orderedKeys := []string{"subdomains", "live", "urls", "endpoints", "ports", "vulnerabilities"}
-	printed := make(map[string]bool)
-	for _, k := range orderedKeys {
-		if v, ok := scan.Stats[k]; ok {
-			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), v)
-			printed[k] = true
-		}
-	}
-	// Any remaining keys not in the preferred order
-	for k, v := range scan.Stats {
-		if !printed[k] {
-			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), v)
-		}
+	// Display stats in preferred order
+	for _, k := range getOrderedStatsKeys(scan.Stats) {
+		text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), scan.Stats[k])
 	}
 
 	text += fmt.Sprintf(
@@ -702,27 +731,7 @@ func escapeMarkdown(s string) string {
 	// Backslash MUST be escaped first to avoid double-escaping the
 	// backslashes we insert for the other characters.
 	s = strings.ReplaceAll(s, "\\", "\\\\")
-	replacer := strings.NewReplacer(
-		"_", "\\_",
-		"*", "\\*",
-		"[", "\\[",
-		"]", "\\]",
-		"`", "\\`",
-		"~", "\\~",
-		">", "\\>",
-		"#", "\\#",
-		"+", "\\+",
-		"-", "\\-",
-		"=", "\\=",
-		"|", "\\|",
-		"{", "\\{",
-		"}", "\\}",
-		".", "\\.",
-		"!", "\\!",
-		"(", "\\(",
-		")", "\\)",
-	)
-	return replacer.Replace(s)
+	return telegramEscaper.Replace(s)
 }
 
 // titleCase capitalises the first rune of s (replaces deprecated strings.Title).

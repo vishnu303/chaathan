@@ -242,6 +242,31 @@ Following a comprehensive package refactor, the `cli` package has been optimized
 *   **Deterministic Output & UX**: Key-value settings output (like `config set` errors) are systematically grouped and sorted using the Go `"sort"` package to guarantee stable, predictable, and clean terminal displays.
 *   **Unified Serialization**: A single `writeJSONOrPrint` routine standardizes JSON output formatting and file-writing across all database query subcommands.
 
+*   **Decoupled & Standardized Utility Packages**: Core utility packages (`pkg/paths`, `pkg/config`, `pkg/scope`, `pkg/logger`, and `pkg/progress`) have been refactored for maximum decoupling:
+    *   **Environment-Aware Configuration & Paths**: `pkg/paths` supports environment overrides (e.g. `CHAATHAN_HOME`) allowing isolated testing configurations, and `pkg/config` maps API keys efficiently to environment variable lookups.
+    *   **Unified Terminal Styling**: Progress indicators in `pkg/progress` reuse consolidated ANSI color structures and duration formatting from `pkg/logger` to avoid duplication.
+    *   **High-Performance File Logging**: The logging system performs ANSI regex cleaning and timestamping outside critical mutex locks to drastically reduce lock contention and thread synchronization overhead.
+    *   **Simplified Scope Validation**: Duplicate filtering checks and regular expression compilation have been refactored into centralized package helpers within `pkg/scope`.
+
+*   **DRY & Robust Execution & Bootstrapping**: Execution-related modules (`pkg/runner`, `pkg/tools`, `pkg/setup`, `pkg/update`, and `pkg/orchestrate`) have been optimized for logic consolidation:
+    *   **Unified Command Runner**: Common timeout context setup and retry loops in `pkg/runner` are abstracted into a single, context-aware retry helper shared by both Native and Docker run methods.
+    *   **Consolidated Arguments Building**: Tool arguments preparation (proxy configuration, custom headers/cookies, and browser-like user agents) is unified into a single configuration-driven helper `appendCommon` in `pkg/tools`, avoiding code replication across 20+ tool wrappers.
+    *   **Unified System Paths**: Shared GOPATH resolutions and file-check validations have been consolidated in `pkg/setup` to keep tool installation dry.
+    *   **Standardized SemVer Rules**: The self-update system utilizes robust SemVer check comparisons and standard loop forms to verify upgrades.
+*   **Workflow Orchestration & State Management (`pkg/wildcard_flow/`)**:
+    *   **Step Entry/Exit Standardization**: Unified state validation and terminal instrumentation through `resumeOrSkip(stepName, stepHeader)` and `markStepCompleteIfNoFailure(stepName)` helpers, preventing invalid state transitions (such as marking steps complete when pre-conditions or executions fail).
+    *   **Resource-Efficient Stream-Based I/O**: High-performance file operations (like `copyFile`) refactored to use `io.Copy` stream pipelines instead of reading entire files into memory, guaranteeing $O(1)$ memory complexity even during massive reconnaissance runs.
+
+---
+
+## 💡 Demonstrated Development Skills
+
+This codebase showcases a range of advanced Go engineering and system-level programming skills:
+*   **Go Concurrency & Coordination**: Safe management of background workers, rotating proxies, and parallel probes using context propagation, channel orchestration, and wait group controls.
+*   **Structured State Machine Management**: Strict validation of workflow progress and recovery. Relies on structured SQLite persistence for step-by-step resume support, enabling execution interruption and restart without target re-scanning.
+*   **Low-Memory High-Throughput I/O**: Stream pipelines using reader/writer interfaces (`io.Reader`/`io.Writer`) to handle vast lists of subdomains and URLs without memory exhaustion.
+*   **Factory-Driven Tool Registry**: A clean, unified interface for invoking and configuring 30+ external binaries dynamically based on global runtime flags, network proxies, and target scopes.
+
 ---
 
 ## ⚖️ Legal & Disclaimer

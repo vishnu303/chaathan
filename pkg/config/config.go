@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -341,7 +342,7 @@ func DefaultConfig() *Config {
 				RateLimit:      150,
 				Severity:       []string{"low", "medium", "high", "critical"},
 				ExcludeTags:    []string{"dos", "fuzz"},
-				DisableOOB:     new(true),
+				DisableOOB:     newBool(true),
 				MaxTimeout:     300,
 				DASTAggression: "low",
 			},
@@ -362,7 +363,7 @@ func DefaultConfig() *Config {
 			},
 			Dalfox: DalfoxConfig{
 				MaxURLs:        500,
-				SkipThirdParty: new(true),
+				SkipThirdParty: newBool(true),
 			},
 		},
 		Notifications: NotificationConfig{
@@ -381,53 +382,46 @@ func DefaultConfig() *Config {
 	}
 }
 
+func newBool(b bool) *bool {
+	return &b
+}
+
+func defaultString(val *string, def string) {
+	if *val == "" {
+		*val = def
+	}
+}
+
+func defaultInt(val *int, def int) {
+	if *val == 0 {
+		*val = def
+	}
+}
+
 func applyDefaults(cfg *Config) {
-	if cfg.General.Mode == "" {
-		cfg.General.Mode = "native"
-	}
-	if cfg.General.JSLimit == 0 {
-		cfg.General.JSLimit = 2000
-	}
-	if cfg.Tools.Nuclei.Concurrency == 0 {
-		cfg.Tools.Nuclei.Concurrency = 25
-	}
-	if cfg.Tools.Nuclei.RateLimit == 0 {
-		cfg.Tools.Nuclei.RateLimit = 150
-	}
-	if cfg.Tools.Nuclei.MaxTimeout == 0 {
-		cfg.Tools.Nuclei.MaxTimeout = 300
-	}
+	defaultString(&cfg.General.Mode, "native")
+	defaultInt(&cfg.General.JSLimit, 2000)
+	defaultInt(&cfg.Tools.Nuclei.Concurrency, 25)
+	defaultInt(&cfg.Tools.Nuclei.RateLimit, 150)
+	defaultInt(&cfg.Tools.Nuclei.MaxTimeout, 300)
 	if cfg.Tools.Nuclei.DisableOOB == nil {
-		cfg.Tools.Nuclei.DisableOOB = new(true)
+		cfg.Tools.Nuclei.DisableOOB = newBool(true)
 	}
-	if cfg.Tools.Nuclei.DASTAggression == "" {
-		cfg.Tools.Nuclei.DASTAggression = "low"
-	}
-	if cfg.Tools.Dalfox.MaxURLs == 0 {
-		cfg.Tools.Dalfox.MaxURLs = 500
-	}
+	defaultString(&cfg.Tools.Nuclei.DASTAggression, "low")
+	defaultInt(&cfg.Tools.Dalfox.MaxURLs, 500)
 	if cfg.Tools.Dalfox.SkipThirdParty == nil {
-		cfg.Tools.Dalfox.SkipThirdParty = new(true)
+		cfg.Tools.Dalfox.SkipThirdParty = newBool(true)
 	}
-	if cfg.Notifications.MinSeverity == "" {
-		cfg.Notifications.MinSeverity = "high"
-	}
+	defaultString(&cfg.Notifications.MinSeverity, "high")
+
 	// Proxy scraping defaults
-	if cfg.General.ProxyScraping.TimeoutMin == 0 {
-		cfg.General.ProxyScraping.TimeoutMin = 10
-	}
-	if cfg.General.ProxyScraping.MaxConcurrent == 0 {
-		cfg.General.ProxyScraping.MaxConcurrent = 256
-	}
+	defaultInt(&cfg.General.ProxyScraping.TimeoutMin, 10)
+	defaultInt(&cfg.General.ProxyScraping.MaxConcurrent, 256)
 	if len(cfg.General.ProxyScraping.ProxyTypes) == 0 {
 		cfg.General.ProxyScraping.ProxyTypes = []string{"socks5", "http", "socks4"}
 	}
-	if cfg.General.ProxyScraping.RotateMethod == "" {
-		cfg.General.ProxyScraping.RotateMethod = "random"
-	}
-	if cfg.General.ProxyScraping.RotateEvery == 0 {
-		cfg.General.ProxyScraping.RotateEvery = 1
-	}
+	defaultString(&cfg.General.ProxyScraping.RotateMethod, "random")
+	defaultInt(&cfg.General.ProxyScraping.RotateEvery, 1)
 }
 
 // GetDefaultConfigPath returns the default config file path
@@ -435,37 +429,38 @@ func GetDefaultConfigPath() string {
 	return paths.ConfigPath()
 }
 
+// apiKeyEnvMap maps API key config names to their corresponding environment variable names.
+var apiKeyEnvMap = map[string]string{
+	"github":         "GITHUB_TOKEN",
+	"shodan":         "SHODAN_API_KEY",
+	"securitytrails": "SECURITYTRAILS_KEY",
+	"virustotal":     "VT_API_KEY",
+	"chaos":          "CHAOS_KEY",
+}
+
 // GetAPIKey retrieves an API key from config or environment
 func (c *Config) GetAPIKey(name string) string {
-	switch name {
+	nameLower := strings.ToLower(name)
+	var val string
+	switch nameLower {
 	case "github":
-		if c.APIKeys.GitHub != "" {
-			return c.APIKeys.GitHub
-		}
-		return os.Getenv("GITHUB_TOKEN")
+		val = c.APIKeys.GitHub
 	case "shodan":
-		if c.APIKeys.Shodan != "" {
-			return c.APIKeys.Shodan
-		}
-		return os.Getenv("SHODAN_API_KEY")
+		val = c.APIKeys.Shodan
 	case "securitytrails":
-		if c.APIKeys.SecurityTrails != "" {
-			return c.APIKeys.SecurityTrails
-		}
-		return os.Getenv("SECURITYTRAILS_KEY")
+		val = c.APIKeys.SecurityTrails
 	case "virustotal":
-		if c.APIKeys.VirusTotal != "" {
-			return c.APIKeys.VirusTotal
-		}
-		return os.Getenv("VT_API_KEY")
+		val = c.APIKeys.VirusTotal
 	case "chaos":
-		if c.APIKeys.Chaos != "" {
-			return c.APIKeys.Chaos
-		}
-		return os.Getenv("CHAOS_KEY")
-	default:
-		return ""
+		val = c.APIKeys.Chaos
 	}
+	if val != "" {
+		return val
+	}
+	if envVar, exists := apiKeyEnvMap[nameLower]; exists {
+		return os.Getenv(envVar)
+	}
+	return ""
 }
 
 // resolveSeclistsBase returns the seclists installation base directory.

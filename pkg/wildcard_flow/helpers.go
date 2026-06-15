@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -40,6 +41,35 @@ var secretGFPatterns = map[string]bool{
 
 // ErrToolSkipped is returned by runWithSkip when the user presses 's'.
 var ErrToolSkipped = fmt.Errorf("tool skipped by user")
+
+// resumeOrSkip checks if a step is already completed.
+// If it is, it logs the resumed header and returns true with context cancelled status.
+// Otherwise, it logs the normal step header and returns false.
+func (c *Ctx) resumeOrSkip(stepName, stepHeader string) (bool, bool) {
+	if c.State != nil && c.State.IsStepCompleted(stepName) {
+		logger.StepHeader("%s [RESUMED — skipping]", stepHeader)
+		return true, c.cancelled()
+	}
+	logger.StepHeader("%s", stepHeader)
+	return false, false
+}
+
+// markStepCompleteIfNoFailure marks the step as completed in the StateManager only if it hasn't failed.
+func (c *Ctx) markStepCompleteIfNoFailure(stepName string) {
+	if c.StateMgr == nil || c.State == nil {
+		return
+	}
+	hasFailure := false
+	for _, fs := range c.State.FailedSteps {
+		if fs.Name == stepName {
+			hasFailure = true
+			break
+		}
+	}
+	if !hasFailure {
+		c.StateMgr.MarkStepComplete(c.State, stepName)
+	}
+}
 
 // runWithSkip executes fn in a goroutine and monitors the skip channel.
 // If the user presses 's', fn's context is cancelled and ErrToolSkipped
@@ -105,13 +135,22 @@ func existingFiles(paths ...string) []string {
 	return out
 }
 
-// copyFile copies src to dst, creating dst if needed.
+// copyFile copies src to dst using memory-efficient io.Copy.
 func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0644)
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
 }
 
 // fileModifiedAfter returns true if the file at path was modified after the

@@ -175,9 +175,9 @@ func Run(cfg RunConfig) error {
 	return nil
 }
 
-func executeStep(c *Ctx, stepNumber int, stepName, stepDescription string, fn func(*Ctx) bool) bool {
+func executeStep(c *Ctx, stepNumber int, stepName, stepDescription string, fn func(*Ctx) (bool, error)) bool {
 	completedBefore := c.Completed
-	cancelled := fn(c)
+	cancelled, err := fn(c)
 
 	// Track state for dashboard display (F18)
 	if c.Completed > completedBefore {
@@ -189,7 +189,10 @@ func executeStep(c *Ctx, stepNumber int, stepName, stepDescription string, fn fu
 	} else if c.Failed > (c.Total - c.Completed - 1) {
 		// Step failed — mark in scan state
 		if c.State != nil && c.StateMgr != nil {
-			c.StateMgr.MarkStepFailed(c.State, stepName, fmt.Errorf("step failed"))
+			if err == nil {
+				err = fmt.Errorf("step failed")
+			}
+			c.StateMgr.MarkStepFailed(c.State, stepName, err)
 		}
 	}
 

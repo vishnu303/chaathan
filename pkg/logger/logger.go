@@ -58,18 +58,22 @@ func CloseFileLog() {
 // ANSI codes stripped and a [HH:MM:SS] timestamp prefixed to each non-empty line.
 func logWrite(w io.Writer, s string) {
 	fmt.Fprint(w, s)
+
+	// Prepare the formatted string outside the critical section to minimize lock hold time.
+	clean := ansiRE.ReplaceAllString(s, "")
+	ts := time.Now().Format("15:04:05")
+	lines := strings.Split(clean, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = "[" + ts + "] " + line
+		}
+	}
+	formatted := strings.Join(lines, "\n")
+
 	logFileMu.Lock()
 	defer logFileMu.Unlock()
 	if logFile != nil {
-		clean := ansiRE.ReplaceAllString(s, "")
-		ts := time.Now().Format("15:04:05")
-		lines := strings.Split(clean, "\n")
-		for i, line := range lines {
-			if line != "" {
-				lines[i] = "[" + ts + "] " + line
-			}
-		}
-		fmt.Fprint(logFile, strings.Join(lines, "\n"))
+		fmt.Fprint(logFile, formatted)
 	}
 }
 
@@ -171,7 +175,7 @@ func FileDebug(format string, args ...any) {
 
 
 
-var (
+const (
 	Reset     = "\033[0m"
 	Bold      = "\033[1m"
 	Dim       = "\033[2m"
@@ -345,7 +349,7 @@ func ScanSummary(status string, target string, scanID int64, duration time.Durat
 	}
 	logWrite(os.Stdout, fmt.Sprintf("  %s│%s  %s🎯 %s%s%s%s│%s\n", Cyan+Bold, Reset, Dim, target, Reset, strings.Repeat(" ", pad2), Cyan+Bold, Reset))
 
-	durStr := fmtDuration(duration)
+	durStr := FmtDuration(duration)
 	pad3 := w - 6 - len(durStr) // '  ' (2) + '⏱  ' (4)
 	if pad3 < 0 {
 		pad3 = 0
@@ -407,7 +411,8 @@ func fmtElapsed(d time.Duration) string {
 	return fmt.Sprintf("[%ds]", s)
 }
 
-func fmtDuration(d time.Duration) string {
+// FmtDuration formats a duration into a readable string (e.g. 1h02m03s, 2m05s, 5s).
+func FmtDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	h := int(d.Hours())
 	m := int(d.Minutes()) % 60

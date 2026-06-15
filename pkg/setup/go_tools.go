@@ -70,13 +70,7 @@ func downloadNucleiTemplates(ctx *SetupContext) error {
 		nucleiPath = p
 	} else {
 		// Fallback to GOPATH/bin
-		gopath := os.Getenv("GOPATH")
-		if gopath == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				gopath = filepath.Join(home, "go")
-			}
-		}
-		if gopath != "" {
+		if gopath := resolveGOPATH(); gopath != "" {
 			candidate := filepath.Join(gopath, "bin", "nuclei")
 			if _, errStat := os.Stat(candidate); errStat == nil {
 				nucleiPath = candidate

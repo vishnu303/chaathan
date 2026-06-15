@@ -3,7 +3,6 @@ package metadata
 import (
 	"encoding/json"
 	"io"
-	"math/rand/v2"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/tools"
 	"github.com/vishnu303/chaathan/utils"
 )
 
@@ -27,30 +27,7 @@ var sessionCookiePrefixes = []string{
 	"auth", "token", "jwt", "access_token",
 }
 
-// realUserAgents contains common, high-frequency browser User-Agent strings.
-// Rotating through these prevents WAF fingerprinting that would occur with a
-// static custom UA like "Chaathan-ROI-Metadata/1.0".
-var realUserAgents = []string{
-	// Chrome 147 on Windows 10
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-	// Chrome 147 on macOS
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-	// Chrome 147 on Linux
-	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-	// Firefox 149 on Windows
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0",
-	// Firefox 149 on macOS
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0",
-	// Edge 147 on Windows
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
-	// Safari 18 on macOS
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
-}
-
-// randomUA returns a random User-Agent from the pool.
-func randomUA() string {
-	return realUserAgents[rand.N(len(realUserAgents))]
-}
+// We reuse the central User-Agent pool defined in pkg/tools.
 
 type httpSignal struct {
 	URL                 string
@@ -197,7 +174,7 @@ func fetchSignal(client *http.Client, rawURL string) (httpSignal, bool) {
 	if err != nil {
 		return httpSignal{}, false
 	}
-	req.Header.Set("User-Agent", randomUA())
+	req.Header.Set("User-Agent", tools.RandomUA())
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8")
 
 	resp, err := client.Do(req)
@@ -355,7 +332,7 @@ func checkDangerousMethods(client *http.Client, rawURL string) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("User-Agent", randomUA())
+	req.Header.Set("User-Agent", tools.RandomUA())
 
 	resp, err := client.Do(req)
 	if err != nil {

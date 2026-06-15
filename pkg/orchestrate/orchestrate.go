@@ -35,16 +35,17 @@ type Infra struct {
 // wildcard_flow/flow.go and company_flow/flow.go.
 func NewInfra(mode string, verbose bool, cfg *config.Config) Infra {
 	// ── Runner ───────────────────────────────────────────────
-	var r runner.Runner
-	if cfg != nil && cfg.General.MaxRetries > 0 {
-		delay := time.Duration(cfg.General.RetryDelaySec) * time.Second
-		if delay == 0 {
-			delay = 3 * time.Second
+	maxRetries := 1
+	retryDelay := 3 * time.Second
+	if cfg != nil {
+		if cfg.General.MaxRetries > 0 {
+			maxRetries = cfg.General.MaxRetries
 		}
-		r = runner.NewWithRetry(mode, verbose, cfg.General.MaxRetries, delay)
-	} else {
-		r = runner.NewWithRetry(mode, verbose, 1, 3*time.Second)
+		if cfg.General.RetryDelaySec > 0 {
+			retryDelay = time.Duration(cfg.General.RetryDelaySec) * time.Second
+		}
 	}
+	r := runner.NewWithRetry(mode, verbose, maxRetries, retryDelay)
 
 	// ── ToolBox ──────────────────────────────────────────────
 	var toolsCfg *config.ToolsConfig

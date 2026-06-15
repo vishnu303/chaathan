@@ -16,8 +16,8 @@ import (
 // ─────────────────────────────────────────────────────────────
 
 // stepAmassIntel uses Amass Intel reverse-whois to find root domains owned by the org.
-// Returns true if the scan should be cancelled.
-func stepAmassIntel(c *Ctx) bool {
+// Returns (cancelled, error).
+func stepAmassIntel(c *Ctx) (bool, error) {
 	c.Total++
 
 	if !c.SkipAmassIntel {
@@ -36,6 +36,7 @@ func stepAmassIntel(c *Ctx) bool {
 			logger.Warning("Amass Intel failed: %v", err)
 			logger.Info("  This is common — amass intel requires WHOIS data access")
 			c.Failed++
+			return c.cancelled(), err
 		} else {
 			count, _ := utils.CountFileLines(amassIntelOut)
 			logger.Success("Discovered %d root domains", count)
@@ -56,5 +57,5 @@ func stepAmassIntel(c *Ctx) bool {
 		c.Completed++
 	}
 
-	return c.cancelled()
+	return c.cancelled(), nil
 }

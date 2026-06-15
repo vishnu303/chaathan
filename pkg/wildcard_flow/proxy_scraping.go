@@ -26,9 +26,8 @@ func stepProxyScraping(c *Ctx) bool {
 	const stepName = "proxy_scraping"
 
 	// ── Resume check ────────────────────────────────────────
-	if c.State != nil && c.State.IsStepCompleted(stepName) {
-		logger.StepHeader("Proxy Scraping [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip(stepName, "Proxy Scraping + Rotation (mubeng)"); skipped {
+		return cancelled
 	}
 
 	// ── Skip if --proxy was explicitly set (manual always wins) ──
@@ -49,8 +48,6 @@ func stepProxyScraping(c *Ctx) bool {
 		return c.cancelled()
 	}
 
-	logger.StepHeader("Proxy Scraping + Rotation (mubeng)")
-
 	// ── Read config values ──────────────────────────────────
 	timeoutMin := 10
 	maxConcurrent := 512
@@ -59,21 +56,21 @@ func stepProxyScraping(c *Ctx) bool {
 	rotateEvery := 1
 
 	if c.Cfg != nil {
-		ph := c.Cfg.General.ProxyScraping
-		if ph.TimeoutMin > 0 {
-			timeoutMin = ph.TimeoutMin
+		scrapeCfg := c.Cfg.General.ProxyScraping
+		if scrapeCfg.TimeoutMin > 0 {
+			timeoutMin = scrapeCfg.TimeoutMin
 		}
-		if ph.MaxConcurrent > 0 {
-			maxConcurrent = ph.MaxConcurrent
+		if scrapeCfg.MaxConcurrent > 0 {
+			maxConcurrent = scrapeCfg.MaxConcurrent
 		}
-		if len(ph.ProxyTypes) > 0 {
-			proxyTypes = ph.ProxyTypes
+		if len(scrapeCfg.ProxyTypes) > 0 {
+			proxyTypes = scrapeCfg.ProxyTypes
 		}
-		if ph.RotateMethod != "" {
-			rotateMethod = ph.RotateMethod
+		if scrapeCfg.RotateMethod != "" {
+			rotateMethod = scrapeCfg.RotateMethod
 		}
-		if ph.RotateEvery > 0 {
-			rotateEvery = ph.RotateEvery
+		if scrapeCfg.RotateEvery > 0 {
+			rotateEvery = scrapeCfg.RotateEvery
 		}
 	}
 

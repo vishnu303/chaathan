@@ -15,8 +15,8 @@ import (
 
 // stepCloudEnum enumerates cloud infrastructure (S3, GCS, Azure Blob, etc.)
 // associated with the target keyword.
-// Returns true if the scan should be cancelled.
-func stepCloudEnum(c *Ctx) bool {
+// Returns (cancelled, error).
+func stepCloudEnum(c *Ctx) (bool, error) {
 	c.Total++
 
 	if !c.SkipCloudEnum {
@@ -27,6 +27,7 @@ func stepCloudEnum(c *Ctx) bool {
 		if err := c.Tb.RunCloudEnum(c.GoCtx, c.Company, cloudOut); err != nil {
 			logger.Warning("Cloud Enum failed: %v", err)
 			c.Failed++
+			return c.cancelled(), err
 		} else {
 			logger.Success("Cloud enumeration complete — results: %s", cloudOut)
 			c.Completed++
@@ -36,5 +37,5 @@ func stepCloudEnum(c *Ctx) bool {
 		c.Completed++
 	}
 
-	return c.cancelled()
+	return c.cancelled(), nil
 }

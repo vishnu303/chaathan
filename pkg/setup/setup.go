@@ -3,7 +3,9 @@ package setup
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/vishnu303/chaathan/pkg/progress"
@@ -108,4 +110,15 @@ func Run(cfg RunConfig) {
 	if totalFailed > 0 && logger != nil {
 		progress.Tip(fmt.Sprintf("Check log for errors: %s", logger.Path()))
 	}
+}
+
+// resolveGOPATH returns the resolved GOPATH directory path, defaulting to ~/go.
+func resolveGOPATH() string {
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			gopath = filepath.Join(home, "go")
+		}
+	}
+	return gopath
 }

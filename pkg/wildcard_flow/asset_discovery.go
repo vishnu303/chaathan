@@ -26,11 +26,9 @@ import (
 // stepPassiveEnum runs Subfinder, Assetfinder, and Sublist3r in parallel.
 // Returns true if the scan should be cancelled.
 func stepPassiveEnum(c *Ctx) bool {
-	if c.State.IsStepCompleted("passive_enum") {
-		logger.StepHeader("Step 1: Passive Subdomain Enumeration [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("passive_enum", "Step 1: Passive Subdomain Enumeration"); skipped {
+		return cancelled
 	}
-	logger.StepHeader("Step 1: Passive Subdomain Enumeration")
 	writeEmptyFile(c.F.SubfinderOut)
 	writeEmptyFile(c.F.AssetfinderOut)
 	writeEmptyFile(c.F.Sublist3rOut)
@@ -117,57 +115,49 @@ func stepPassiveEnum(c *Ctx) bool {
 // stepActiveEnum runs Amass unless --skip-amass is set.
 // Returns true if the scan should be cancelled.
 func stepActiveEnum(c *Ctx) bool {
-	if c.State.IsStepCompleted("active_enum") {
-		logger.StepHeader("Step 2: Active Subdomain Enumeration (Amass) [RESUMED — skipping]")
-	} else if !c.SkipAmass {
-		logger.StepHeader("Step 2: Active Subdomain Enumeration (Amass)")
-		writeEmptyFile(c.F.AmassOut)
-		logger.SubStep("Running Amass (this may take a while)...")
-		logger.FileDebug("amass input: domain=%s out=%s", c.Domain, c.F.AmassOut)
-		
-		var amassSkipped bool
-		if err := runWithSkip(c, "amass", func(sCtx context.Context) error {
-			return c.Tb.RunAmass(sCtx, c.Domain, c.F.AmassOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				amassSkipped = true
-			} else {
-				logger.Error("Amass failed: %v", err)
-				c.StateMgr.MarkStepFailed(c.State, "active_enum", err)
-			}
-		}
+	if skipped, cancelled := c.resumeOrSkip("active_enum", "Step 2: Active Subdomain Enumeration (Amass)"); skipped {
+		return cancelled
+	}
 
-		if c.ScanID > 0 {
-			count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AmassOut, "amass")
-			if count > 0 {
-				label := ""
-				if amassSkipped {
-					label = " (partial)"
-				}
-				logger.Info("  Found %d subdomains%s", count, label)
-			} else if amassSkipped {
-				logger.Info("  Amass skipped — no subdomains found")
-			} else {
-				logger.Info("  Found 0 subdomains")
-			}
-		}
-
-		// Only mark complete if not failed
-		hasFailure := false
-		for _, fs := range c.State.FailedSteps {
-			if fs.Name == "active_enum" {
-				hasFailure = true
-				break
-			}
-		}
-		if !hasFailure {
-			c.StateMgr.MarkStepComplete(c.State, "active_enum")
-		}
-	} else {
+	if c.SkipAmass {
 		logger.StepHeader("Step 2: Skipping Amass (--skip-amass)")
 		logger.FileDebug("amass skipped via --skip-amass flag")
 		c.StateMgr.MarkStepComplete(c.State, "active_enum")
+		return c.cancelled()
 	}
+
+	writeEmptyFile(c.F.AmassOut)
+	logger.SubStep("Running Amass (this may take a while)...")
+	logger.FileDebug("amass input: domain=%s out=%s", c.Domain, c.F.AmassOut)
+	
+	var amassSkipped bool
+	if err := runWithSkip(c, "amass", func(sCtx context.Context) error {
+		return c.Tb.RunAmass(sCtx, c.Domain, c.F.AmassOut)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			amassSkipped = true
+		} else {
+			logger.Error("Amass failed: %v", err)
+			c.StateMgr.MarkStepFailed(c.State, "active_enum", err)
+		}
+	}
+
+	if c.ScanID > 0 {
+		count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AmassOut, "amass")
+		if count > 0 {
+			label := ""
+			if amassSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Found %d subdomains%s", count, label)
+		} else if amassSkipped {
+			logger.Info("  Amass skipped — no subdomains found")
+		} else {
+			logger.Info("  Found 0 subdomains")
+		}
+	}
+
+	c.markStepCompleteIfNoFailure("active_enum")
 	return c.cancelled()
 }
 
@@ -178,60 +168,52 @@ func stepActiveEnum(c *Ctx) bool {
 // stepGitHubRecon runs github-subdomains when a token is available.
 // Returns true if the scan should be cancelled.
 func stepGitHubRecon(c *Ctx) bool {
-	if c.State.IsStepCompleted("github_recon") {
-		logger.StepHeader("Step 3: GitHub Subdomain Discovery [RESUMED — skipping]")
-	} else if c.GitHubToken != "" {
-		logger.StepHeader("Step 3: GitHub Subdomain Discovery")
-		writeEmptyFile(c.F.GithubSubsOut)
-		logger.SubStep("Running github-subdomains...")
-		logger.FileDebug("github-subdomains input: domain=%s token_len=%d out=%s", c.Domain, len(c.GitHubToken), c.F.GithubSubsOut)
-		
-		var githubSkipped bool
-		if err := runWithSkip(c, "github-subdomains", func(sCtx context.Context) error {
-			return c.Tb.RunGithubSubdomains(sCtx, c.Domain, c.GitHubToken, c.F.GithubSubsOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				githubSkipped = true
-			} else {
-				c.StateMgr.MarkStepFailed(c.State, "github_recon", err)
-				logger.Warning("GitHub subdomains failed: %v", err)
-			}
-		} else {
-			logger.SubStep("[Done] GitHub Subdomains")
-		}
+	if skipped, cancelled := c.resumeOrSkip("github_recon", "Step 3: GitHub Subdomain Discovery"); skipped {
+		return cancelled
+	}
 
-		if c.ScanID > 0 {
-			count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.GithubSubsOut, "github")
-			if count > 0 {
-				label := ""
-				if githubSkipped {
-					label = " (partial)"
-				}
-				logger.Info("  Found %d subdomains%s", count, label)
-			} else if githubSkipped {
-				logger.Info("  GitHub subdomains skipped — no subdomains found")
-			} else {
-				logger.Info("  Found 0 subdomains")
-			}
-		}
-		
-		// Only mark complete if not failed
-		hasFailure := false
-		for _, fs := range c.State.FailedSteps {
-			if fs.Name == "github_recon" {
-				hasFailure = true
-				break
-			}
-		}
-		if !hasFailure {
-			c.StateMgr.MarkStepComplete(c.State, "github_recon")
-		}
-	} else {
+	if c.GitHubToken == "" {
 		logger.StepHeader("Step 3: Skipping GitHub Recon (no token provided)")
 		logger.Warning("Set GITHUB_TOKEN env var or use --github-token for GitHub recon")
 		logger.FileDebug("github_recon skipped: no token provided")
 		c.StateMgr.MarkStepComplete(c.State, "github_recon")
+		return c.cancelled()
 	}
+
+	writeEmptyFile(c.F.GithubSubsOut)
+	logger.SubStep("Running github-subdomains...")
+	logger.FileDebug("github-subdomains input: domain=%s token_len=%d out=%s", c.Domain, len(c.GitHubToken), c.F.GithubSubsOut)
+	
+	var githubSkipped bool
+	if err := runWithSkip(c, "github-subdomains", func(sCtx context.Context) error {
+		return c.Tb.RunGithubSubdomains(sCtx, c.Domain, c.GitHubToken, c.F.GithubSubsOut)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			githubSkipped = true
+		} else {
+			c.StateMgr.MarkStepFailed(c.State, "github_recon", err)
+			logger.Warning("GitHub subdomains failed: %v", err)
+		}
+	} else {
+		logger.SubStep("[Done] GitHub Subdomains")
+	}
+
+	if c.ScanID > 0 {
+		count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.GithubSubsOut, "github")
+		if count > 0 {
+			label := ""
+			if githubSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Found %d subdomains%s", count, label)
+		} else if githubSkipped {
+			logger.Info("  GitHub subdomains skipped — no subdomains found")
+		} else {
+			logger.Info("  Found 0 subdomains")
+		}
+	}
+	
+	c.markStepCompleteIfNoFailure("github_recon")
 	return c.cancelled()
 }
 
@@ -242,61 +224,53 @@ func stepGitHubRecon(c *Ctx) bool {
 // stepSearchEngineRecon runs Uncover unless --skip-uncover is set.
 // Returns true if the scan should be cancelled.
 func stepSearchEngineRecon(c *Ctx) bool {
-	if c.State.IsStepCompleted("search_engine_recon") {
-		logger.StepHeader("Step 4: Passive Search Engine Recon (Uncover) [RESUMED — skipping]")
-	} else if !c.SkipUncover {
-		logger.StepHeader("Step 4: Passive Search Engine Recon (Uncover)")
-		writeEmptyFile(c.F.UncoverOut)
-		writeEmptyFile(c.F.UncoverHostsOut)
-		logger.SubStep("Running Uncover (Shodan/Censys/Fofa)...")
-		
-		var uncoverSkipped bool
-		if err := runWithSkip(c, "uncover", func(sCtx context.Context) error {
-			return c.Tb.RunUncover(sCtx, c.Domain, c.F.UncoverOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				uncoverSkipped = true
-			} else {
-				c.StateMgr.MarkStepFailed(c.State, "search_engine_recon", err)
-				logger.Warning("Uncover failed: %v (check API keys in config)", err)
-			}
-		}
+	if skipped, cancelled := c.resumeOrSkip("search_engine_recon", "Step 4: Passive Search Engine Recon (Uncover)"); skipped {
+		return cancelled
+	}
 
-		if c.ScanID > 0 {
-			subs, ports, _ := utils.ParseUncoverOutput(c.ScanID, c.F.UncoverOut)
-			if subs > 0 || ports > 0 {
-				label := ""
-				if uncoverSkipped {
-					label = " (partial)"
-				}
-				logger.Info("  Found %d hosts and %d open ports from search engines%s", subs, ports, label)
-			} else if uncoverSkipped {
-				logger.Info("  Uncover skipped — no hosts or open ports found")
-			} else {
-				logger.Info("  Found 0 hosts and 0 open ports from search engines")
-			}
-		}
-		
-		// Extract hostnames into a plain-text file so Step 6 can merge them
-		if n := extractUncoverHosts(c.F.UncoverOut, c.F.UncoverHostsOut); n > 0 {
-			logger.SubStep("[Done] Extracted %d unique hosts from Uncover output", n)
-		}
-
-		// Only mark complete if not failed
-		hasFailure := false
-		for _, fs := range c.State.FailedSteps {
-			if fs.Name == "search_engine_recon" {
-				hasFailure = true
-				break
-			}
-		}
-		if !hasFailure {
-			c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
-		}
-	} else {
+	if c.SkipUncover {
 		logger.StepHeader("Step 4: Skipping Uncover (--skip-uncover)")
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
+		return c.cancelled()
 	}
+
+	writeEmptyFile(c.F.UncoverOut)
+	writeEmptyFile(c.F.UncoverHostsOut)
+	logger.SubStep("Running Uncover (Shodan/Censys/Fofa)...")
+	
+	var uncoverSkipped bool
+	if err := runWithSkip(c, "uncover", func(sCtx context.Context) error {
+		return c.Tb.RunUncover(sCtx, c.Domain, c.F.UncoverOut)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			uncoverSkipped = true
+		} else {
+			c.StateMgr.MarkStepFailed(c.State, "search_engine_recon", err)
+			logger.Warning("Uncover failed: %v (check API keys in config)", err)
+		}
+	}
+
+	if c.ScanID > 0 {
+		subs, ports, _ := utils.ParseUncoverOutput(c.ScanID, c.F.UncoverOut)
+		if subs > 0 || ports > 0 {
+			label := ""
+			if uncoverSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Found %d hosts and %d open ports from search engines%s", subs, ports, label)
+		} else if uncoverSkipped {
+			logger.Info("  Uncover skipped — no hosts or open ports found")
+		} else {
+			logger.Info("  Found 0 hosts and 0 open ports from search engines")
+		}
+	}
+	
+	// Extract hostnames into a plain-text file so Step 6 can merge them
+	if n := extractUncoverHosts(c.F.UncoverOut, c.F.UncoverHostsOut); n > 0 {
+		logger.SubStep("[Done] Extracted %d unique hosts from Uncover output", n)
+	}
+
+	c.markStepCompleteIfNoFailure("search_engine_recon")
 	return c.cancelled()
 }
 
@@ -307,54 +281,46 @@ func stepSearchEngineRecon(c *Ctx) bool {
 // stepJSSubdomains crawls the root domain with Hakrawler to surface additional links and subdomains.
 // Returns true if the scan should be cancelled.
 func stepJSSubdomains(c *Ctx) bool {
-	if c.State.IsStepCompleted("js_subdomain_discovery") {
-		logger.StepHeader("Step 5: JS Crawling (Hakrawler) [RESUMED — skipping]")
-	} else if !c.SkipHakrawler {
-		logger.StepHeader("Step 5: JS Crawling (Hakrawler)")
-		writeEmptyFile(c.F.HakrawlerOut)
-		logger.SubStep("Running Hakrawler on https://%s...", c.Domain)
+	if skipped, cancelled := c.resumeOrSkip("js_subdomain_discovery", "Step 5: JS Crawling (Hakrawler)"); skipped {
+		return cancelled
+	}
 
-		var hakrawlerSkipped bool
-		if err := runWithSkip(c, "hakrawler", func(sCtx context.Context) error {
-			return c.Tb.RunHakrawler(sCtx, "https://"+c.Domain, c.F.HakrawlerOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
-				hakrawlerSkipped = true
-			} else {
-				c.StateMgr.MarkStepFailed(c.State, "js_subdomain_discovery", err)
-				logger.Warning("Hakrawler failed: %v", err)
-			}
-		}
-
-		if c.ScanID > 0 {
-			count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.HakrawlerOut, "hakrawler")
-			if count > 0 {
-				label := ""
-				if hakrawlerSkipped {
-					label = " (partial)"
-				}
-				logger.Info("  Found %d links/subdomains from Hakrawler%s", count, label)
-			} else if hakrawlerSkipped {
-				logger.Info("  Hakrawler skipped — no links/subdomains found")
-			} else {
-				logger.Info("  Found 0 links/subdomains from Hakrawler")
-			}
-		}
-
-		// Only mark complete if not failed
-		hasFailure := false
-		for _, fs := range c.State.FailedSteps {
-			if fs.Name == "js_subdomain_discovery" {
-				hasFailure = true
-				break
-			}
-		}
-		if !hasFailure {
-			c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
-		}
-	} else {
+	if c.SkipHakrawler {
 		logger.StepHeader("Step 5: Skipping Hakrawler (--skip-hakrawler)")
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
+		return c.cancelled()
 	}
+
+	writeEmptyFile(c.F.HakrawlerOut)
+	logger.SubStep("Running Hakrawler on https://%s...", c.Domain)
+
+	var hakrawlerSkipped bool
+	if err := runWithSkip(c, "hakrawler", func(sCtx context.Context) error {
+		return c.Tb.RunHakrawler(sCtx, "https://"+c.Domain, c.F.HakrawlerOut)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			hakrawlerSkipped = true
+		} else {
+			c.StateMgr.MarkStepFailed(c.State, "js_subdomain_discovery", err)
+			logger.Warning("Hakrawler failed: %v", err)
+		}
+	}
+
+	if c.ScanID > 0 {
+		count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.HakrawlerOut, "hakrawler")
+		if count > 0 {
+			label := ""
+			if hakrawlerSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Found %d links/subdomains from Hakrawler%s", count, label)
+		} else if hakrawlerSkipped {
+			logger.Info("  Hakrawler skipped — no links/subdomains found")
+		} else {
+			logger.Info("  Found 0 links/subdomains from Hakrawler")
+		}
+	}
+
+	c.markStepCompleteIfNoFailure("js_subdomain_discovery")
 	return c.cancelled()
 }

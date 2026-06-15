@@ -81,10 +81,10 @@ func (t *ToolBox) WithAPIKeys(keys *config.APIKeysConfig) *ToolBox {
 
 // --- User-Agent rotation pool ---
 
-// realUserAgents contains common, high-frequency browser User-Agent strings.
+// RealUserAgents contains common, high-frequency browser User-Agent strings.
 // Rotating through these prevents WAF fingerprinting from static tool UAs
 // like "httpx - Open-source project" or "Nuclei - Open-source project".
-var realUserAgents = []string{
+var RealUserAgents = []string{
 	// Chrome 147 on Windows 10
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
 	// Chrome 147 on macOS
@@ -101,9 +101,9 @@ var realUserAgents = []string{
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
 }
 
-// randomUA returns a random User-Agent from the pool.
-func randomUA() string {
-	return realUserAgents[rand.N(len(realUserAgents))]
+// RandomUA returns a random User-Agent from the pool.
+func RandomUA() string {
+	return RealUserAgents[rand.N(len(RealUserAgents))]
 }
 
 // uaEnabled returns true when UA rotation is active.
@@ -117,7 +117,36 @@ func (t *ToolBox) getUA() string {
 	if t.General != nil && t.General.UserAgent != "" {
 		return t.General.UserAgent
 	}
-	return randomUA()
+	return RandomUA()
+}
+
+type appendOptions struct {
+	uaHeader    bool
+	tlsOpSec    bool
+	customHFlag string // e.g. "-H"
+	cookieFlag  string // e.g. "-cookie" or "-b"
+	proxyFlag   string // e.g. "-http-proxy" or "-proxy" or "-x"
+}
+
+// appendCommon consolidates repetitive appends for User-Agent, TLS opsec,
+// custom headers, custom cookies, and proxy parameters into a single call.
+func (t *ToolBox) appendCommon(args []string, opts appendOptions) []string {
+	if opts.uaHeader {
+		args = t.appendUAHeader(args)
+	}
+	if opts.tlsOpSec {
+		args = t.appendTLSOpSec(args)
+	}
+	if opts.customHFlag != "" {
+		args = t.appendCustomHeaders(args, opts.customHFlag)
+	}
+	if opts.cookieFlag != "" {
+		args = t.appendCustomCookies(args, opts.cookieFlag)
+	}
+	if opts.proxyFlag != "" {
+		args = t.appendProxy(args, opts.proxyFlag)
+	}
+	return args
 }
 
 // appendUAHeader appends a -H "User-Agent: ..." flag pair for tools that
@@ -480,11 +509,13 @@ func (t *ToolBox) RunHttpx(ctx context.Context, domainsFile string, outputFile s
 	if t.Config != nil && t.Config.Httpx.FollowRedirects {
 		args = append(args, "-follow-redirects")
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
 	}
@@ -602,10 +633,12 @@ func (t *ToolBox) RunFfuf(ctx context.Context, url string, wordlist string, outp
 		"-t", strconv.Itoa(t.ffufThreads()),
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-b")
-	args = t.appendProxy(args, "-x")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-b",
+		proxyFlag:   "-x",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
 	}
@@ -632,10 +665,12 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 		"-t", strconv.Itoa(t.ffufThreads()),
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-b")
-	args = t.appendProxy(args, "-x")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-b",
+		proxyFlag:   "-x",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
 	}
@@ -871,11 +906,13 @@ func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputF
 	if t.Config != nil && t.Config.Httpx.FollowRedirects {
 		args = append(args, "-follow-redirects")
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
 	}
@@ -907,11 +944,13 @@ func (t *ToolBox) RunHttpxFetchJS(ctx context.Context, urlsFile string, download
 		"-silent",
 		"-no-fallback",
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	_, err := t.Runner.Run(ctx, "httpx", args)
 	return err
 }
@@ -1155,11 +1194,13 @@ func (t *ToolBox) RunHttpxFingerprint(ctx context.Context, inputFile string, out
 		"-tech-detect", "-json",
 		"-o", outputFile,
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
 	}
@@ -1184,8 +1225,10 @@ func (t *ToolBox) RunNucleiWAF(ctx context.Context, inputFile string, outputFile
 		"-o", outputFile,
 	}
 
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:  true,
+		proxyFlag: "-proxy",
+	})
 	_, err := t.Runner.Run(ctx, "nuclei", args)
 	return err
 }
