@@ -211,9 +211,10 @@ const (
 // ── Scan step tracking ──────────────────────────────────────────────────────
 
 var (
-	currentStep   int
-	totalSteps    int
-	scanStartTime time.Time
+	currentStep    int
+	totalSteps     int
+	scanStartTime  time.Time
+	lastStepPrefix string
 )
 
 // InitScanUI initializes the scan UI with the total number of steps.
@@ -221,6 +222,7 @@ func InitScanUI(total int) {
 	currentStep = 0
 	totalSteps = total
 	scanStartTime = time.Now()
+	lastStepPrefix = ""
 }
 
 // ── Primary output functions ────────────────────────────────────────────────
@@ -267,7 +269,27 @@ func Section(format string, args ...any) {
 // and shows elapsed time. Use this only in scan workflow phases.
 func StepHeader(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	currentStep++
+
+	// Extract the step identifier prefix (e.g. "Step 2" or "Proxy Scraping")
+	var prefix string
+	if strings.HasPrefix(msg, "Step ") {
+		parts := strings.SplitN(msg, ":", 2)
+		if len(parts) > 0 {
+			prefix = parts[0]
+		}
+	} else if strings.HasPrefix(msg, "Proxy Scraping") {
+		prefix = "Proxy Scraping"
+	}
+
+	// Only increment the step counter if we are transitioning to a new step.
+	// This prevents duplicate incrementing when skip/fallback notices are printed
+	// for the currently active step.
+	if prefix == "" || prefix != lastStepPrefix {
+		currentStep++
+		if prefix != "" {
+			lastStepPrefix = prefix
+		}
+	}
 
 	elapsed := ""
 	if !scanStartTime.IsZero() {

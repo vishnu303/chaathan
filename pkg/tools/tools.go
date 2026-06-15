@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -164,12 +165,12 @@ func (t *ToolBox) appendTLSOpSec(args []string) []string {
 	return append(args, "-tls-impersonate")
 }
 
-// appendDalfoxUA appends --header "User-Agent: ..." for dalfox.
+// appendDalfoxUA appends --user-agent "..." for dalfox.
 func (t *ToolBox) appendDalfoxUA(args []string) []string {
 	if !t.uaEnabled() {
 		return args
 	}
-	return append(args, "--header", "User-Agent: "+t.getUA())
+	return append(args, "--user-agent", t.getUA())
 }
 
 // appendGoSpiderUA appends -u "..." for gospider.
@@ -177,8 +178,7 @@ func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	if !t.uaEnabled() {
 		return args
 	}
-	// Pass User-Agent as a header to avoid parsing issues with long strings containing spaces
-	return append(args, "-H", "User-Agent: "+t.getUA())
+	return append(args, "-u", t.getUA())
 }
 
 // appendArjunHeaders appends --headers '{"Key":"Value",...}' for Arjun.
@@ -210,14 +210,12 @@ func (t *ToolBox) appendArjunHeaders(args []string) []string {
 		return args
 	}
 
-	// Format headers as "Key: Value\n" separated string for Arjun
-	var headerLines []string
-	for k, v := range headers {
-		headerLines = append(headerLines, fmt.Sprintf("%s: %s", k, v))
+	// Format headers as JSON object string for Arjun
+	jsonData, err := json.Marshal(headers)
+	if err != nil {
+		return args
 	}
-	
-	hString := strings.Join(headerLines, "\n")
-	return append(args, "--headers", hString)
+	return append(args, "--headers", string(jsonData))
 }
 
 // --- Proxy helpers ---

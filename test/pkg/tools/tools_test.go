@@ -67,3 +67,101 @@ func TestToolBoxOptionsAndHelpers(t *testing.T) {
 		t.Errorf("expected arguments to contain domain target.com, got %q", argsJoined)
 	}
 }
+
+func TestArjunHeaders(t *testing.T) {
+	dr := &DummyRunner{}
+	tb := tools.New(dr)
+
+	tb.WithCustomAuth("my_cookie_val", []string{"X-My-Header: header_val"})
+	// Set general config
+	tb.WithGeneral(&config.GeneralConfig{UARotation: false})
+
+	ctx := context.Background()
+	err := tb.RunArjun(ctx, "in.txt", "out.json")
+	if err != nil {
+		t.Fatalf("unexpected error running Arjun: %v", err)
+	}
+
+	if dr.LastCmd != "arjun" {
+		t.Errorf("expected command 'arjun', got %q", dr.LastCmd)
+	}
+
+	// Verify that "--headers" is followed by a valid JSON string containing our headers
+	foundHeaders := false
+	for i, arg := range dr.LastArgs {
+		if arg == "--headers" && i+1 < len(dr.LastArgs) {
+			foundHeaders = true
+			jsonStr := dr.LastArgs[i+1]
+			if !strings.Contains(jsonStr, `"Cookie":"my_cookie_val"`) {
+				t.Errorf("expected JSON to contain Cookie, got %q", jsonStr)
+			}
+			if !strings.Contains(jsonStr, `"X-My-Header":"header_val"`) {
+				t.Errorf("expected JSON to contain X-My-Header, got %q", jsonStr)
+			}
+			break
+		}
+	}
+	if !foundHeaders {
+		t.Error("expected --headers argument in Arjun command")
+	}
+}
+
+func TestGoSpiderUA(t *testing.T) {
+	dr := &DummyRunner{}
+	tb := tools.New(dr)
+	tb.WithGeneral(&config.GeneralConfig{UserAgent: "custom_gospider_ua"})
+
+	ctx := context.Background()
+	err := tb.RunGoSpider(ctx, "in.txt", "out.txt")
+	if err != nil {
+		t.Fatalf("unexpected error running GoSpider: %v", err)
+	}
+
+	if dr.LastCmd != "gospider" {
+		t.Errorf("expected command 'gospider', got %q", dr.LastCmd)
+	}
+
+	foundUA := false
+	for i, arg := range dr.LastArgs {
+		if arg == "-u" && i+1 < len(dr.LastArgs) {
+			foundUA = true
+			if dr.LastArgs[i+1] != "custom_gospider_ua" {
+				t.Errorf("expected custom_gospider_ua, got %q", dr.LastArgs[i+1])
+			}
+			break
+		}
+	}
+	if !foundUA {
+		t.Error("expected native -u argument in GoSpider command")
+	}
+}
+
+func TestDalfoxUA(t *testing.T) {
+	dr := &DummyRunner{}
+	tb := tools.New(dr)
+	tb.WithGeneral(&config.GeneralConfig{UserAgent: "custom_dalfox_ua"})
+
+	ctx := context.Background()
+	err := tb.RunDalfox(ctx, "in.txt", "out.jsonl")
+	if err != nil {
+		t.Fatalf("unexpected error running Dalfox: %v", err)
+	}
+
+	if dr.LastCmd != "dalfox" {
+		t.Errorf("expected command 'dalfox', got %q", dr.LastCmd)
+	}
+
+	foundUA := false
+	for i, arg := range dr.LastArgs {
+		if arg == "--user-agent" && i+1 < len(dr.LastArgs) {
+			foundUA = true
+			if dr.LastArgs[i+1] != "custom_dalfox_ua" {
+				t.Errorf("expected custom_dalfox_ua, got %q", dr.LastArgs[i+1])
+			}
+			break
+		}
+	}
+	if !foundUA {
+		t.Error("expected native --user-agent argument in Dalfox command")
+	}
+}
