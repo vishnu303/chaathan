@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -274,16 +275,28 @@ func StartDashboard() error {
 			colSub := fmt.Sprintf("%d", stats.TotalSubdomains)
 			colLive := fmt.Sprintf("%d", stats.LiveSubdomains)
 			rightSB.WriteString(fmt.Sprintf("  %-14s [%s]%s[-]\n", "Subdomains:", ColorSapphire, colSub))
-			rightSB.WriteString(fmt.Sprintf("  %-14s [%s]%s[-]\n\n", "Live Hosts:", ColorSapphire, colLive))
+			rightSB.WriteString(fmt.Sprintf("  %-14s [%s]%s[-]\n", "Live Hosts:", ColorSapphire, colLive))
+			rightSB.WriteString(fmt.Sprintf("  %-14s [%s]%d[-]\n", "URLs Crawled:", ColorSapphire, stats.TotalURLs))
+			rightSB.WriteString(fmt.Sprintf("  %-14s [%s]%d[-]\n\n", "Endpoints:", ColorSapphire, stats.TotalEndpoints))
 		} else {
 			rightSB.WriteString(fmt.Sprintf("  [%s]No counters compiled.[-]\n\n", ColorSubtle))
+		}
+
+		// Top technologies list aggregation
+		techs := getTopTechnologies(s.ID)
+		if len(techs) > 0 {
+			rightSB.WriteString(fmt.Sprintf("  [%s::b]TOP TECHNOLOGIES DETECTED[-]\n", ColorSapphire))
+			for _, t := range techs {
+				rightSB.WriteString(fmt.Sprintf("  • %s\n", t))
+			}
+			rightSB.WriteString("\n")
 		}
 
 		// Vulnerability discoveries list
 		rightSB.WriteString(fmt.Sprintf("  [%s::b]VULNERABILITY DISCOVERIES[-]\n", ColorActive))
 		vulns, err := database.GetVulnerabilities(s.ID)
 		if err == nil && len(vulns) > 0 {
-			displayLimit := 10
+			displayLimit := 5
 			if len(vulns) < displayLimit {
 				displayLimit = len(vulns)
 			}
@@ -306,6 +319,9 @@ func StartDashboard() error {
 				vTitle := truncateText(v.Name, 26)
 				vHost := truncateText(v.Host, 14)
 				rightSB.WriteString(fmt.Sprintf("  %s %s [%s]%s[-]\n", badge, vHost, ColorSubtle, vTitle))
+				if v.URL != "" {
+					rightSB.WriteString(fmt.Sprintf("    [%s]↳ URL: %s[-]\n", ColorSubtle, truncateText(v.URL, 80)))
+				}
 			}
 			if len(vulns) > displayLimit {
 				rightSB.WriteString(fmt.Sprintf("  [%s::i]...and %d more vulnerabilities[-]\n", ColorSubtle, len(vulns)-displayLimit))
@@ -349,6 +365,57 @@ func StartDashboard() error {
 		return err
 	}
 	return nil
+}
+
+func getTopTechnologies(scanID int64) []string {
+	urls, err := database.GetURLs(scanID)
+	if err != nil || len(urls) == 0 {
+		return nil
+	}
+	techCounts := make(map[string]int)
+	for _, u := range urls {
+		if u.Tech == "" {
+			continue
+		}
+		var techs []string
+		if err := json.Unmarshal([]byte(u.Tech), &techs); err == nil {
+			for _, t := range techs {
+				techCounts[t]++
+			}
+		} else {
+			for _, t := range strings.Split(u.Tech, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					techCounts[t]++
+				}
+			}
+		}
+	}
+	type techCount struct {
+		name  string
+		count int
+	}
+	var list []techCount
+	for k, v := range techCounts {
+		list = append(list, techCount{k, v})
+	}
+	// Sort descending
+	for i := 0; i < len(list); i++ {
+		for j := i + 1; j < len(list); j++ {
+			if list[j].count > list[i].count {
+				list[i], list[j] = list[j], list[i]
+			}
+		}
+	}
+	var result []string
+	limit := 4
+	if len(list) < limit {
+		limit = len(list)
+	}
+	for i := 0; i < limit; i++ {
+		result = append(result, fmt.Sprintf("%s (%d)", list[i].name, list[i].count))
+	}
+	return result
 }
 
 func truncateText(str string, limit int) string {
