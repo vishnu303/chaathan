@@ -10,17 +10,22 @@ import (
 )
 
 func main() {
-	// Resolve ~/. chaathan home directory once at startup
-	if err := paths.Init(); err != nil {
+	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// run encapsulates the main execution flow to guarantee deferred closures
+// (like closing the SQLite database handle) are executed before the process exits.
+func run() error {
+	// Resolve ~/.chaathan home directory once at startup
+	if err := paths.Init(); err != nil {
+		return err
 	}
 
 	// Ensure database is properly closed on exit (flushes WAL, releases locks)
 	defer database.Close()
 
-	if err := cli.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return cli.Execute()
 }

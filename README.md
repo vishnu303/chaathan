@@ -235,12 +235,21 @@ Modern web applications sit behind front-end shields like Cloudflare, Akamai, an
 
 ## 🛠️ Architecture & Development Patterns
 
-Following a comprehensive package refactor, the `cli` package has been optimized to adhere to the highest Go development standards and clean coding principles:
+Following a comprehensive package refactor, the entrypoint, `cli`, `utils`, and automation targets have been optimized to adhere to the highest Go development standards and clean coding principles:
 
+*   **Deferred Resource Safety (`main.go`)**: Restructured the process lifecycle to execute within a standard Go `run()` wrapper. This guarantees all deferred operations—specifically `defer database.Close()` (which flushes database transactions and releases SQLite file locks)—are executed completely before the program exits, preventing resource leakages if Cobra routing or setup crashes.
+*   **Modernized Makefile Automation (`Makefile`)**: Converted build targets to self-documenting inline configurations (`target: ## Description`), parsed dynamically at runtime via a grep-and-awk script to generate interactive help pages. Upgraded compilation installer rules to use the standard atomic Unix `install` command instead of sequential copy and chmod steps.
 *   **Thin CLI Pattern**: Command handlers in `cli/` focus exclusively on argument parsing, flag binding, and user-facing terminal presentation, delegating all scanning, database, and reporting workflows to dedicated packages under `pkg/`.
 *   **Centralized Helpers (`cli/helpers.go`)**: Repetitive validations, custom parsing (e.g., scan ID and age parameters), rotating configuration overrides, and path resolutions are unified inside a dedicated helpers module to avoid code duplication.
 *   **Deterministic Output & UX**: Key-value settings output (like `config set` errors) are systematically grouped and sorted using the Go `"sort"` package to guarantee stable, predictable, and clean terminal displays.
 *   **Unified Serialization**: A single `writeJSONOrPrint` routine standardizes JSON output formatting and file-writing across all database query subcommands.
+
+*   **High-Performance Utility & I/O Packages (`utils/`)**:
+    *   **Buffered Export Operations**: Replaced unbuffered file I/O with `bufio.Writer` buffers across all report exports, ensuring disk efficiency when exporting tens of thousands of domains, URLs, or ports.
+    *   **Allocation-Free Parsers**: Minimized memory overhead inside high-frequency parser loops by analyzing scanner byte slices (`scanner.Bytes()`) directly, and rewritten checks like `isHTTPMethod` into allocation-free switch statements.
+    *   **Decoupled Reader/Writer Pipelines**: Split complex file operations into clear, separate reading and writing steps (reusing a unified `writeLines` helper), allowing standard `defer` file handle closures and eliminating nested descriptor leak risks.
+    *   **Robust Network Parsing**: Replaced naive colon-splitting with standard library `net.SplitHostPort` to safely parse Naabu ports and resolve IPv6 hostnames cleanly.
+    *   **Strict Scope Matching (Security)**: Fixed certificate mining in `ParseTlsxOutput` to perform correct subdomain matches (`san == targetDomain || strings.HasSuffix(san, "."+targetDomain)`), preventing out-of-scope sibling domains (e.g. `notgoogle.com` matching when scanning `google.com`) from leaking into scope.
 
 *   **Decoupled & Standardized Utility Packages**: Core utility packages (`pkg/paths`, `pkg/config`, `pkg/scope`, `pkg/logger`, and `pkg/progress`) have been refactored for maximum decoupling:
     *   **Environment-Aware Configuration & Paths**: `pkg/paths` supports environment overrides (e.g. `CHAATHAN_HOME`) allowing isolated testing configurations, and `pkg/config` maps API keys efficiently to environment variable lookups.
@@ -263,11 +272,14 @@ Following a comprehensive package refactor, the `cli` package has been optimized
 
 This codebase showcases a range of advanced Go engineering and system-level programming skills:
 *   **Go Concurrency & Coordination**: Safe management of background workers, rotating proxies, and parallel probes using context propagation, channel orchestration, and wait group controls.
+*   **Safe Process Lifecycle Management**: Structured program entry points to guarantee clean, un-bypassed database lock release and transaction flushing before process termination.
 *   **Structured State Machine Management**: Strict validation of workflow progress and recovery. Relies on structured SQLite persistence for step-by-step resume support, enabling execution interruption and restart without target re-scanning.
-*   **Low-Memory High-Throughput I/O**: Stream pipelines using reader/writer interfaces (`io.Reader`/`io.Writer`) to handle vast lists of subdomains and URLs without memory exhaustion.
+*   **Low-Memory High-Throughput I/O**: Stream pipelines using reader/writer interfaces (`io.Reader`/`io.Writer`) and buffered writers (`bufio.Writer`) to handle vast lists of subdomains and URLs without memory exhaustion.
+*   **Advanced Go Testing Practices**: Zero-dependency unit testing using temporary directory hooks (`t.TempDir()`), boundary/regex check cases, and mock file processing to ensure complete code coverage on parsing logic.
 *   **Factory-Driven Tool Registry**: A clean, unified interface for invoking and configuring 30+ external binaries dynamically based on global runtime flags, network proxies, and target scopes.
 
 ---
+
 
 ## ⚖️ Legal & Disclaimer
 

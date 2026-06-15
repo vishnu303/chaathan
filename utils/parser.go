@@ -6,12 +6,14 @@ import (
 	"net"
 	neturl "net/url"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/vishnu303/chaathan/pkg/database"
 )
+
+// maxScanBufferSize is the buffer size limit used when scanning large output files (4MB)
+const maxScanBufferSize = 4 * 1024 * 1024
 
 // ParseSubdomainsFile reads a file with one subdomain per line and adds to database
 func ParseSubdomainsFile(scanID int64, filePath, source string) (int, error) {
@@ -66,7 +68,7 @@ func ParseHttpxOutput(scanID int64, filePath string) (int, error) {
 	count := 0
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 4*1024*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -132,9 +134,8 @@ func ParseNucleiOutput(scanID int64, filePath string) (int, error) {
 
 	count := 0
 	scanner := bufio.NewScanner(file)
-	// Increase buffer size for large lines
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -191,7 +192,8 @@ type FfufResult struct {
 	Status int               `json:"status"`
 }
 
-// ParseNaabuOutput parses naabu output and stores in database
+// ParseNaabuOutput parses naabu output and stores in database.
+// Supports both JSON output format and standard host:port/ip:port format.
 func ParseNaabuOutput(scanID int64, filePath string) (int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -207,7 +209,6 @@ func ParseNaabuOutput(scanID int64, filePath string) (int, error) {
 			continue
 		}
 
-		// Naabu outputs in format: host:port or JSON
 		var host string
 		var port int
 
@@ -220,11 +221,12 @@ func ParseNaabuOutput(scanID int64, filePath string) (int, error) {
 			}
 			port = result.Port
 		} else {
-			// Try host:port format
-			parts := strings.Split(line, ":")
-			if len(parts) == 2 {
-				host = parts[0]
-				port, _ = strconv.Atoi(parts[1])
+			// Try host:port format using net.SplitHostPort to support IPv6 correctly
+			if h, pStr, err := net.SplitHostPort(line); err == nil {
+				host = h
+				if portVal, err := strconv.Atoi(pStr); err == nil {
+					port = portVal
+				}
 			}
 		}
 
@@ -255,7 +257,6 @@ func ParseEndpointsFile(scanID int64, filePath, source string) (int, error) {
 			continue
 		}
 
-		// Determine method if present
 		method := ""
 		url := line
 
@@ -319,8 +320,10 @@ func ParseLiveURLsFile(scanID int64, filePath, source string) (int, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Take only the first field — strips "[200]", "[403]", etc.
 		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
 		url := fields[0]
 		if url == "" || seen[url] {
 			continue
@@ -365,14 +368,15 @@ func ParseFfufOutput(scanID int64, filePath string) (int, error) {
 	return count, nil
 }
 
+// isHTTPMethod checks if a string is a standard HTTP method in an allocation-free manner.
 func isHTTPMethod(s string) bool {
-	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
-	return slices.Contains(methods, strings.ToUpper(s))
+	switch strings.ToUpper(s) {
+	case "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CONNECT", "TRACE":
+		return true
+	default:
+		return false
+	}
 }
-
-// --- Phase 3: New tool parsers ---
-
-
 
 // TlsxResult represents a line from tlsx JSON output
 type TlsxResult struct {
@@ -404,7 +408,7 @@ func ParseTlsxOutput(scanID int64, filePath string, targetDomain string) (newSub
 	seenSANs := make(map[string]bool)
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -425,7 +429,7 @@ func ParseTlsxOutput(scanID int64, filePath string, targetDomain string) (newSub
 		}
 		for _, san := range sans {
 			san = strings.TrimPrefix(san, "*.")
-			if !seenSANs[san] && strings.HasSuffix(san, targetDomain) {
+			if !seenSANs[san] && (san == targetDomain || strings.HasSuffix(san, "."+targetDomain)) {
 				seenSANs[san] = true
 				database.AddSubdomains(scanID, []string{san}, "tlsx-san")
 				newSubs++
@@ -558,7 +562,7 @@ func ParseDalfoxOutput(scanID int64, filePath string) (int, error) {
 	count := 0
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 
 	for scanner.Scan() {
 		line := scanner.Text()
