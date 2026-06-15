@@ -213,14 +213,14 @@ func notifyStepCompletion(c *Ctx, stepNumber int, stepName, stepDescription stri
 		StepNumber:      stepNumber,
 		TotalSteps:      len(scan.CompanySteps),
 		Duration:        time.Since(c.StartTime),
-		FindingsCount:   countFindingsForStep(c, stepName),
+		FindingsCount:   CountFindingsForStep(c, stepName),
 		Timestamp:       time.Now(),
 	}); err != nil {
 		logger.Warning("Failed to send step completion notification: %v", err)
 	}
 }
 
-func countFindingsForStep(c *Ctx, stepName string) int {
+func CountFindingsForStep(c *Ctx, stepName string) int {
 	countLines := func(files ...string) int {
 		total := 0
 		for _, file := range files {

@@ -1,9 +1,10 @@
-package scope
-
+package scope_test
+ 
 import (
 	"testing"
 
 	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/scope"
 )
 
 func TestScope_IsInScope(t *testing.T) {
@@ -12,7 +13,7 @@ func TestScope_IsInScope(t *testing.T) {
 		OutOfScope: []string{`^exclude\.example\.com$`, `^bad.*\.com$`},
 	}
 
-	s, err := New(cfg)
+	s, err := scope.New(cfg)
 	if err != nil {
 		t.Fatalf("failed to create scope: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestScope_IsIPExcluded(t *testing.T) {
 		},
 	}
 
-	s, err := New(cfg)
+	s, err := scope.New(cfg)
 	if err != nil {
 		t.Fatalf("failed to create scope: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestScope_IsPortAllowed(t *testing.T) {
 		AllowedPorts: []int{80, 443, 8080},
 	}
 
-	s, err := New(cfg)
+	s, err := scope.New(cfg)
 	if err != nil {
 		t.Fatalf("failed to create scope: %v", err)
 	}
@@ -94,14 +95,14 @@ func TestScope_IsPortAllowed(t *testing.T) {
 
 	// Empty allowed ports = all allowed
 	emptyCfg := &config.ScopeConfig{}
-	emptyScope, _ := New(emptyCfg)
+	emptyScope, _ := scope.New(emptyCfg)
 	if !emptyScope.IsPortAllowed(22) {
 		t.Error("expected port 22 to be allowed under empty scope config")
 	}
 }
 
 func TestWildcardScope(t *testing.T) {
-	s, err := WildcardScope("example.com")
+	s, err := scope.WildcardScope("example.com")
 	if err != nil {
 		t.Fatalf("failed to create wildcard scope: %v", err)
 	}
@@ -130,7 +131,7 @@ func TestScope_FilterDomains(t *testing.T) {
 		InScope: []string{`^.*\.example\.com$`},
 	}
 
-	s, err := New(cfg)
+	s, err := scope.New(cfg)
 	if err != nil {
 		t.Fatalf("failed to create scope: %v", err)
 	}

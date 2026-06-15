@@ -161,7 +161,7 @@ func readSanitizedURLLines(filePath string) ([]string, error) {
 		}
 
 		// Unescape \\uXXXX → \uXXXX → actual character
-		line = unescapeUnicodeURL(line)
+		line = UnescapeUnicodeURL(line)
 
 		// Strip trailing backslashes left over from JS string extraction
 		line = strings.TrimRight(line, "\\")
@@ -195,8 +195,8 @@ func SanitizeURLFile(filePath string) error {
 	return writeLines(filePath, cleaned)
 }
 
-// unescapeUnicodeURL replaces literal \uXXXX sequences with their actual characters.
-func unescapeUnicodeURL(s string) string {
+// UnescapeUnicodeURL replaces literal \uXXXX sequences with their actual characters.
+func UnescapeUnicodeURL(s string) string {
 	// Handle double-escaped \\u first
 	s = strings.ReplaceAll(s, "\\\\u", "\\u")
 
@@ -211,7 +211,7 @@ func unescapeUnicodeURL(s string) string {
 		if i+5 < len(s) && s[i] == '\\' && s[i+1] == 'u' {
 			// Try to parse 4 hex digits after \u
 			hex := s[i+2 : i+6]
-			if r, ok := parseHex4(hex); ok {
+			if r, ok := ParseHex4(hex); ok {
 				b.WriteRune(r)
 				i += 5 // skip \uXXXX (loop adds 1)
 				continue
@@ -222,8 +222,8 @@ func unescapeUnicodeURL(s string) string {
 	return b.String()
 }
 
-// parseHex4 parses exactly 4 hex digits into a rune using standard library strconv.
-func parseHex4(s string) (rune, bool) {
+// ParseHex4 parses exactly 4 hex digits into a rune using standard library strconv.
+func ParseHex4(s string) (rune, bool) {
 	if len(s) != 4 {
 		return 0, false
 	}

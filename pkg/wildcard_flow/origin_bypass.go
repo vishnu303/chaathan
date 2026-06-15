@@ -61,8 +61,8 @@ func initCIDRs() {
 	})
 }
 
-// isWafIP checks if an IP belongs to a major CDN/WAF public IP range.
-func isWafIP(ipStr string) bool {
+// IsWafIP checks if an IP belongs to a major CDN/WAF public IP range.
+func IsWafIP(ipStr string) bool {
 	initCIDRs()
 	parsedIP := net.ParseIP(strings.TrimSpace(ipStr))
 	if parsedIP == nil {
@@ -128,7 +128,7 @@ func RunOriginIPBypass(ctx context.Context, c *Ctx) error {
 
 				for _, ip := range ips {
 					ipStr := ip.String()
-					if isWafIP(ipStr) {
+					if IsWafIP(ipStr) {
 						mu.Lock()
 						protectedSubs = append(protectedSubs, domain)
 						mu.Unlock()
@@ -222,14 +222,14 @@ func verifyOriginBypass(ctx context.Context, c *Ctx, client *http.Client, ip str
 		}
 		// 1. Establish the baseline behavior (accessing direct IP without the host header)
 		baselineURL := fmt.Sprintf("%s://%s/", scheme, ip)
-		baselineCode, _, err := makeRawRequest(ctx, client, baselineURL, ip)
+		baselineCode, _, err := MakeRawRequest(ctx, client, baselineURL, ip)
 		if err != nil {
 			continue
 		}
 
 		// 2. Perform the bypass probe (address IP directly but inject the protected host header)
 		probeURL := fmt.Sprintf("%s://%s/", scheme, ip)
-		probeCode, probeBody, err := makeRawRequest(ctx, client, probeURL, hostHeader)
+		probeCode, probeBody, err := MakeRawRequest(ctx, client, probeURL, hostHeader)
 		if err != nil {
 			continue
 		}
@@ -288,7 +288,7 @@ func verifyOriginBypass(ctx context.Context, c *Ctx, client *http.Client, ip str
 	}
 }
 
-func makeRawRequest(ctx context.Context, client *http.Client, urlStr, hostHeader string) (int, string, error) {
+func MakeRawRequest(ctx context.Context, client *http.Client, urlStr, hostHeader string) (int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
 		return 0, "", err

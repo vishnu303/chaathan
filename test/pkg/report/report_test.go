@@ -1,11 +1,12 @@
-package report
-
+package report_test
+ 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/report"
 )
 
 func TestReportGenerationAndExport(t *testing.T) {
@@ -54,7 +55,7 @@ func TestReportGenerationAndExport(t *testing.T) {
 	}
 
 	// Generate report
-	rpt, err := Generate(scan.ID)
+	rpt, err := report.Generate(scan.ID)
 	if err != nil {
 		t.Fatalf("failed to generate report: %v", err)
 	}
@@ -64,9 +65,9 @@ func TestReportGenerationAndExport(t *testing.T) {
 	}
 
 	// Export formats
-	formats := []ReportFormat{FormatMarkdown, FormatJSON, FormatHTML, FormatText}
+	formats := []report.ReportFormat{report.FormatMarkdown, report.FormatJSON, report.FormatHTML, report.FormatText}
 	for _, fmtStr := range formats {
-		outPath := filepath.Join(t.TempDir(), "report"+ExtensionFor(string(fmtStr)))
+		outPath := filepath.Join(t.TempDir(), "report"+report.ExtensionFor(string(fmtStr)))
 		if err := rpt.Export(fmtStr, outPath); err != nil {
 			t.Errorf("failed to export format %s: %v", fmtStr, err)
 		}

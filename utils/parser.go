@@ -262,7 +262,7 @@ func ParseEndpointsFile(scanID int64, filePath, source string) (int, error) {
 
 		// Some tools output "METHOD URL"
 		parts := strings.Fields(line)
-		if len(parts) >= 2 && isHTTPMethod(parts[0]) {
+		if len(parts) >= 2 && IsHTTPMethod(parts[0]) {
 			method = parts[0]
 			url = parts[1]
 		}
@@ -368,8 +368,8 @@ func ParseFfufOutput(scanID int64, filePath string) (int, error) {
 	return count, nil
 }
 
-// isHTTPMethod checks if a string is a standard HTTP method in an allocation-free manner.
-func isHTTPMethod(s string) bool {
+// IsHTTPMethod checks if a string is a standard HTTP method in an allocation-free manner.
+func IsHTTPMethod(s string) bool {
 	switch strings.ToUpper(s) {
 	case "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CONNECT", "TRACE":
 		return true
@@ -472,9 +472,9 @@ func ParseTlsxOutput(scanID int64, filePath string, targetDomain string) (newSub
 			vulns++
 		}
 
-		host := normalizeHostValue(result.Host)
+		host := NormalizeHostValue(result.Host)
 		if host != "" {
-			weakTLS := isWeakTLSVersion(result.TLSVersion)
+			weakTLS := IsWeakTLSVersion(result.TLSVersion)
 			_ = database.UpsertHostMetadata(scanID, database.HostMetadata{
 				Host:          host,
 				SSLExpired:    result.Expired,
@@ -649,7 +649,7 @@ func ParseDalfoxOutput(scanID int64, filePath string) (int, error) {
 	return count, scanner.Err()
 }
 
-func normalizeHostValue(raw string) string {
+func NormalizeHostValue(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
@@ -668,7 +668,7 @@ func normalizeHostValue(raw string) string {
 	return strings.ToLower(strings.Trim(raw, "[]"))
 }
 
-func isWeakTLSVersion(version string) bool {
+func IsWeakTLSVersion(version string) bool {
 	version = strings.ToLower(strings.TrimSpace(version))
 	return strings.Contains(version, "tls10") ||
 		strings.Contains(version, "tls1.0") ||

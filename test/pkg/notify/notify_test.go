@@ -1,5 +1,5 @@
-package notify
-
+package notify_test
+ 
 import (
 	"encoding/json"
 	"net/http"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/notify"
 )
 
 func TestEscapeMarkdown(t *testing.T) {
@@ -23,7 +24,7 @@ func TestEscapeMarkdown(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		actual := escapeMarkdown(tc.input)
+		actual := notify.EscapeMarkdown(tc.input)
 		if actual != tc.expected {
 			t.Errorf("escapeMarkdown(%q) = %q, expected %q", tc.input, actual, tc.expected)
 		}
@@ -41,7 +42,7 @@ func TestTitleCase(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		actual := titleCase(tc.input)
+		actual := notify.TitleCase(tc.input)
 		if actual != tc.expected {
 			t.Errorf("titleCase(%q) = %q, expected %q", tc.input, actual, tc.expected)
 		}
@@ -60,7 +61,7 @@ func TestFormatDuration(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		actual := formatDuration(tc.input)
+		actual := notify.FormatDuration(tc.input)
 		if actual != tc.expected {
 			t.Errorf("formatDuration(%v) = %q, expected %q", tc.input, actual, tc.expected)
 		}
@@ -76,7 +77,7 @@ func TestGetOrderedStatsKeys(t *testing.T) {
 	}
 
 	expected := []string{"subdomains", "urls", "vulnerabilities", "unknown_metric"}
-	actual := getOrderedStatsKeys(stats)
+	actual := notify.GetOrderedStatsKeys(stats)
 
 	if len(actual) != len(expected) {
 		t.Fatalf("expected length %d, got %d", len(expected), len(actual))
@@ -113,9 +114,9 @@ func TestNotifier_SendFinding_Discord(t *testing.T) {
 		DiscordWebhook: server.URL,
 	}
 
-	notifier := New(cfg)
+	notifier := notify.New(cfg)
 
-	finding := Finding{
+	finding := notify.Finding{
 		Target:    "example.com",
 		Type:      "vulnerability",
 		Name:      "Critical Vulnerability",

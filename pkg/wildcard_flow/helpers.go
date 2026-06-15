@@ -588,8 +588,8 @@ func (h *urlHeap) Pop() any {
 	return item
 }
 
-// collectScopedURLs filters all_urls_live.txt for DAST-suitable URLs using O(1) heap pipelines.
-func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
+// CollectScopedURLs filters all_urls_live.txt for DAST-suitable URLs using O(1) heap pipelines.
+func CollectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 	file, err := os.Open(inputFile)
 	if err != nil {
 		return 0
@@ -800,5 +800,5 @@ func collectScopedParamURLs(c *Ctx, inputFile, outputFile string) int {
 	if c.Cfg != nil && c.Cfg.Tools.Dalfox.MaxURLs > 0 {
 		maxURLs = c.Cfg.Tools.Dalfox.MaxURLs
 	}
-	return collectScopedURLs(c, inputFile, outputFile, maxURLs)
+	return CollectScopedURLs(c, inputFile, outputFile, maxURLs)
 }

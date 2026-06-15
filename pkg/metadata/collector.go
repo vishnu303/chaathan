@@ -49,7 +49,7 @@ type httpSignal struct {
 // CollectHostMetadata fetches lightweight metadata for live host URLs and
 // stores one record per host for ROI scoring.
 func CollectHostMetadata(scanID int64, urls []string, proxy string) (int, error) {
-	targets := dedupeByHost(urls)
+	targets := DedupeByHost(urls)
 	if len(targets) == 0 {
 		return 0, nil
 	}
@@ -81,7 +81,7 @@ func CollectHostMetadata(scanID int64, urls []string, proxy string) (int, error)
 // CollectURLMetadata fetches lightweight metadata for selected high-value URLs
 // and stores per-path signals for ROI scoring.
 func CollectURLMetadata(scanID int64, urls []string, proxy string) (int, error) {
-	targets := dedupeByURL(urls)
+	targets := DedupeByURL(urls)
 	if len(targets) == 0 {
 		return 0, nil
 	}
@@ -226,7 +226,7 @@ func fetchSignal(client *http.Client, rawURL string) (httpSignal, bool) {
 	corsWildcard := corsHeader == "*"
 
 	// Cookie security analysis
-	hasInsecureCookies, hasSessionCookie := analyzeCookies(resp.Header["Set-Cookie"])
+	hasInsecureCookies, hasSessionCookie := AnalyzeCookies(resp.Header["Set-Cookie"])
 
 	// OPTIONS method detection (follow-up request for dangerous methods)
 	hasDangerousMethods := checkDangerousMethods(client, rawURL)
@@ -249,7 +249,7 @@ func fetchSignal(client *http.Client, rawURL string) (httpSignal, bool) {
 	}, true
 }
 
-func dedupeByHost(urls []string) []string {
+func DedupeByHost(urls []string) []string {
 	seen := make(map[string]bool)
 	var out []string
 	for _, raw := range urls {
@@ -266,7 +266,7 @@ func dedupeByHost(urls []string) []string {
 	return out
 }
 
-func dedupeByURL(urls []string) []string {
+func DedupeByURL(urls []string) []string {
 	seen := make(map[string]bool)
 	var out []string
 	for _, raw := range urls {
@@ -280,9 +280,9 @@ func dedupeByURL(urls []string) []string {
 	return out
 }
 
-// analyzeCookies inspects Set-Cookie headers for missing security flags.
+// AnalyzeCookies inspects Set-Cookie headers for missing security flags.
 // Returns (hasInsecureCookies, hasSessionCookie).
-func analyzeCookies(setCookies []string) (bool, bool) {
+func AnalyzeCookies(setCookies []string) (bool, bool) {
 	if len(setCookies) == 0 {
 		return false, false
 	}

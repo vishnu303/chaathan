@@ -1,10 +1,12 @@
-package scan
-
+package scan_test
+ 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/vishnu303/chaathan/pkg/scan"
 )
 
 func tempStateDir(t *testing.T) string {
@@ -21,7 +23,7 @@ func tempStateDir(t *testing.T) string {
 // the failure (the "later success" path). This is correct behaviour
 // when a step is explicitly re-run or skipped.
 func TestMarkStepComplete_ClearsFailureOnSuccess(t *testing.T) {
-	mgr := NewManager(tempStateDir(t))
+	mgr := scan.NewManager(tempStateDir(t))
 	state, err := mgr.CreateState(1, "test.com", "wildcard", "/tmp/results", 21, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +55,7 @@ func TestMarkStepComplete_ClearsFailureOnSuccess(t *testing.T) {
 // failure is preserved. This is the F-01 invariant: callers must NOT
 // unconditionally call MarkStepComplete after MarkStepFailed.
 func TestMarkStepFailed_PreservesFailureRecord(t *testing.T) {
-	mgr := NewManager(tempStateDir(t))
+	mgr := scan.NewManager(tempStateDir(t))
 	state, err := mgr.CreateState(1, "test.com", "wildcard", "/tmp/results", 21, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +74,7 @@ func TestMarkStepFailed_PreservesFailureRecord(t *testing.T) {
 // TestMarkStepFailed_RetryTracking verifies that re-failing the same
 // step increments the retry counter.
 func TestMarkStepFailed_RetryTracking(t *testing.T) {
-	mgr := NewManager(tempStateDir(t))
+	mgr := scan.NewManager(tempStateDir(t))
 	state, err := mgr.CreateState(1, "test.com", "wildcard", "/tmp/results", 21, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +97,7 @@ func TestMarkStepFailed_RetryTracking(t *testing.T) {
 // TestMarkStepComplete_NoDuplicates verifies that calling
 // MarkStepComplete twice doesn't double-count the step.
 func TestMarkStepComplete_NoDuplicates(t *testing.T) {
-	mgr := NewManager(tempStateDir(t))
+	mgr := scan.NewManager(tempStateDir(t))
 	state, err := mgr.CreateState(1, "test.com", "wildcard", "/tmp/results", 21, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +122,7 @@ func TestMarkStepComplete_NoDuplicates(t *testing.T) {
 
 // TestIsStepCompleted verifies the basic lookup.
 func TestIsStepCompleted(t *testing.T) {
-	mgr := NewManager(tempStateDir(t))
+	mgr := scan.NewManager(tempStateDir(t))
 	state, err := mgr.CreateState(1, "test.com", "wildcard", "/tmp/results", 21, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +142,7 @@ func TestIsStepCompleted(t *testing.T) {
 // TestStatePersistence verifies round-trip save/load.
 func TestStatePersistence(t *testing.T) {
 	dir := tempStateDir(t)
-	mgr := NewManager(dir)
+	mgr := scan.NewManager(dir)
 
 	state, err := mgr.CreateState(42, "example.com", "wildcard", "/tmp/results", 21, map[string]bool{"verbose": true})
 	if err != nil {

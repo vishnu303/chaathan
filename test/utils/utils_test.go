@@ -1,10 +1,12 @@
-package utils
-
+package utils_test
+ 
 import (
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/vishnu303/chaathan/utils"
 )
 
 func TestValidateDomain(t *testing.T) {
@@ -26,7 +28,7 @@ func TestValidateDomain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		err := ValidateDomain(tt.domain)
+		err := utils.ValidateDomain(tt.domain)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("ValidateDomain(%q) error = %v, wantErr %v", tt.domain, err, tt.wantErr)
 		}
@@ -47,7 +49,7 @@ func TestParseScanID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got, err := ParseScanID(tt.arg)
+		got, err := utils.ParseScanID(tt.arg)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("ParseScanID(%q) error = %v, wantErr %v", tt.arg, err, tt.wantErr)
 		}
@@ -71,7 +73,7 @@ func TestParseDays(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got, err := ParseDays(tt.arg)
+		got, err := utils.ParseDays(tt.arg)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("ParseDays(%q) error = %v, wantErr %v", tt.arg, err, tt.wantErr)
 		}
@@ -84,14 +86,14 @@ func TestParseDays(t *testing.T) {
 func TestDeduplicateSlice(t *testing.T) {
 	in := []string{"apple", "orange", "apple", "banana", "orange"}
 	want := []string{"apple", "orange", "banana"}
-	got := DeduplicateSlice(in)
+	got := utils.DeduplicateSlice(in)
 	if !slices.Equal(got, want) {
 		t.Errorf("DeduplicateSlice(%v) = %v, want %v", in, got, want)
 	}
 
 	// Empty case
 	var empty []int
-	if gotEmpty := DeduplicateSlice(empty); len(gotEmpty) != 0 {
+	if gotEmpty := utils.DeduplicateSlice(empty); len(gotEmpty) != 0 {
 		t.Errorf("DeduplicateSlice(empty) = %v, want empty", gotEmpty)
 	}
 }
@@ -111,7 +113,7 @@ func TestTruncate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := Truncate(tt.s, tt.max)
+		got := utils.Truncate(tt.s, tt.max)
 		if got != tt.want {
 			t.Errorf("Truncate(%q, %d) = %q, want %q", tt.s, tt.max, got, tt.want)
 		}
@@ -131,7 +133,7 @@ func TestFormatSize(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := FormatSize(tt.bytes)
+		got := utils.FormatSize(tt.bytes)
 		if got != tt.want {
 			t.Errorf("FormatSize(%d) = %q, want %q", tt.bytes, got, tt.want)
 		}
@@ -157,9 +159,9 @@ func TestIsHTTPMethod(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := isHTTPMethod(tt.method)
+		got := utils.IsHTTPMethod(tt.method)
 		if got != tt.want {
-			t.Errorf("isHTTPMethod(%q) = %t, want %t", tt.method, got, tt.want)
+			t.Errorf("IsHTTPMethod(%q) = %t, want %t", tt.method, got, tt.want)
 		}
 	}
 }
@@ -179,12 +181,12 @@ func TestParseHex4(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got, ok := parseHex4(tt.hex)
+		got, ok := utils.ParseHex4(tt.hex)
 		if ok != tt.wantOk {
-			t.Errorf("parseHex4(%q) ok = %t, wantOk %t", tt.hex, ok, tt.wantOk)
+			t.Errorf("ParseHex4(%q) ok = %t, wantOk %t", tt.hex, ok, tt.wantOk)
 		}
 		if ok && got != tt.want {
-			t.Errorf("parseHex4(%q) = %d, want %d", tt.hex, got, tt.want)
+			t.Errorf("ParseHex4(%q) = %d, want %d", tt.hex, got, tt.want)
 		}
 	}
 }
@@ -201,9 +203,9 @@ func TestUnescapeUnicodeURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := unescapeUnicodeURL(tt.in)
+		got := utils.UnescapeUnicodeURL(tt.in)
 		if got != tt.want {
-			t.Errorf("unescapeUnicodeURL(%q) = %q, want %q", tt.in, got, tt.want)
+			t.Errorf("UnescapeUnicodeURL(%q) = %q, want %q", tt.in, tt.want, got)
 		}
 	}
 }
@@ -222,9 +224,9 @@ func TestNormalizeHostValue(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := normalizeHostValue(tt.raw)
+		got := utils.NormalizeHostValue(tt.raw)
 		if got != tt.want {
-			t.Errorf("normalizeHostValue(%q) = %q, want %q", tt.raw, got, tt.want)
+			t.Errorf("NormalizeHostValue(%q) = %q, want %q", tt.raw, got, tt.want)
 		}
 	}
 }
@@ -245,9 +247,9 @@ func TestIsWeakTLSVersion(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := isWeakTLSVersion(tt.version)
+		got := utils.IsWeakTLSVersion(tt.version)
 		if got != tt.want {
-			t.Errorf("isWeakTLSVersion(%q) = %t, want %t", tt.version, got, tt.want)
+			t.Errorf("IsWeakTLSVersion(%q) = %t, want %t", tt.version, got, tt.want)
 		}
 	}
 }
@@ -271,7 +273,7 @@ func TestFileUtilities(t *testing.T) {
 	}
 
 	// Test CountFileLines
-	lines, err := CountFileLines(file1)
+	lines, err := utils.CountFileLines(file1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +282,7 @@ func TestFileUtilities(t *testing.T) {
 	}
 
 	// Test MergeAndDeduplicate
-	err = MergeAndDeduplicate([]string{file1, file2}, mergedFile)
+	err = utils.MergeAndDeduplicate([]string{file1, file2}, mergedFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +298,7 @@ func TestFileUtilities(t *testing.T) {
 	}
 
 	// Test FilterFileLines
-	err = FilterFileLines(mergedFile, func(line string) bool {
+	err = utils.FilterFileLines(mergedFile, func(line string) bool {
 		return line != "banana" // filter out banana
 	})
 	if err != nil {
@@ -324,7 +326,7 @@ https://example.com/a
 		t.Fatal(err)
 	}
 
-	err = SanitizeURLFile(urlFile)
+	err = utils.SanitizeURLFile(urlFile)
 	if err != nil {
 		t.Fatal(err)
 	}

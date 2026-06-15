@@ -1,5 +1,5 @@
-package wildcard_flow
-
+package wildcard_flow_test
+ 
 import (
 	"context"
 	"net"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/vishnu303/chaathan/pkg/runner"
 	"github.com/vishnu303/chaathan/pkg/tools"
+	"github.com/vishnu303/chaathan/pkg/wildcard_flow"
 )
 
 // MockRunner captures the run arguments for validation.
@@ -45,7 +46,7 @@ func TestWafIPCheck(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		res := isWafIP(tc.ip)
+		res := wildcard_flow.IsWafIP(tc.ip)
 		if res != tc.expected {
 			t.Errorf("expected isWafIP(%s) to be %v, got %v", tc.ip, tc.expected, res)
 		}
@@ -140,7 +141,7 @@ func TestVerifyOriginBypassMatch(t *testing.T) {
 	}
 
 	// 1. Verify baseline behavior (requesting direct IP with raw IP host header)
-	baselineCode, _, err := makeRawRequest(context.Background(), client, server.URL, ip)
+	baselineCode, _, err := wildcard_flow.MakeRawRequest(context.Background(), client, server.URL, ip)
 	if err != nil {
 		t.Fatalf("baseline request failed: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestVerifyOriginBypassMatch(t *testing.T) {
 	}
 
 	// 2. Verify WAF Bypass behavior (injecting matching Host header)
-	probeCode, probeBody, err := makeRawRequest(context.Background(), client, server.URL, "protected.example.com")
+	probeCode, probeBody, err := wildcard_flow.MakeRawRequest(context.Background(), client, server.URL, "protected.example.com")
 	if err != nil {
 		t.Fatalf("probe request failed: %v", err)
 	}

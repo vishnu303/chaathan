@@ -35,8 +35,8 @@ var telegramEscaper = strings.NewReplacer(
 	")", "\\)",
 )
 
-// getOrderedStatsKeys returns the stats keys ordered by preference for display.
-func getOrderedStatsKeys(stats map[string]int) []string {
+// GetOrderedStatsKeys returns the stats keys ordered by preference for display.
+func GetOrderedStatsKeys(stats map[string]int) []string {
 	preferred := []string{"subdomains", "live", "urls", "endpoints", "ports", "vulnerabilities"}
 	var keys []string
 	seen := make(map[string]bool)
@@ -345,9 +345,9 @@ func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
 		{"name": "Duration", "value": scan.Duration.String(), "inline": true},
 	}
 
-	for _, k := range getOrderedStatsKeys(scan.Stats) {
+	for _, k := range GetOrderedStatsKeys(scan.Stats) {
 		fields = append(fields, map[string]any{
-			"name": titleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "inline": true,
+			"name": TitleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "inline": true,
 		})
 	}
 
@@ -433,9 +433,9 @@ func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
 		{"title": "Duration", "value": scan.Duration.String(), "short": true},
 	}
 
-	for _, k := range getOrderedStatsKeys(scan.Stats) {
+	for _, k := range GetOrderedStatsKeys(scan.Stats) {
 		fields = append(fields, map[string]any{
-			"title": titleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "short": true,
+			"title": TitleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "short": true,
 		})
 	}
 
@@ -496,22 +496,22 @@ func (n *Notifier) sendTelegram(finding Finding) error {
 			"━━━━━━━━━━━━━━━━━━━━\n"+
 			"🎯 *Target*    %s\n"+
 			"🔖 *Type*    %s",
-		header, escapeMarkdown(sev),
-		sev, escapeMarkdown(finding.Name),
-		escapeMarkdown(finding.Target),
-		escapeMarkdown(finding.Type),
+		header, EscapeMarkdown(sev),
+		sev, EscapeMarkdown(finding.Name),
+		EscapeMarkdown(finding.Target),
+		EscapeMarkdown(finding.Type),
 	)
 
 	if finding.Description != "" {
-		text += fmt.Sprintf("\n📝 *Details*    %s", escapeMarkdown(finding.Description))
+		text += fmt.Sprintf("\n📝 *Details*    %s", EscapeMarkdown(finding.Description))
 	}
 
 	if finding.URL != "" {
-		text += fmt.Sprintf("\n🔗 *URL*    %s", escapeMarkdown(finding.URL))
+		text += fmt.Sprintf("\n🔗 *URL*    %s", EscapeMarkdown(finding.URL))
 	}
 
 	if finding.TemplateID != "" {
-		text += fmt.Sprintf("\n🗂 *Template*    %s", escapeMarkdown(finding.TemplateID))
+		text += fmt.Sprintf("\n🗂 *Template*    %s", EscapeMarkdown(finding.TemplateID))
 	}
 
 	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
@@ -527,20 +527,20 @@ func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
 			"🔢 *Scan ID*    %d\n"+
 			"━━━━━━━━━━━━━━━━━━━━\n"+
 			"📊 *Results*\n",
-		escapeMarkdown(scan.Target),
+		EscapeMarkdown(scan.Target),
 		scan.ScanID,
 	)
 
 	// Display stats in preferred order
-	for _, k := range getOrderedStatsKeys(scan.Stats) {
-		text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), scan.Stats[k])
+	for _, k := range GetOrderedStatsKeys(scan.Stats) {
+		text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), EscapeMarkdown(TitleCase(k)), scan.Stats[k])
 	}
 
 	text += fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━\n"+
 			"⏱ *Duration*    %s\n"+
 			"_Chaathan Scanner_",
-		escapeMarkdown(formatDuration(scan.Duration)),
+		EscapeMarkdown(FormatDuration(scan.Duration)),
 	)
 
 	return n.sendTelegramMessage(text)
@@ -562,16 +562,16 @@ func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
 			"📋 *Step*    %s\n"+
 			"⏱ *Duration*    %s\n"+
 			"🔍 *Findings*    %s",
-		escapeMarkdown(step.Target),
+		EscapeMarkdown(step.Target),
 		step.StepNumber,
 		step.TotalSteps,
-		escapeMarkdown(formatStepLabel(step)),
-		escapeMarkdown(formatDuration(step.Duration)),
+		EscapeMarkdown(formatStepLabel(step)),
+		EscapeMarkdown(FormatDuration(step.Duration)),
 		findings,
 	)
 
 	if step.ScanType != "" {
-		text += fmt.Sprintf("\n🏷 *Type*    %s", escapeMarkdown(step.ScanType))
+		text += fmt.Sprintf("\n🏷 *Type*    %s", EscapeMarkdown(step.ScanType))
 	}
 
 	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
@@ -725,7 +725,7 @@ func formatStepLabel(step StepComplete) string {
 	return step.StepName
 }
 
-func escapeMarkdown(s string) string {
+func EscapeMarkdown(s string) string {
 	// Escape all Telegram MarkdownV2 special characters to prevent
 	// injection from attacker-controlled finding names, template IDs, etc.
 	// Backslash MUST be escaped first to avoid double-escaping the
@@ -734,8 +734,8 @@ func escapeMarkdown(s string) string {
 	return telegramEscaper.Replace(s)
 }
 
-// titleCase capitalises the first rune of s (replaces deprecated strings.Title).
-func titleCase(s string) string {
+// TitleCase capitalises the first rune of s (replaces deprecated strings.Title).
+func TitleCase(s string) string {
 	if s == "" {
 		return s
 	}
@@ -744,9 +744,9 @@ func titleCase(s string) string {
 	return string(runes)
 }
 
-// formatDuration converts a duration to a clean human-readable string.
+// FormatDuration converts a duration to a clean human-readable string.
 // e.g. 19m56.166s → "19m 56s", 3723s → "1h 2m", 45s → "45s"
-func formatDuration(d time.Duration) string {
+func FormatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
