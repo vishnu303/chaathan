@@ -14,7 +14,7 @@ import (
 
 // Catppuccin color theme constants
 const (
-	ColorBorder   = "#45475a" // Overlay grey
+	ColorBorder   = "#585b70" // High-contrast grey
 	ColorActive   = "#cba6f7" // Mauve active highlight
 	ColorSubtle   = "#a6adc8" // Subtext muted grey
 	ColorLavender = "#b4befe" // Purple
@@ -28,6 +28,14 @@ const (
 
 // StartDashboard boots up the interactive tview dashboard.
 func StartDashboard() error {
+	// Configure global tview styles to use terminal transparent background
+	tview.Styles.PrimitiveBackgroundColor = tcell.ColorDefault
+	tview.Styles.ContrastBackgroundColor = tcell.ColorDefault
+	tview.Styles.MoreContrastBackgroundColor = tcell.ColorDefault
+	tview.Styles.BorderColor = tcell.GetColor(ColorActive)
+	tview.Styles.GraphicsColor = tcell.GetColor(ColorActive)
+	tview.Styles.TitleColor = tcell.GetColor(ColorSapphire)
+
 	app := tview.NewApplication()
 
 	// 1. Header View
@@ -35,7 +43,7 @@ func StartDashboard() error {
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
 	headerText.SetText(fmt.Sprintf(
-		" [%s:black:b]CHAATHAN PENTESTING ORCHESTRATOR[-] [%s:black:i]v1.0.0 • Professional Recon Console[-]",
+		" [%s::b]CHAATHAN PENTESTING ORCHESTRATOR[-] [%s::i]v1.0.0 • Professional Recon Console[-]",
 		ColorActive, ColorSapphire,
 	))
 
@@ -49,7 +57,7 @@ func StartDashboard() error {
 		box.SetBorder(true).
 			SetTitle(" " + title + " ").
 			SetTitleColor(tcell.GetColor(ColorSapphire)).
-			SetBorderColor(tcell.GetColor(ColorBorder))
+			SetBorderColor(tcell.GetColor(ColorActive))
 	}
 
 	// 3. Left Column: Scan Runs List
@@ -115,7 +123,7 @@ func StartDashboard() error {
 		// Recent 15 scans
 		scans, err := database.GetRecentScans(15)
 		if err != nil {
-			middleText.SetText(fmt.Sprintf("[red]Database error: %v[-]", err))
+			middleText.SetText(fmt.Sprintf(" [red]Database error: %v[-]", err))
 			return
 		}
 		scansList = scans
@@ -123,8 +131,8 @@ func StartDashboard() error {
 		leftList.Clear()
 		if len(scansList) == 0 {
 			leftList.AddItem("No scans recorded.", "Run a scan first.", 0, nil)
-			middleText.SetText("Select a scan run to view properties.")
-			rightText.SetText("Select a scan to inspect findings.")
+			middleText.SetText(" Select a scan run to view properties.")
+			rightText.SetText(" Select a scan to inspect findings.")
 			return
 		}
 
@@ -177,12 +185,12 @@ func StartDashboard() error {
 		case "running":
 			statusColor = ColorYellow
 		}
-		statusBadge := fmt.Sprintf("[%s:black:b] %s [-]", statusColor, strings.ToUpper(s.Status))
+		statusBadge := fmt.Sprintf("[%s::b] %s [-]", statusColor, strings.ToUpper(s.Status))
 
-		midSB.WriteString(fmt.Sprintf(" [%s:black:b]Target: %s[-]\n\n", ColorLavender, s.Target))
-		midSB.WriteString(fmt.Sprintf(" %-12s %s\n", "Type:", strings.ToUpper(s.Type)))
-		midSB.WriteString(fmt.Sprintf(" %-12s %s\n", "Status:", statusBadge))
-		midSB.WriteString(fmt.Sprintf(" %-12s %s\n", "Started:", s.StartedAt.Format("15:04:05")))
+		midSB.WriteString(fmt.Sprintf("  [%s::b]Target: %s[-]\n\n", ColorLavender, s.Target))
+		midSB.WriteString(fmt.Sprintf("  %-12s %s\n", "Type:", strings.ToUpper(s.Type)))
+		midSB.WriteString(fmt.Sprintf("  %-12s %s\n", "Status:", statusBadge))
+		midSB.WriteString(fmt.Sprintf("  %-12s %s\n", "Started:", s.StartedAt.Format("15:04:05")))
 
 		durStr := "Active..."
 		if s.CompletedAt != nil {
@@ -192,14 +200,14 @@ func StartDashboard() error {
 		} else {
 			durStr = time.Since(s.StartedAt).Round(time.Second).String()
 		}
-		midSB.WriteString(fmt.Sprintf(" %-12s %s\n", "Duration:", durStr))
-		midSB.WriteString(fmt.Sprintf(" [%s]Folder:[-] %s\n\n", ColorSubtle, s.ResultDir))
+		midSB.WriteString(fmt.Sprintf("  %-12s %s\n", "Duration:", durStr))
+		midSB.WriteString(fmt.Sprintf("  [%s]Folder:[-] %s\n\n", ColorSubtle, s.ResultDir))
 
 		// Render live running scan progress if applicable
 		if s.Status == "running" {
 			stateMgr := scan.NewManager(paths.StateDir())
 			if state, err := stateMgr.LoadState(s.ID); err == nil {
-				midSB.WriteString(fmt.Sprintf(" [%s:black:b]RUNTIME PROGRESS[-]\n", ColorYellow))
+				midSB.WriteString(fmt.Sprintf("  [%s::b]RUNTIME PROGRESS[-]\n", ColorYellow))
 				completed := len(state.CompletedSteps)
 				total := state.TotalSteps
 				if total == 0 {
@@ -217,20 +225,20 @@ func StartDashboard() error {
 						bar += "░"
 					}
 				}
-				midSB.WriteString(fmt.Sprintf(" [%s]%.0f%%[-] Current: %d/%d steps\n", ColorYellow, pct, completed, total))
+				midSB.WriteString(fmt.Sprintf("  [%s]%.0f%%[-] Current: %d/%d steps\n", ColorYellow, pct, completed, total))
 				if state.CurrentStep < len(scan.WildcardSteps) {
-					midSB.WriteString(fmt.Sprintf(" Current: %s\n\n", scan.WildcardSteps[state.CurrentStep].Description))
+					midSB.WriteString(fmt.Sprintf("  Current: %s\n\n", scan.WildcardSteps[state.CurrentStep].Description))
 				} else {
-					midSB.WriteString(" Current: Finalizing...\n\n")
+					midSB.WriteString("  Current: Finalizing...\n\n")
 				}
 			}
 		}
 
 		// List open ports
-		midSB.WriteString(fmt.Sprintf(" [%s:black:b]DISCOVERED OPEN PORTS[-]\n", ColorSapphire))
+		midSB.WriteString(fmt.Sprintf("  [%s::b]DISCOVERED OPEN PORTS[-]\n", ColorSapphire))
 		ports, err := database.GetPorts(s.ID)
 		if err == nil && len(ports) > 0 {
-			midSB.WriteString(fmt.Sprintf(" [%s]Host                Port/Proto  Service[-]\n", ColorSubtle))
+			midSB.WriteString(fmt.Sprintf("  [%s]Host                Port/Proto  Service[-]\n", ColorSubtle))
 			
 			displayLimit := 8
 			if len(ports) < displayLimit {
@@ -248,31 +256,31 @@ func StartDashboard() error {
 					srv = "unknown"
 				}
 				// Pad output cleanly using formatting tags
-				midSB.WriteString(fmt.Sprintf(" %-19s %-11s %s\n", truncateText(p.Host, 18), portStr, truncateText(srv, 8)))
+				midSB.WriteString(fmt.Sprintf("  %-19s %-11s %s\n", truncateText(p.Host, 18), portStr, truncateText(srv, 8)))
 			}
 			if len(ports) > displayLimit {
-				midSB.WriteString(fmt.Sprintf(" [%s:black:i]...and %d more ports[-]\n", ColorSubtle, len(ports)-displayLimit))
+				midSB.WriteString(fmt.Sprintf("  [%s::i]...and %d more ports[-]\n", ColorSubtle, len(ports)-displayLimit))
 			}
 		} else {
-			midSB.WriteString(fmt.Sprintf(" [%s]No open ports discovered.[-]\n", ColorSubtle))
+			midSB.WriteString(fmt.Sprintf("  [%s]No open ports discovered.[-]\n", ColorSubtle))
 		}
 		middleText.SetText(midSB.String())
 
 		// Update right panel findings
 		var rightSB strings.Builder
-		rightSB.WriteString(fmt.Sprintf(" [%s:black:b]SCOPE COUNTS[-]\n", ColorSapphire))
+		rightSB.WriteString(fmt.Sprintf("  [%s::b]SCOPE COUNTS[-]\n", ColorSapphire))
 		stats, err := database.GetScanStats(s.ID)
 		if err == nil && stats != nil {
 			colSub := fmt.Sprintf("%d", stats.TotalSubdomains)
 			colLive := fmt.Sprintf("%d", stats.LiveSubdomains)
-			rightSB.WriteString(fmt.Sprintf(" %-14s [%s]%s[-]\n", "Subdomains:", ColorSapphire, colSub))
-			rightSB.WriteString(fmt.Sprintf(" %-14s [%s]%s[-]\n\n", "Live Hosts:", ColorSapphire, colLive))
+			rightSB.WriteString(fmt.Sprintf("  %-14s [%s]%s[-]\n", "Subdomains:", ColorSapphire, colSub))
+			rightSB.WriteString(fmt.Sprintf("  %-14s [%s]%s[-]\n\n", "Live Hosts:", ColorSapphire, colLive))
 		} else {
-			rightSB.WriteString(fmt.Sprintf(" [%s]No counters compiled.[-]\n\n", ColorSubtle))
+			rightSB.WriteString(fmt.Sprintf("  [%s]No counters compiled.[-]\n\n", ColorSubtle))
 		}
 
 		// Vulnerability discoveries list
-		rightSB.WriteString(fmt.Sprintf(" [%s:black:b]VULNERABILITY DISCOVERIES[-]\n", ColorActive))
+		rightSB.WriteString(fmt.Sprintf("  [%s::b]VULNERABILITY DISCOVERIES[-]\n", ColorActive))
 		vulns, err := database.GetVulnerabilities(s.ID)
 		if err == nil && len(vulns) > 0 {
 			displayLimit := 10
@@ -297,13 +305,13 @@ func StartDashboard() error {
 
 				vTitle := truncateText(v.Name, 26)
 				vHost := truncateText(v.Host, 14)
-				rightSB.WriteString(fmt.Sprintf(" %s %s [%s]%s[-]\n", badge, vHost, ColorSubtle, vTitle))
+				rightSB.WriteString(fmt.Sprintf("  %s %s [%s]%s[-]\n", badge, vHost, ColorSubtle, vTitle))
 			}
 			if len(vulns) > displayLimit {
-				rightSB.WriteString(fmt.Sprintf(" [%s:black:i]...and %d more vulnerabilities[-]\n", ColorSubtle, len(vulns)-displayLimit))
+				rightSB.WriteString(fmt.Sprintf("  [%s::i]...and %d more vulnerabilities[-]\n", ColorSubtle, len(vulns)-displayLimit))
 			}
 		} else {
-			rightSB.WriteString(fmt.Sprintf("\n [%s]Clean Scan - No vulnerabilities found.[-]\n", ColorGreen))
+			rightSB.WriteString(fmt.Sprintf("\n  [%s]Clean Scan - No vulnerabilities found.[-]\n", ColorGreen))
 		}
 		rightText.SetText(rightSB.String())
 	})
