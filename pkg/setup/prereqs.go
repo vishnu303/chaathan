@@ -73,10 +73,16 @@ func installPrerequisites(ctx *SetupContext) {
 		return
 	}
 
+	// Ensure Go runtime is installed and at least 1.26
+	if _, err := EnsureGoInstalled(ctx); err != nil {
+		progress.ItemFail("Go setup failed", err.Error())
+		return
+	}
+
 	distro := detectDistro()
 	if distro == distroUnknown {
-		progress.ItemInfo("Unrecognised Linux distribution — cannot auto-install prerequisites.")
-		progress.ItemInfo("Please ensure: go, pip3, gem, git, make, gcc, libpcap")
+		progress.ItemInfo("Unrecognised Linux distribution — cannot auto-install other prerequisites.")
+		progress.ItemInfo("Please ensure: pip3, gem, git, make, gcc, libpcap")
 		ensurePathSetup()
 		return
 	}
@@ -91,7 +97,6 @@ func installPrerequisites(ctx *SetupContext) {
 	}
 
 	prereqs := []prereq{
-		{"Go", "go", "golang-go", "go", "", ""},
 		{"pip3", "pip3", "python3-pip", "python-pip", "", ""},
 		{"Git", "git", "git", "git", "", ""},
 		{"Make", "make", "make", "make", "", ""},

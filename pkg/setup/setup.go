@@ -71,8 +71,8 @@ func Run(cfg RunConfig) {
 
 	installPrerequisites(ctx)
 
-	if _, err := exec.LookPath("go"); err != nil {
-		progress.ItemFail("Go is not installed", "Please install Go 1.21+ manually")
+	if ok, _ := CheckGoInstalledAndAtLeast126(); !ok {
+		progress.ItemFail("Go runtime validation failed", "Please install Go 1.26+ manually")
 		return
 	}
 

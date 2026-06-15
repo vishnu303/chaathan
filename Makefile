@@ -6,8 +6,9 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 GOFLAGS := -buildvcs=false -ldflags "-s -w -X github.com/vishnu303/chaathan/cli.Version=$(VERSION) -X github.com/vishnu303/chaathan/cli.BuildTime=$(BUILD_TIME)"
 INSTALL_DIR := /usr/local/bin
+GO_BIN := $(shell command -v go 2>/dev/null || echo "/usr/local/go/bin/go")
 
-.PHONY: all build install uninstall clean test vet lint setup tools-check help dev version
+.PHONY: all build install uninstall clean test vet lint setup tools-check help dev version check-go install-go
 
 help: ## Show this help message with dynamic target listings
 	@echo "Chaathan Makefile"
@@ -20,9 +21,44 @@ help: ## Show this help message with dynamic target listings
 
 all: build install setup ## Build, install, and setup all external tools (all-in-one bootstrap)
 
-build: ## Build the chaathan binary with version flags
+check-go: ## Verify if Go 1.26+ is installed, automatically running the installer on failure
+	@GO_PATH=$$(command -v go 2>/dev/null || echo "/usr/local/go/bin/go"); \
+	if [ ! -x "$$GO_PATH" ]; then \
+		echo "Go is not installed. Installing Go 1.26+..."; \
+		$(MAKE) install-go; \
+	else \
+		GO_VER=$$("$$GO_PATH" version | awk '{print $$3}' | sed 's/go//'); \
+		GO_MAJOR=$$(echo $$GO_VER | cut -d. -f1); \
+		GO_MINOR=$$(echo $$GO_VER | cut -d. -f2); \
+		if [ $$GO_MAJOR -lt 1 ] || { [ $$GO_MAJOR -eq 1 ] && [ $$GO_MINOR -lt 26 ]; }; then \
+			echo "Go version $$GO_VER is too old. Installing Go 1.26+..."; \
+			$(MAKE) install-go; \
+		fi; \
+	fi
+
+install-go: ## Download and install the latest Go binary globally to /usr/local/go
+	@if ! command -v curl >/dev/null 2>&1; then \
+		if command -v apt-get >/dev/null 2>&1; then \
+			sudo apt-get update -qq && sudo apt-get install -y -qq curl; \
+		elif command -v pacman >/dev/null 2>&1; then \
+			sudo pacman -S --noconfirm --needed curl; \
+		else \
+			echo "Please install curl manually"; exit 1; \
+		fi; \
+	fi
+	@VER=$$(curl -fsSL https://go.dev/VERSION?m=text | head -n1) && \
+	echo "Downloading and installing $$VER..." && \
+	curl -fsSL https://go.dev/dl/$$VER.linux-amd64.tar.gz -o /tmp/go.tar.gz && \
+	sudo rm -rf /usr/local/go && \
+	sudo tar -C /usr/local -xzf /tmp/go.tar.gz && \
+	rm -f /tmp/go.tar.gz && \
+	(grep -q '/usr/local/go/bin' ~/.bashrc || echo 'export PATH=$$PATH:/usr/local/go/bin' >> ~/.bashrc) && \
+	(if [ -f ~/.zshrc ]; then grep -q '/usr/local/go/bin' ~/.zshrc || echo 'export PATH=$$PATH:/usr/local/go/bin' >> ~/.zshrc; fi) && \
+	echo "✅ Go installed: $$(/usr/local/go/bin/go version)"
+
+build: check-go ## Build the chaathan binary with version flags
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
-	@go build $(GOFLAGS) -o $(BINARY_NAME) .
+	@PATH=$$PATH:/usr/local/go/bin $(GO_BIN) build $(GOFLAGS) -o $(BINARY_NAME) .
 	@echo "✅ Built: ./$(BINARY_NAME)"
 
 install: build ## Build and install the chaathan binary to the system path

@@ -1,6 +1,6 @@
 # Chaathan
 
-[![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
 [![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=for-the-badge&logo=sqlite)](https://sqlite.org)
 [![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux)](https://linux.org)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
@@ -34,10 +34,10 @@ Run these targets from the root of the cloned repository directory to compile th
 git clone https://github.com/vishnu303/chaathan.git && cd chaathan
 
 # Orchestration targets
-make all            # Installs chaathan binary and provisions all 30 tools (Recommended)
+make all            # Installs chaathan binary and provisions all 27 tools (Recommended)
 make build          # Compiles the single chaathan binary in the local directory
 make install        # Installs the compiled binary globally to /usr/local/bin
-make setup          # Provisions and compiles all 30 third-party tools
+make setup          # Provisions and compiles all 27 third-party tools
 make test           # Executes the Go unit test suite
 make vet            # Performs static analysis and code verification
 make clean          # Cleans up local compilation and build artifacts
@@ -102,8 +102,8 @@ chaathan delete list                        # Catalog and list all scans flagged
 
 # Tooling Checks & Provisioning
 chaathan setup                              # Install missing external third-party dependencies
-chaathan setup --update                     # Force rebuild and update all 30 third-party tools to latest
-chaathan tools list                         # Show categorization list of all 30 integrated engines
+chaathan setup --update                     # Force rebuild and update all 27 third-party tools to latest
+chaathan tools list                         # Show categorization list of all 27 integrated engines
 chaathan tools check                        # Perform disk audits and check binary paths for all tools
 ```
 
@@ -144,10 +144,10 @@ chaathan diff <previous_id> <latest_id>
 
 ## 📦 System Provisioning & Requirements
 
-Chaathan is packaged as a single static binary. It acts as an orchestration engine, launching and managing 30 third-party security utilities.
+Chaathan is packaged as a single static binary. It acts as an orchestration engine, launching and managing 27 third-party security utilities.
 
 > [!IMPORTANT]  
-> **Host Requirements:** Linux operating system (tested extensively on Ubuntu, Arch, and CachyOS). Go 1.21 or greater and Git must be pre-installed on the host system.
+> **Host Requirements:** Linux operating system (tested extensively on Ubuntu, Arch, and CachyOS). Go 1.26 or greater and Git must be pre-installed on the host system.
 > All external scanning engines (such as Amass, Nuclei, Httpx, Dalfox) are dynamically compiled and verified during the `make all` bootstrap process (syntax detailed in the Command Center).
 
 ---
@@ -161,14 +161,14 @@ Chaathan orchestrates complex multi-stage recon chains, consolidating raw output
 [Proxy Scraping] ──> [Asset Discovery] ──> [DNS & Port Validation] ──> [Content crawling] ──> [Vulnerability Audits] ──> [WAF Fingerprints]
 ```
 
-| Phase | Steps | Key Tools Used | Central Artifact Generated |
+| Phase | Steps | Key Tools Used | Central Artifact Generated (in `final_files/`) |
 | :--- | :--- | :--- | :--- |
-| **Phase 0: Proxy Scraping** | 1 | `mubeng` | `proxy_pool.txt` + rotating proxy server |
-| **Phase 1: Asset Discovery** | 2–6 | `subfinder`, `assetfinder`, `amass`, `uncover`, `github-subdomains` | `all_subdomains.txt` |
-| **Phase 2: Validation** | 7–11 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_hosts.txt` |
-| **Phase 3: Content Discovery** | 12–18 | `katana`, `gospider`, `waybackurls`, `gau`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls_live.txt` |
-| **Phase 4: Vulnerability Scan** | 19–22 | `nuclei` (smart CVE + DAST rules), `dalfox` (targeted XSS scanning) | Saved to SQLite (`vulnerabilities` table) |
-| **Phase 5: Fingerprinting** | 23 | `httpx`, `nuclei` | `tech_fingerprint.json` |
+| **Phase 0: Proxy Scraping** | 1 | `mubeng`, `proxy-scraper-checker` | `proxy_pool.txt` + rotating proxy server |
+| **Phase 1: Asset Discovery** | 2–6 | `subfinder`, `assetfinder`, `sublist3r`, `amass`, `uncover`, `github-subdomains`, `hakrawler` | `final_subdomains.txt` |
+| **Phase 2: Validation** | 7–11 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_subdomains.txt`, `open_ports.txt` |
+| **Phase 3: Content Discovery** | 12–18 | `waybackurls`, `gau`, `katana`, `gospider`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls.txt`, `urls_200.txt`, `gf_secrets_findings.txt` |
+| **Phase 4: Vulnerability Scan** | 19–22 | `nuclei` (infra CVE, DAST, takeovers), `dalfox` | `vulnerabilities.txt`, `vulnerabilities_critical_high.txt`, `dalfox_xss.jsonl` |
+| **Phase 5: Fingerprinting** | 23 | `httpx`, `nuclei` | `httpx_tech.json`, `nuclei_waf.json` |
 
 <details>
 <summary>🔍 Expand Detailed 23-Step Pipeline Spec</summary>
@@ -232,54 +232,6 @@ Modern web applications sit behind front-end shields like Cloudflare, Akamai, an
 - **Automated Proxy Rotation (`--auto-proxy`):** Automatically scrapes and validates free proxies from public sources against the target domain, then starts `mubeng` as a local rotating proxy server. Every outgoing request from every tool uses a different exit IP address — no manual proxy configuration needed. Dead proxies are automatically removed from the pool.
 
 ---
-
-## 🛠️ Architecture & Development Patterns
-
-Following a comprehensive package refactor, the entrypoint, `cli`, `utils`, and automation targets have been optimized to adhere to the highest Go development standards and clean coding principles:
-
-*   **Deferred Resource Safety (`main.go`)**: Restructured the process lifecycle to execute within a standard Go `run()` wrapper. This guarantees all deferred operations—specifically `defer database.Close()` (which flushes database transactions and releases SQLite file locks)—are executed completely before the program exits, preventing resource leakages if Cobra routing or setup crashes.
-*   **Modernized Makefile Automation (`Makefile`)**: Converted build targets to self-documenting inline configurations (`target: ## Description`), parsed dynamically at runtime via a grep-and-awk script to generate interactive help pages. Upgraded compilation installer rules to use the standard atomic Unix `install` command instead of sequential copy and chmod steps.
-*   **Thin CLI Pattern**: Command handlers in `cli/` focus exclusively on argument parsing, flag binding, and user-facing terminal presentation, delegating all scanning, database, and reporting workflows to dedicated packages under `pkg/`.
-*   **Centralized Helpers (`cli/helpers.go`)**: Repetitive validations, custom parsing (e.g., scan ID and age parameters), rotating configuration overrides, and path resolutions are unified inside a dedicated helpers module to avoid code duplication.
-*   **Deterministic Output & UX**: Key-value settings output (like `config set` errors) are systematically grouped and sorted using the Go `"sort"` package to guarantee stable, predictable, and clean terminal displays.
-*   **Unified Serialization**: A single `writeJSONOrPrint` routine standardizes JSON output formatting and file-writing across all database query subcommands.
-
-*   **High-Performance Utility & I/O Packages (`utils/`)**:
-    *   **Buffered Export Operations**: Replaced unbuffered file I/O with `bufio.Writer` buffers across all report exports, ensuring disk efficiency when exporting tens of thousands of domains, URLs, or ports.
-    *   **Allocation-Free Parsers**: Minimized memory overhead inside high-frequency parser loops by analyzing scanner byte slices (`scanner.Bytes()`) directly, and rewritten checks like `isHTTPMethod` into allocation-free switch statements.
-    *   **Decoupled Reader/Writer Pipelines**: Split complex file operations into clear, separate reading and writing steps (reusing a unified `writeLines` helper), allowing standard `defer` file handle closures and eliminating nested descriptor leak risks.
-    *   **Robust Network Parsing**: Replaced naive colon-splitting with standard library `net.SplitHostPort` to safely parse Naabu ports and resolve IPv6 hostnames cleanly.
-    *   **Strict Scope Matching (Security)**: Fixed certificate mining in `ParseTlsxOutput` to perform correct subdomain matches (`san == targetDomain || strings.HasSuffix(san, "."+targetDomain)`), preventing out-of-scope sibling domains (e.g. `notgoogle.com` matching when scanning `google.com`) from leaking into scope.
-
-*   **Decoupled & Standardized Utility Packages**: Core utility packages (`pkg/paths`, `pkg/config`, `pkg/scope`, `pkg/logger`, and `pkg/progress`) have been refactored for maximum decoupling:
-    *   **Environment-Aware Configuration & Paths**: `pkg/paths` supports environment overrides (e.g. `CHAATHAN_HOME`) allowing isolated testing configurations, and `pkg/config` maps API keys efficiently to environment variable lookups.
-    *   **Unified Terminal Styling**: Progress indicators in `pkg/progress` reuse consolidated ANSI color structures and duration formatting from `pkg/logger` to avoid duplication.
-    *   **High-Performance File Logging**: The logging system performs ANSI regex cleaning and timestamping outside critical mutex locks to drastically reduce lock contention and thread synchronization overhead.
-    *   **Simplified Scope Validation**: Duplicate filtering checks and regular expression compilation have been refactored into centralized package helpers within `pkg/scope`.
-
-*   **DRY & Robust Execution & Bootstrapping**: Execution-related modules (`pkg/runner`, `pkg/tools`, `pkg/setup`, `pkg/update`, and `pkg/orchestrate`) have been optimized for logic consolidation:
-    *   **Unified Command Runner**: Common timeout context setup and retry loops in `pkg/runner` are abstracted into a single, context-aware retry helper shared by both Native and Docker run methods.
-    *   **Consolidated Arguments Building**: Tool arguments preparation (proxy configuration, custom headers/cookies, and browser-like user agents) is unified into a single configuration-driven helper `appendCommon` in `pkg/tools`, avoiding code replication across 20+ tool wrappers.
-    *   **Unified System Paths**: Shared GOPATH resolutions and file-check validations have been consolidated in `pkg/setup` to keep tool installation dry.
-    *   **Standardized SemVer Rules**: The self-update system utilizes robust SemVer check comparisons and standard loop forms to verify upgrades.
-*   **Workflow Orchestration & State Management (`pkg/wildcard_flow/`)**:
-    *   **Step Entry/Exit Standardization**: Unified state validation and terminal instrumentation through `resumeOrSkip(stepName, stepHeader)` and `markStepCompleteIfNoFailure(stepName)` helpers, preventing invalid state transitions (such as marking steps complete when pre-conditions or executions fail).
-    *   **Resource-Efficient Stream-Based I/O**: High-performance file operations (like `copyFile`) refactored to use `io.Copy` stream pipelines instead of reading entire files into memory, guaranteeing $O(1)$ memory complexity even during massive reconnaissance runs.
-
----
-
-## 💡 Demonstrated Development Skills
-
-This codebase showcases a range of advanced Go engineering and system-level programming skills:
-*   **Go Concurrency & Coordination**: Safe management of background workers, rotating proxies, and parallel probes using context propagation, channel orchestration, and wait group controls.
-*   **Safe Process Lifecycle Management**: Structured program entry points to guarantee clean, un-bypassed database lock release and transaction flushing before process termination.
-*   **Structured State Machine Management**: Strict validation of workflow progress and recovery. Relies on structured SQLite persistence for step-by-step resume support, enabling execution interruption and restart without target re-scanning.
-*   **Low-Memory High-Throughput I/O**: Stream pipelines using reader/writer interfaces (`io.Reader`/`io.Writer`) and buffered writers (`bufio.Writer`) to handle vast lists of subdomains and URLs without memory exhaustion.
-*   **Advanced Go Testing Practices**: Zero-dependency unit testing using temporary directory hooks (`t.TempDir()`), boundary/regex check cases, and mock file processing to ensure complete code coverage on parsing logic.
-*   **Factory-Driven Tool Registry**: A clean, unified interface for invoking and configuring 30+ external binaries dynamically based on global runtime flags, network proxies, and target scopes.
-
----
-
 
 ## ⚖️ Legal & Disclaimer
 

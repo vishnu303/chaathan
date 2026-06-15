@@ -7,93 +7,74 @@ description: Use when changing external tool installation, setup flows, tool che
 
 ## When to use
 
-Activate this skill for tasks involving external binary installation, setup behavior, or tool availability.
+Activate this skill when adding or updating external command dependencies, editing installer modules inside `pkg/setup/`, modifying setup parameters, or fixing runner execution issues.
 
-## Relevant code
+---
 
-| File | Purpose |
-|------|---------|
-| `cli/setup.go` | Setup command entry, `--update` flag |
-| `cli/tools_cmd.go` | `tools list` / `tools check` commands |
-| `pkg/setup/setup.go` | Setup orchestration |
-| `pkg/setup/go_tools.go` | Go tool installation (`go install`) |
-| `pkg/setup/python_tools.go` | Python tool installation (pip/clone) |
-| `pkg/setup/massdns.go` | MassDNS build-from-source |
-| `pkg/setup/gf_patterns.go` | gf pattern installation |
-| `pkg/setup/prereqs.go` | System prerequisite checks |
-| `pkg/setup/log.go` | Setup log file management |
-| `pkg/setup/proxy_tools.go` | Proxy tool installation (proxy-scraper-checker binary + mubeng via go install) |
-| `pkg/tools/registry.go` | Canonical tool catalogue (30 tools) |
-| `pkg/tools/tools.go` | Runtime tool wrappers and ToolBox (includes `RunNucleiSmartCVE`, `RunNucleiMisconfig`, `RunNucleiDAST`, `RunNucleiTakeovers`) |
-| `pkg/runner/runner.go` | Command execution, retry, docker, UA/proxy |
-| `pkg/config/config.go` | Per-tool config parameters (NucleiConfig, DalfoxConfig, etc.) |
-| `Makefile` | `make setup`, `make tools-check` targets |
+## Tool Registry Structure
 
-## Tool categories (from registry)
+All external tools configured in the application are cataloged in the static registry `pkg/tools/registry.go`.
+- **Install Verification:** The system uses `ToolInfo.CheckStatus() (bool, string)` to determine if a tool is active, rather than executing raw `exec.LookPath` searches.
+- **Categorization Mapping:**
+  - **Subdomain Discovery:** subfinder, assetfinder, sublist3r, amass, github-subdomains.
+  - **DNS Engines:** dnsx, shuffledns, massdns.
+  - **Probing & Ports:** httpx, tlsx, naabu.
+  - **URL Gatherers:** waybackurls, gau, arjun.
+  - **Crawlers:** katana, gospider, hakrawler.
+  - **Security Audits:** nuclei, dalfox.
+  - **Helpers:** anew, gf, proxy-scraper-checker, mubeng.
 
-| Category | Tools |
-|----------|-------|
-| Enum | subfinder, assetfinder, sublist3r, amass |
-| DNS | dnsx, shuffledns, massdns |
-| Probe | httpx, tlsx, naabu |
-| URLs | waybackurls, gau, arjun |
-| Crawl | katana, gospider, hakrawler |
-| Analysis | GoLinkFinder |
-| Fuzz | ffuf |
-| Vuln | nuclei, dalfox |
-| Recon | uncover, metabigor, github-subdomains |
-| Cloud | cloud_enum |
-| Util | anew, gf |
-| Proxy | proxy-scraper-checker (Rust binary), mubeng (Go, `go install`) |
+---
 
-## When adding or changing a tool
+## Setup Execution Engine Rules
 
-1. Identify type: Go tool (`go install`), Python tool (pip/clone), compiled binary (from source), or system package.
-2. Add/update install logic in the correct `pkg/setup/` file.
-3. Add/update the entry in `pkg/tools/registry.go` (`AllTools`).
-4. Update `tools check` availability reporting.
-5. Update workflow/toolbox code for runtime invocation.
-6. Update config structs if the tool has user-tunable parameters.
-7. Update README only if user-visible setup or workflow behavior changed.
+All installers within `pkg/setup/` (e.g., `go_tools.go`, `python_tools.go`, `massdns.go`) must obey these execution standards:
+1. **Piped Output Wrappers:** Run command executions inside setup routines via `SetupContext.RunCommand` or `SetupContext.RunCommandInDir`. These helpers automatically capture standard output/error, writing them to `~/.chaathan/setup.log`.
+2. **Never hardcode paths:** Install Go tools via `go install <url>@latest`, letting Go resolve path environments. Install Python utilities via custom cloned directories or pip installations matching config paths.
+3. **Prerequisite Checkers:** System utilities (such as Python pip, git, make, gcc compiler tools) must be checked in `prereqs.go` before beginning binary compilations.
 
-## Working rules
+---
 
-- Installation logic lives in `pkg/setup/`.
-- Runtime invocation and argument construction live in `pkg/tools/` or the owning workflow step.
-- User-facing checks live in `cli/tools_cmd.go`; setup entry in `cli/setup.go`.
-- `AllTools` in `pkg/tools/registry.go` is the single source of truth for the tool catalogue.
-- `CheckStatus() (bool, string)` on `ToolInfo` is the canonical way to verify if a tool is installed. Use it rather than writing manual `exec.LookPath` blocks.
-- Use `RunCommand` and `RunCommandInDir` helpers on `SetupContext` for all installation execution commands in `pkg/setup/` to pipe and capture outputs automatically. Setup commands do not use timeouts.
+## Process Group Isolation (PGID Execution Invariants)
 
-## Failure handling
+External processes launched by workflow runners can spawn multi-tiered child processes (e.g., subprocess shells, secondary scrapers). To prevent orphan zombie processes when scans cancel or time out:
+- **Set PGID:** Standard external commands executed outside the `pkg/runner` package (e.g., custom scripts, raw command calls) must be group-isolated. Ensure you configure `Setpgid: true` inside the system attributes (`SysProcAttr`):
+  ```go
+  cmd := exec.CommandContext(ctx, name, args...)
+  cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+  ```
+- **Process Group Termination:** If a cancel signal is caught or a timeout is reached, kill the entire process group by sending `syscall.SIGKILL` targeting the negative Process ID (`-Pid`):
+  ```go
+  if cmd.Process != nil {
+      _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+  }
+  ```
 
-- Prefer explicit, actionable error messages that identify the missing dependency.
-- Do not assume `sudo` or package-manager behavior beyond what the repo already does.
-- Do not turn optional tool absence into a fatal error unless the workflow requires it.
-- Distinguish between: Go code bug in Chaathan, missing external dependency, and bad upstream install command.
+---
 
-## Validation
+## Setup Failure Diagnostic Guidelines
 
+If an external installation fails:
+1. Log an explicit, actionable error explaining the missing environment requirement (e.g., `"golang is missing; install version 1.21+ manually"`).
+2. Never prompt for sudo access or attempt root execution commands.
+3. Do not treat optional utility install issues (e.g., a secondary scraper failing to download) as terminal errors. Let the setup run continue, logging the dependency as missing.
+
+---
+
+## Validation Procedures
+
+### Verification Pipeline:
 ```bash
-go test ./...
-go build -buildvcs=false -o chaathan .
-```
+# Validate installer packages
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go test ./pkg/setup/..."
 
-If developing on Windows, run WSL commands by changing to the `/mnt/c/Users/vishn/desktop/chaathan` directory for optimal I/O (using interactive shell `-i` to source your Go environment):
-```bash
-wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go test ./..."
+# Compile binary verification
 wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go build -buildvcs=false -o chaathan ."
 ```
 
-If environment allows:
+### Dry-run Command Checks:
 ```bash
-./chaathan tools check
-./chaathan setup --help
-# On Windows, use WSL: wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan tools check"
+# Run tool diagnostics checks
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan tools check"
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan setup --help"
 ```
-
-## Avoid
-
-- Do not scatter install logic outside `pkg/setup/`.
-- Do not modify `AllTools` without checking setup, check, and workflow consumers.
-- Do not make setup code own runtime scan behavior.
