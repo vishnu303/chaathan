@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,26 +8,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vishnu303/chaathan/pkg/database"
+	"github.com/vishnu303/chaathan/pkg/paths"
+	"github.com/vishnu303/chaathan/pkg/scan"
 )
-
-type ScanConfig struct {
-	SkipAmass       bool   `json:"skip_amass"`
-	SkipNuclei      bool   `json:"skip_nuclei"`
-	SkipNaabu       bool   `json:"skip_naabu"`
-	SkipCrawl       bool   `json:"skip_crawl"`
-	SkipTakeovers   bool   `json:"skip_takeovers"`
-	SkipDalfox      bool   `json:"skip_dalfox"`
-	SkipUncover     bool   `json:"skip_uncover"`
-	SkipTlsx        bool   `json:"skip_tlsx"`
-	SkipArjun       bool   `json:"skip_arjun"`
-	SkipShuffleDNS  bool   `json:"skip_shuffledns"`
-	SkipHakrawler   bool   `json:"skip_hakrawler"`
-	SkipFingerprint bool   `json:"skip_fingerprint"`
-	Wordlist        string `json:"wordlist"`
-	DNSWordlist     string `json:"dns_wordlist"`
-	GitHub          bool   `json:"github"`
-	AutoProxy       bool   `json:"auto_proxy"`
-}
 
 type model struct {
 	scans         []database.Scan
@@ -44,10 +26,11 @@ type model struct {
 	// Selected scan metrics and findings
 	selectedStats *database.ScanStats
 	selectedVulns []database.Vulnerability
-	parsedConfig  *ScanConfig
+	selectedPorts []database.Port
+	activeState   *scan.State
 
-	width  int
-	height int
+	width   int
+	height  int
 	loading bool
 }
 
@@ -91,7 +74,8 @@ func (m *model) loadSelectedScanStats() {
 	if len(m.scans) == 0 || m.selectedIndex < 0 || m.selectedIndex >= len(m.scans) {
 		m.selectedStats = nil
 		m.selectedVulns = nil
-		m.parsedConfig = nil
+		m.selectedPorts = nil
+		m.activeState = nil
 		return
 	}
 	scanItem := m.scans[m.selectedIndex]
@@ -102,28 +86,33 @@ func (m *model) loadSelectedScanStats() {
 		m.selectedStats = stats
 	}
 
-	// 2. Get top 5 vulnerabilities
+	// 2. Get vulnerabilities
 	vulns, err := database.GetVulnerabilities(scanItem.ID)
 	if err == nil {
-		if len(vulns) > 5 {
-			m.selectedVulns = vulns[:5]
-		} else {
-			m.selectedVulns = vulns
-		}
+		m.selectedVulns = vulns
 	} else {
 		m.selectedVulns = nil
 	}
 
-	// 3. Parse scan options configurations
-	if scanItem.Config != "" {
-		var sc ScanConfig
-		if err := json.Unmarshal([]byte(scanItem.Config), &sc); err == nil {
-			m.parsedConfig = &sc
+	// 3. Get open ports
+	ports, err := database.GetPorts(scanItem.ID)
+	if err == nil {
+		m.selectedPorts = ports
+	} else {
+		m.selectedPorts = nil
+	}
+
+	// 4. Check if currently running and load live state file
+	if scanItem.Status == "running" {
+		stateMgr := scan.NewManager(paths.StateDir())
+		state, err := stateMgr.LoadState(scanItem.ID)
+		if err == nil {
+			m.activeState = state
 		} else {
-			m.parsedConfig = nil
+			m.activeState = nil
 		}
 	} else {
-		m.parsedConfig = nil
+		m.activeState = nil
 	}
 }
 
@@ -248,7 +237,7 @@ func (m model) View() string {
 			rowText := fmt.Sprintf("%s #%-3d %-12s %-4s", statusSymbol, scanItem.ID, truncate(scanItem.Target, 12), ageStr)
 
 			if i == m.selectedIndex {
-				listContent.WriteString(StyleScanRowSelected.Width(leftWidth - 4).Render(rowText) + "\n")
+				listContent.WriteString(StyleScanRowSelected.Render(rowText) + "\n")
 			} else {
 				listContent.WriteString(StyleScanRow.Render(rowText) + "\n")
 			}
@@ -256,14 +245,14 @@ func (m model) View() string {
 	}
 	leftPanel := StylePanelMantleActive.Width(leftWidth).Height(contentHeight).Render(listContent.String())
 
-	// --- Middle Pane: Scan metadata & Config options ---
+	// --- Middle Pane: Scan Properties & Open Ports ---
 	var midContent strings.Builder
-	midContent.WriteString(StylePanelTitle.Render("📋 METADATA & PARAMETERS") + "\n")
+	midContent.WriteString(StylePanelTitle.Render("📋 PROPERTIES & OPEN PORTS") + "\n")
 
 	if len(m.scans) > 0 && m.selectedIndex >= 0 && m.selectedIndex < len(m.scans) {
 		scanItem := m.scans[m.selectedIndex]
 
-		// Target Title & Status Pill
+		// Status Badge
 		statusColor := ColorStatusIdle
 		switch scanItem.Status {
 		case "completed":
@@ -275,10 +264,18 @@ func (m model) View() string {
 		}
 		statusBadge := lipgloss.NewStyle().Background(statusColor).Foreground(lipgloss.Color("#11111b")).Bold(true).Padding(0, 1).Render(strings.ToUpper(scanItem.Status))
 
-		midContent.WriteString(fmt.Sprintf("%s\n", lipgloss.NewStyle().Foreground(ColorLavender).Bold(true).Render(scanItem.Target)))
-		midContent.WriteString(fmt.Sprintf("%s %s\n", StyleSummaryLabel.Render("Type:"), StyleSummaryValue.Render(strings.ToUpper(scanItem.Type))))
-		midContent.WriteString(fmt.Sprintf("%s %s\n", StyleSummaryLabel.Render("Status:"), statusBadge))
-		midContent.WriteString(fmt.Sprintf("%s %s\n", StyleSummaryLabel.Render("Started:"), StyleSummaryValue.Render(scanItem.StartedAt.Format("2006-01-02 15:04:05"))))
+		age := time.Since(scanItem.StartedAt).Round(time.Minute)
+		ageStr := fmt.Sprintf("%dm ago", int(age.Minutes()))
+		if age.Hours() >= 24 {
+			ageStr = fmt.Sprintf("%.0fd ago", age.Hours()/24)
+		} else if age.Hours() >= 1 {
+			ageStr = fmt.Sprintf("%.0fh ago", age.Hours())
+		}
+
+		midContent.WriteString(fmt.Sprintf("%s\n\n", lipgloss.NewStyle().Foreground(ColorLavender).Bold(true).Render(scanItem.Target)))
+		midContent.WriteString(fmt.Sprintf("%-12s %s\n", "Type:", StyleSummaryValue.Render(strings.ToUpper(scanItem.Type))))
+		midContent.WriteString(fmt.Sprintf("%-12s %s\n", "Status:", statusBadge))
+		midContent.WriteString(fmt.Sprintf("%-12s %s (%s)\n", "Started:", StyleSummaryValue.Render(scanItem.StartedAt.Format("15:04:05")), ageStr))
 
 		durStr := "Active..."
 		if scanItem.CompletedAt != nil {
@@ -288,67 +285,104 @@ func (m model) View() string {
 		} else {
 			durStr = time.Since(scanItem.StartedAt).Round(time.Second).String()
 		}
-		midContent.WriteString(fmt.Sprintf("%s %s\n", StyleSummaryLabel.Render("Duration:"), StyleSummaryValue.Render(durStr)))
-		midContent.WriteString(fmt.Sprintf("%s %s\n\n", StyleSummaryLabel.Render("Output:"), StyleSummaryValue.Copy().Foreground(ColorSubtle).Render(truncate(scanItem.ResultDir, middleWidth-16))))
+		midContent.WriteString(fmt.Sprintf("%-12s %s\n", "Duration:", StyleSummaryValue.Render(durStr)))
+		midContent.WriteString(fmt.Sprintf("%-12s %s\n\n", "Folder:", StyleSummaryValue.Copy().Foreground(ColorSubtle).Render(truncate(scanItem.ResultDir, middleWidth-16))))
 
-		// Config flags parsed from DB json
-		midContent.WriteString(lipgloss.NewStyle().Foreground(ColorSapphire).Bold(true).Render("🛡️ SCAN ENGINE OPTION FLAGS") + "\n")
-		if m.parsedConfig != nil {
-			c := m.parsedConfig
+		// 1. Live scan steps progress if running
+		if scanItem.Status == "running" && m.activeState != nil {
+			midContent.WriteString(lipgloss.NewStyle().Foreground(ColorStatusRun).Bold(true).Render("⏳ RUNTIME PROGRESS") + "\n")
+			completed := len(m.activeState.CompletedSteps)
+			total := m.activeState.TotalSteps
+			if total == 0 {
+				total = 1
+			}
+			pct := float64(completed) / float64(total) * 100
 
-			printPill := func(name string, active bool) string {
-				valText := StyleConfigPillFalse.Render("Disabled")
-				if active {
-					valText = StyleConfigPillTrue.Render("Enabled")
+			barWidth := middleWidth - 14
+			if barWidth < 10 {
+				barWidth = 10
+			}
+			filled := int(float64(barWidth) * pct / 100)
+			bar := ""
+			for i := 0; i < barWidth; i++ {
+				if i < filled {
+					bar += "█"
+				} else {
+					bar += "░"
 				}
-				return fmt.Sprintf("%s %s\n", StyleConfigLabel.Render(name), valText)
 			}
-
-			// Render config parameters status
-			midContent.WriteString(printPill("Active DNS:", !c.SkipAmass))
-			midContent.WriteString(printPill("Port Scanning:", !c.SkipNaabu))
-			midContent.WriteString(printPill("Vulnerabilities:", !c.SkipNuclei))
-			midContent.WriteString(printPill("Web Crawling:", !c.SkipCrawl))
-			midContent.WriteString(printPill("XSS Audits:", !c.SkipDalfox))
-			midContent.WriteString(printPill("Auto Proxy:", c.AutoProxy))
-
-			wlText := StyleConfigPillFalse.Render("None")
-			if c.Wordlist != "" {
-				wlText = StyleConfigPillTrue.Render("Custom")
+			midContent.WriteString(fmt.Sprintf("[%s] %.0f%%\n", bar, pct))
+			
+			// Show next/current step
+			if m.activeState.CurrentStep < len(scan.WildcardSteps) {
+				stepDesc := scan.WildcardSteps[m.activeState.CurrentStep].Description
+				midContent.WriteString(fmt.Sprintf("Current: %s\n\n", StyleSummaryValue.Render(stepDesc)))
+			} else {
+				midContent.WriteString("Current: Finalizing...\n\n")
 			}
-			midContent.WriteString(fmt.Sprintf("%s %s\n", StyleConfigLabel.Render("Fuzzing Wordlist:"), wlText))
+		}
+
+		// 2. Open Ports List
+		midContent.WriteString(lipgloss.NewStyle().Foreground(ColorSapphire).Bold(true).Render("🔌 DISCOVERED OPEN PORTS") + "\n")
+		if len(m.selectedPorts) > 0 {
+			// Print header
+			midContent.WriteString(lipgloss.NewStyle().Foreground(ColorSubtle).Render("Host                Port/Proto  Service") + "\n")
+			
+			// Limit to first 6 entries to avoid wrapping/scrolling issues
+			displayLimit := 6
+			if len(m.selectedPorts) < displayLimit {
+				displayLimit = len(m.selectedPorts)
+			}
+			
+			for i := 0; i < displayLimit; i++ {
+				p := m.selectedPorts[i]
+				proto := p.Protocol
+				if proto == "" {
+					proto = "tcp"
+				}
+				portStr := fmt.Sprintf("%d/%s", p.Port, proto)
+				srv := p.Service
+				if srv == "" {
+					srv = "unknown"
+				}
+				midContent.WriteString(fmt.Sprintf("%-19s %-11s %s\n", truncate(p.Host, 18), portStr, truncate(srv, 8)))
+			}
+			if len(m.selectedPorts) > displayLimit {
+				midContent.WriteString(lipgloss.NewStyle().Foreground(ColorSubtle).Italic(true).Render(fmt.Sprintf("...and %d more ports", len(m.selectedPorts)-displayLimit)) + "\n")
+			}
 		} else {
-			midContent.WriteString(StyleSummaryValue.Copy().Foreground(ColorSubtle).Render("No parameters available.") + "\n")
+			midContent.WriteString(lipgloss.NewStyle().Foreground(ColorSubtle).Render("No open ports discovered.") + "\n")
 		}
 	} else {
 		midContent.WriteString(StyleSummaryValue.Copy().Foreground(ColorSubtle).Render("Select a scan run to view properties.") + "\n")
 	}
 	middlePanel := StylePanel.Width(middleWidth).Height(contentHeight).Render(midContent.String())
 
-	// --- Right Pane: Counts & Recent Findings ---
+	// --- Right Pane: Counts & Vulnerability Findings ---
 	var rightContent strings.Builder
-	rightContent.WriteString(StylePanelTitle.Render("⚡ SCOPE COUNTS & TOP FINDINGS") + "\n")
+	rightContent.WriteString(StylePanelTitle.Render("⚡ FINDINGS & VULNERABILITIES") + "\n")
 
 	if len(m.scans) > 0 && m.selectedIndex >= 0 && m.selectedIndex < len(m.scans) {
-		// Metrics row
+		// Target summary counts
 		if m.selectedStats != nil {
 			colSub := fmt.Sprintf("%d", m.selectedStats.TotalSubdomains)
-			colPrt := fmt.Sprintf("%d", m.selectedStats.TotalPorts)
 			colLive := fmt.Sprintf("%d", m.selectedStats.LiveSubdomains)
 
-			rowMetrics := fmt.Sprintf(
-				"🌐 %s %s  •  🔌 %s %s  •  🖥️ %s %s\n\n",
-				StyleMetricLabel.Render("Subs:"), StyleMetricVal.Render(colSub),
-				StyleMetricLabel.Render("Ports:"), StyleMetricVal.Render(colPrt),
-				StyleMetricLabel.Render("Live:"), StyleMetricVal.Render(colLive),
-			)
-			rightContent.WriteString(rowMetrics)
+			rightContent.WriteString(fmt.Sprintf("🌐 %-14s %s\n", "Subdomains:", StyleMetricVal.Render(colSub)))
+			rightContent.WriteString(fmt.Sprintf("🖥️ %-14s %s\n\n", "Live Hosts:", StyleMetricVal.Render(colLive)))
 		}
 
 		// Vulnerabilities list breakdown
-		rightContent.WriteString(lipgloss.NewStyle().Foreground(ColorMauve).Bold(true).Render("🔥 RECENT CRITICAL DISCOVERIES") + "\n")
+		rightContent.WriteString(lipgloss.NewStyle().Foreground(ColorMauve).Bold(true).Render("🔥 VULNERABILITY DISCOVERIES") + "\n")
 		if len(m.selectedVulns) > 0 {
-			for _, v := range m.selectedVulns {
+			// Limit to first 8 entries to avoid text clipping
+			displayLimit := 8
+			if len(m.selectedVulns) < displayLimit {
+				displayLimit = len(m.selectedVulns)
+			}
+			
+			for i := 0; i < displayLimit; i++ {
+				v := m.selectedVulns[i]
 				var badge string
 				switch strings.ToLower(v.Severity) {
 				case "critical":
@@ -368,8 +402,12 @@ func (m model) View() string {
 				row := StyleVulnRow.Render(fmt.Sprintf("%s %s %s", badge, vHost, lipgloss.NewStyle().Foreground(ColorSubtle).Render(vTitle)))
 				rightContent.WriteString(row + "\n")
 			}
+			
+			if len(m.selectedVulns) > displayLimit {
+				rightContent.WriteString(lipgloss.NewStyle().Foreground(ColorSubtle).Italic(true).Render(fmt.Sprintf("...and %d more vulnerabilities", len(m.selectedVulns)-displayLimit)) + "\n")
+			}
 		} else {
-			rightContent.WriteString("\n" + lipgloss.NewStyle().Foreground(ColorStatusDone).Bold(true).Render("  ✅ No vulnerabilities detected so far.") + "\n")
+			rightContent.WriteString("\n" + lipgloss.NewStyle().Foreground(ColorStatusDone).Bold(true).Render("  ✅ Clean Scan - No vulnerabilities found.") + "\n")
 		}
 	} else {
 		rightContent.WriteString(StyleSummaryValue.Copy().Foreground(ColorSubtle).Render("Select a scan to inspect findings.") + "\n")
