@@ -145,7 +145,7 @@ type NucleiConfig struct {
 	Severity       []string `yaml:"severity"`        // severities to scan (default: [low, medium, high, critical])
 	DisableOOB     *bool    `yaml:"disable_oob"`     // disable Interactsh OOB checks — prevents hangs (default: true)
 	MaxTimeout     int      `yaml:"max_timeout_min"` // hard process timeout per Nuclei run in minutes (default: 300)
-	DASTAggression string   `yaml:"dast_aggression"` // DAST fuzzing payload count: low/medium/high (default: low)
+	DASTAggression string   `yaml:"dast_aggression"` // DAST fuzzing payload count: low/medium/high (default: medium)
 }
 
 type DalfoxConfig struct {
@@ -344,7 +344,7 @@ func DefaultConfig() *Config {
 				ExcludeTags:    []string{"dos", "fuzz"},
 				DisableOOB:     newBool(true),
 				MaxTimeout:     300,
-				DASTAggression: "low",
+				DASTAggression: "medium",
 			},
 			Httpx: HttpxConfig{
 				Threads:         50,
@@ -407,7 +407,7 @@ func applyDefaults(cfg *Config) {
 	if cfg.Tools.Nuclei.DisableOOB == nil {
 		cfg.Tools.Nuclei.DisableOOB = newBool(true)
 	}
-	defaultString(&cfg.Tools.Nuclei.DASTAggression, "low")
+	defaultString(&cfg.Tools.Nuclei.DASTAggression, "medium")
 	defaultInt(&cfg.Tools.Dalfox.MaxURLs, 500)
 	if cfg.Tools.Dalfox.SkipThirdParty == nil {
 		cfg.Tools.Dalfox.SkipThirdParty = newBool(true)
