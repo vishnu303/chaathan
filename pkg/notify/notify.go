@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"log"
 	"net/http"
@@ -14,13 +13,6 @@ import (
 
 	"github.com/vishnu303/chaathan/pkg/config"
 )
-
-var telegramAPIURL = "https://api.telegram.org"
-
-// SetTelegramAPIURL overrides the Telegram API base URL for testing.
-func SetTelegramAPIURL(url string) {
-	telegramAPIURL = url
-}
 
 var telegramEscaper = strings.NewReplacer(
 	"_", "\\_",
@@ -492,128 +484,108 @@ func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
 	return n.postJSON(n.cfg.SlackWebhook, payload)
 }
 
-// EscapeHTML escapes HTML characters for Telegram Bot API HTML parse mode.
-func EscapeHTML(s string) string {
-	return html.EscapeString(s)
-}
-
-func getFindingTypeIcon(t string) string {
-	switch strings.ToLower(t) {
-	case "vulnerability":
-		return "🐛"
-	case "subdomain":
-		return "🌐"
-	case "port":
-		return "🔌"
-	case "subdomain-takeover":
-		return "💀"
-	default:
-		return "🏷️"
-	}
-}
-
 // Telegram notification
 func (n *Notifier) sendTelegram(finding Finding) error {
 	header := getSeverityEmoji(finding.Severity)
 	sev := strings.ToUpper(finding.Severity)
-	typeIcon := getFindingTypeIcon(finding.Type)
 
-	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("%s <b>%s Finding: %s</b>\n", header, EscapeHTML(sev), EscapeHTML(finding.Name)))
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString(fmt.Sprintf("🎯 <b>Target:</b> <code>%s</code>\n", EscapeHTML(finding.Target)))
-	builder.WriteString(fmt.Sprintf("%s <b>Type:</b> <code>%s</code>\n", typeIcon, EscapeHTML(finding.Type)))
+	text := fmt.Sprintf(
+		"%s *%s Finding*\n\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"⚡ *\\[%s\\] %s*\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"🎯 *Target*    %s\n"+
+			"🔖 *Type*    %s",
+		header, EscapeMarkdown(sev),
+		sev, EscapeMarkdown(finding.Name),
+		EscapeMarkdown(finding.Target),
+		EscapeMarkdown(finding.Type),
+	)
 
-	if finding.TemplateID != "" {
-		builder.WriteString(fmt.Sprintf("🗂️ <b>Template:</b> <code>%s</code>\n", EscapeHTML(finding.TemplateID)))
-	}
-
-	if !finding.Timestamp.IsZero() {
-		tStr := finding.Timestamp.UTC().Format("2006-01-02 15:04:05 UTC")
-		builder.WriteString(fmt.Sprintf("⏰ <b>Detected:</b> <code>%s</code>\n", tStr))
+	if finding.Description != "" {
+		text += fmt.Sprintf("\n📝 *Details*    %s", EscapeMarkdown(finding.Description))
 	}
 
 	if finding.URL != "" {
-		builder.WriteString(fmt.Sprintf("🔗 <b>URL:</b> <code>%s</code>\n", EscapeHTML(finding.URL)))
+		text += fmt.Sprintf("\n🔗 *URL*    %s", EscapeMarkdown(finding.URL))
 	}
 
-	var details []string
-	if finding.Description != "" {
-		details = append(details, fmt.Sprintf("<b>Description:</b>\n%s", EscapeHTML(finding.Description)))
-	}
-	if finding.Evidence != "" {
-		details = append(details, fmt.Sprintf("<b>Evidence:</b>\n<pre>%s</pre>", EscapeHTML(finding.Evidence)))
+	if finding.TemplateID != "" {
+		text += fmt.Sprintf("\n🗂 *Template*    %s", EscapeMarkdown(finding.TemplateID))
 	}
 
-	if len(details) > 0 {
-		builder.WriteString(fmt.Sprintf("\n<blockquote expandable>%s</blockquote>\n", strings.Join(details, "\n\n")))
-	}
+	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
 
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString("🤖 <i>Chaathan Security Suite</i>")
-
-	return n.sendTelegramMessage(builder.String())
+	return n.sendTelegramMessage(text)
 }
 
 func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
-	var builder strings.Builder
-	builder.WriteString("🏁 <b>Scan Completed Successfully</b>\n")
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString(fmt.Sprintf("🎯 <b>Target:</b> <code>%s</code>\n", EscapeHTML(scan.Target)))
-	builder.WriteString(fmt.Sprintf("🔢 <b>Scan ID:</b> <code>#%d</code>\n", scan.ScanID))
-	builder.WriteString(fmt.Sprintf("⏱️ <b>Duration:</b> <code>%s</code>\n", EscapeHTML(FormatDuration(scan.Duration))))
+	text := fmt.Sprintf(
+		"🏁 *Scan Completed*\n\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"🎯 *Target*    %s\n"+
+			"🔢 *Scan ID*    %d\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"📊 *Results*\n",
+		EscapeMarkdown(scan.Target),
+		scan.ScanID,
+	)
 
-	if len(scan.Stats) > 0 {
-		builder.WriteString("\n📊 <b>Results & Metrics:</b>\n")
-		// Display stats in preferred order
-		for _, k := range GetOrderedStatsKeys(scan.Stats) {
-			builder.WriteString(fmt.Sprintf("  %s %s: <b>%d</b>\n", statEmoji(k), EscapeHTML(TitleCase(k)), scan.Stats[k]))
-		}
+	// Display stats in preferred order
+	for _, k := range GetOrderedStatsKeys(scan.Stats) {
+		text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), EscapeMarkdown(TitleCase(k)), scan.Stats[k])
 	}
 
-	if scan.ReportPath != "" {
-		builder.WriteString(fmt.Sprintf("\n📂 <b>Report:</b> <code>%s</code>\n", EscapeHTML(scan.ReportPath)))
-	}
+	text += fmt.Sprintf(
+		"━━━━━━━━━━━━━━━━━━━━\n"+
+			"⏱ *Duration*    %s\n"+
+			"_Chaathan Scanner_",
+		EscapeMarkdown(FormatDuration(scan.Duration)),
+	)
 
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString("🤖 <i>Chaathan Security Suite</i>")
-
-	return n.sendTelegramMessage(builder.String())
+	return n.sendTelegramMessage(text)
 }
 
 func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
 	findings := ""
 	if step.FindingsCount > 0 {
-		findings = fmt.Sprintf("<b>%d findings detected</b> 🚨", step.FindingsCount)
+		findings = fmt.Sprintf("*%d* 🚨", step.FindingsCount)
 	} else {
 		findings = "0"
 	}
 
-	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("✅ <b>Step Completed: %s</b>\n", EscapeHTML(step.StepName)))
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString(fmt.Sprintf("🎯 <b>Target:</b> <code>%s</code>\n", EscapeHTML(step.Target)))
-	builder.WriteString(fmt.Sprintf("📊 <b>Progress:</b> <b>%d</b> / <b>%d</b>\n", step.StepNumber, step.TotalSteps))
-	builder.WriteString(fmt.Sprintf("⏱️ <b>Duration:</b> <code>%s</code>\n", EscapeHTML(FormatDuration(step.Duration))))
-	builder.WriteString(fmt.Sprintf("🚨 <b>Findings:</b> %s\n", findings))
+	text := fmt.Sprintf(
+		"✅ *Step Completed*\n\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n"+
+			"🎯 *Target*    %s\n"+
+			"📊 *Progress*    %d / %d\n"+
+			"📋 *Step*    %s\n"+
+			"⏱ *Duration*    %s\n"+
+			"🔍 *Findings*    %s",
+		EscapeMarkdown(step.Target),
+		step.StepNumber,
+		step.TotalSteps,
+		EscapeMarkdown(formatStepLabel(step)),
+		EscapeMarkdown(FormatDuration(step.Duration)),
+		findings,
+	)
 
 	if step.ScanType != "" {
-		builder.WriteString(fmt.Sprintf("🏷️ <b>Type:</b> <code>%s</code>\n", EscapeHTML(step.ScanType)))
+		text += fmt.Sprintf("\n🏷 *Type*    %s", EscapeMarkdown(step.ScanType))
 	}
 
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString("🤖 <i>Chaathan Security Suite</i>")
+	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
 
-	return n.sendTelegramMessage(builder.String())
+	return n.sendTelegramMessage(text)
 }
 
 func (n *Notifier) sendTelegramMessage(text string) error {
-	url := fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIURL, n.cfg.TelegramBotToken)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.cfg.TelegramBotToken)
 
 	payload := map[string]any{
 		"chat_id":    n.cfg.TelegramChatID,
 		"text":       text,
-		"parse_mode": "HTML",
+		"parse_mode": "MarkdownV2",
 	}
 
 	return n.postJSON(url, payload)
