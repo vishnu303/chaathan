@@ -1,7 +1,4 @@
-// Setup Logging
-//
-// Manages a per-run log file under ~/.chaathan/logs/ and provides
-// captureCommandOutput to record stdout/stderr from every install command.
+// Package setup orchestrates installation of all chaathan dependency tools.
 package setup
 
 import (
@@ -12,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,60 +17,74 @@ import (
 	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
-// ─────────────────────────────────────────────────────────────
-// Log file state
-// ─────────────────────────────────────────────────────────────
+// SetupLogger encapsulates file-based logging for the installation and setup processes.
+// It is thread-safe and manages raw stdout/stderr capture from external commands.
+type SetupLogger struct {
+	file *os.File
+	mu   sync.Mutex
+	path string
+}
 
-var (
-	setupLogFile *os.File
-	setupLogMu   sync.Mutex
-	setupLogPath string
-)
-
-// ─────────────────────────────────────────────────────────────
-// initSetupLog — create the log file for this run
-// ─────────────────────────────────────────────────────────────
-
-func initSetupLog() {
-	logDir := filepath.Join(paths.ChaathanHome(), "logs")
-	os.MkdirAll(logDir, 0755)
+// NewSetupLogger creates a new log file in ~/.chaathan/logs/ with a timestamp.
+// If file creation fails, it returns a logger that gracefully does not write anywhere, along with the error.
+func NewSetupLogger() (*SetupLogger, error) {
+	logDir := paths.LogsDir()
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		progress.ItemInfo(fmt.Sprintf("Warning: cannot create logs directory: %v", err))
+		return &SetupLogger{}, err
+	}
 
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	setupLogPath = filepath.Join(logDir, fmt.Sprintf("setup_%s.log", timestamp))
+	logPath := filepath.Join(logDir, fmt.Sprintf("setup_%s.log", timestamp))
 
-	var err error
-	setupLogFile, err = os.Create(setupLogPath)
+	file, err := os.Create(logPath)
 	if err != nil {
 		progress.ItemInfo(fmt.Sprintf("Warning: cannot create log file: %v", err))
-		return
+		return &SetupLogger{}, err
 	}
 
-	fmt.Fprintf(setupLogFile, "=== Chaathan Setup Log ===\n")
-	fmt.Fprintf(setupLogFile, "Started: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(setupLogFile, "OS: %s/%s\n\n", runtime.GOOS, runtime.GOARCH)
+	logger := &SetupLogger{
+		file: file,
+		path: logPath,
+	}
+
+	logger.Write("=== Chaathan Setup Log ===")
+	logger.Write("Started: %s", time.Now().Format(time.RFC3339))
+	logger.Write("OS: %s/%s", runtime.GOOS, runtime.GOARCH)
+	logger.Write("")
+
+	return logger, nil
 }
 
-// ─────────────────────────────────────────────────────────────
-// writeSetupLog — thread-safe write to the log file
-// ─────────────────────────────────────────────────────────────
+// Path returns the absolute file path of the setup log file.
+func (l *SetupLogger) Path() string {
+	return l.path
+}
 
-func writeSetupLog(format string, args ...interface{}) {
-	if setupLogFile == nil {
+// Close closes the underlying log file handle.
+func (l *SetupLogger) Close() error {
+	if l.file != nil {
+		return l.file.Close()
+	}
+	return nil
+}
+
+// Write appends a formatted line to the log file in a thread-safe manner.
+func (l *SetupLogger) Write(format string, args ...any) {
+	if l.file == nil {
 		return
 	}
-	setupLogMu.Lock()
-	defer setupLogMu.Unlock()
-	fmt.Fprintf(setupLogFile, format+"\n", args...)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	fmt.Fprintf(l.file, format+"\n", args...)
 }
 
-// ─────────────────────────────────────────────────────────────
-// captureCommandOutput — run cmd, log stdout/stderr, return error
-// ─────────────────────────────────────────────────────────────
-
-func captureCommandOutput(cmd *exec.Cmd, toolName string) error {
+// CaptureCommandOutput executes the command and streams/logs its output.
+// If verbose is true, outputs are piped live to the console in addition to the log file.
+func (l *SetupLogger) CaptureCommandOutput(cmd *exec.Cmd, toolName string, verbose bool) error {
 	var stdout, stderr bytes.Buffer
 
-	if isVerbose() {
+	if verbose {
 		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
 		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	} else {
@@ -82,20 +94,24 @@ func captureCommandOutput(cmd *exec.Cmd, toolName string) error {
 
 	err := cmd.Run()
 
-	writeSetupLog("--- [%s] ---", toolName)
-	writeSetupLog("Command: %s", cmd.String())
+	l.Write("--- [%s] ---", toolName)
+	l.Write("Command: %s", cmd.String())
 	if stdout.Len() > 0 {
-		writeSetupLog("STDOUT:\n%s", stdout.String())
+		l.Write("STDOUT:\n%s", stdout.String())
 	}
 	if stderr.Len() > 0 {
-		writeSetupLog("STDERR:\n%s", stderr.String())
+		l.Write("STDERR:\n%s", stderr.String())
 	}
 	if err != nil {
-		writeSetupLog("ERROR: %v", err)
-	} else {
-		writeSetupLog("STATUS: SUCCESS")
+		l.Write("ERROR: %v", err)
+		l.Write("")
+		if stderr.Len() > 0 {
+			return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		}
+		return err
 	}
-	writeSetupLog("")
+	l.Write("STATUS: SUCCESS")
+	l.Write("")
 
-	return err
+	return nil
 }

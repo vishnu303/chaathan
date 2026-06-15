@@ -1,11 +1,4 @@
-// Python Tools Installation
-//
-// Installs pip-based Python security tools:
-//   sublist3r, arjun, cloud_enum — recon tools
-//   proxybroker2 (proxybroker CLI) — proxy scraper & checker
-//
-// Creates shell shims in ~/.local/bin/ for pip packages that don't ship a
-// stand-alone binary.
+// Package setup orchestrates installation of all chaathan dependency tools.
 package setup
 
 import (
@@ -13,15 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 
 	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
-// ─────────────────────────────────────────────────────────────
-// Tool definitions
-// ─────────────────────────────────────────────────────────────
-
+// pyTools defines the Python-based security tools installed via pip.
 var pyTools = []struct {
 	name     string
 	package_ string
@@ -33,12 +22,8 @@ var pyTools = []struct {
 	{"arjun", "arjun", "arjun", "arjun"},
 }
 
-
-// ─────────────────────────────────────────────────────────────
-// installPythonToolsSection
-// ─────────────────────────────────────────────────────────────
-
-func installPythonToolsSection() (installed, skipped, failed int) {
+// installPythonToolsSection checks and installs Python-based tools sequentially.
+func installPythonToolsSection(ctx *SetupContext) (installed, skipped, failed int) {
 	pip := resolvePip()
 	if pip == "" {
 		progress.Section("Python Tools", "")
@@ -50,14 +35,13 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 	var toInstall []pyTool
 	skippedCount := 0
 	for _, t := range pyTools {
-		if !isForceUpdate() && pythonToolInstalled(t.name, t.cmdName, t.module) {
+		if !ctx.IsForceUpdate() && pythonToolInstalled(t.name, t.cmdName, t.module) {
 			_ = ensurePythonToolShim(t.name, t.module)
 			skippedCount++
 			continue
 		}
 		toInstall = append(toInstall, pyTool{t.name, t.package_, t.cmdName, t.module})
 	}
-
 
 	totalToInstall := len(toInstall)
 	detail := fmt.Sprintf("%d to install, %d already installed", totalToInstall, skippedCount)
@@ -74,52 +58,41 @@ func installPythonToolsSection() (installed, skipped, failed int) {
 	tracker := progress.NewTracker(totalToInstall)
 	tracker.RunSpinner()
 
-	var wg sync.WaitGroup
-
-	// pip-based tools
 	for _, t := range toInstall {
-		wg.Add(1)
-		go func(tool pyTool) {
-			defer wg.Done()
-			tracker.Start(tool.name)
-			args := []string{"install", "--break-system-packages", tool.pkg}
-			cmd := exec.Command(pip, args...)
-			if err := captureCommandOutput(cmd, tool.name); err != nil {
-				tracker.Fail(tool.name, err.Error())
-				return
+		tracker.Start(t.name)
+		args := []string{"install", "--break-system-packages", t.pkg}
+		err := ctx.RunCommand(t.name, pip, args...)
+		if err != nil {
+			tracker.Fail(t.name, err.Error())
+			continue
+		}
+
+		// sublist3r and arjun depend on requests/urllib3, but urllib3 v2.x dropped
+		// urllib3.packages.six.moves, which both tools rely on. A constraint in the
+		// install command above is insufficient when urllib3 v2 is already globally
+		// installed — pip won't downgrade an already-satisfied dependency. Force a
+		// separate reinstall to guarantee the working 1.26.x series is on disk.
+		if t.name == "sublist3r" || t.name == "arjun" {
+			pinArgs := []string{"install", "--break-system-packages", "--upgrade", "requests", "urllib3"}
+			pinErr := ctx.RunCommand(t.name+" (urllib3/requests upgrade)", pip, pinArgs...)
+			if pinErr != nil {
+				tracker.Fail(t.name, "upgrade requests/urllib3 failed: "+pinErr.Error())
+				continue
 			}
-			// sublist3r and arjun depend on requests/urllib3, but urllib3 v2.x dropped
-			// urllib3.packages.six.moves, which both tools rely on. A constraint in the
-			// install command above is insufficient when urllib3 v2 is already globally
-			// installed — pip won't downgrade an already-satisfied dependency. Force a
-			// separate reinstall to guarantee the working 1.26.x series is on disk.
-			if tool.name == "sublist3r" || tool.name == "arjun" {
-				pinArgs := []string{"install", "--break-system-packages", "--upgrade", "requests", "urllib3"}
-				pinCmd := exec.Command(pip, pinArgs...)
-				if err := captureCommandOutput(pinCmd, tool.name+" (urllib3/requests upgrade)"); err != nil {
-					tracker.Fail(tool.name, "upgrade requests/urllib3 failed: "+err.Error())
-					return
-				}
-			}
-			if err := ensurePythonToolShim(tool.name, tool.module); err != nil {
-				tracker.Fail(tool.name, err.Error())
-			} else {
-				tracker.Complete(tool.name)
-			}
-		}(t)
+		}
+
+		if err := ensurePythonToolShim(t.name, t.module); err != nil {
+			tracker.Fail(t.name, err.Error())
+		} else {
+			tracker.Complete(t.name)
+		}
 	}
 
-
-	wg.Wait()
 	tracker.StopSpinner()
 
 	i, _, f := tracker.Stats()
 	return i, skippedCount, f
 }
-
-// ─────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────
 
 // resolvePip returns the first available pip binary name, or "" if none found.
 func resolvePip() string {
@@ -131,6 +104,7 @@ func resolvePip() string {
 	return ""
 }
 
+// pythonToolInstalled checks if a tool or Python module is already installed on the system.
 func pythonToolInstalled(name, cmdName, module string) bool {
 	if _, err := exec.LookPath(name); err == nil {
 		return true
@@ -146,6 +120,7 @@ func pythonToolInstalled(name, cmdName, module string) bool {
 	return false
 }
 
+// pythonModuleInstalled checks if a python module is importable.
 func pythonModuleInstalled(module string) bool {
 	if module == "" {
 		return false
@@ -153,6 +128,7 @@ func pythonModuleInstalled(module string) bool {
 	return exec.Command("python3", "-c", "import "+module).Run() == nil
 }
 
+// ensurePythonToolShim ensures a wrapper bash script is created in ~/.local/bin to invoke python modules easily.
 func ensurePythonToolShim(name, module string) error {
 	if name == "" || module == "" {
 		return nil

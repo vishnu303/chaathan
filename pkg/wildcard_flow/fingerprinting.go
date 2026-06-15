@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -143,14 +143,7 @@ func logFingerprintSummary(c *Ctx) {
 			}
 			host := v.Host
 			// Deduplicate hosts per WAF
-			found := false
-			for _, h := range wafHosts[wafName] {
-				if h == host {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !slices.Contains(wafHosts[wafName], host) {
 				wafHosts[wafName] = append(wafHosts[wafName], host)
 			}
 		}
@@ -169,7 +162,7 @@ func logFingerprintSummary(c *Ctx) {
 			for tech := range techCounts {
 				parts = append(parts, tech)
 			}
-			sort.Strings(parts)
+			slices.Sort(parts)
 			// Print in compact groups of ~6 technologies per line for readability
 			for i := 0; i < len(parts); i += 6 {
 				end := i + 6

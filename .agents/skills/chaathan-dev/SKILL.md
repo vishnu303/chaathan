@@ -73,11 +73,11 @@ go vet ./...        # static analysis
 go build -buildvcs=false -o chaathan .  # build check
 ```
 
-If developing on Windows, use WSL for all commands:
+If developing on Windows, use WSL with the installed Go path for all commands:
 ```bash
-wsl go test ./...       # all tests
-wsl go vet ./...        # static analysis
-wsl go build -buildvcs=false -o chaathan .  # build check
+wsl /usr/local/go/bin/go test ./...       # all tests
+wsl /usr/local/go/bin/go vet ./...        # static analysis
+wsl /usr/local/go/bin/go build -buildvcs=false -o chaathan .  # build check
 ```
 
 If CLI wiring changed:

@@ -111,7 +111,7 @@ func NewManager(stateDir string) *Manager {
 }
 
 // CreateState creates a new scan state
-func (m *Manager) CreateState(scanID int64, target, scanType, resultDir string, totalSteps int, cfg interface{}) (*State, error) {
+func (m *Manager) CreateState(scanID int64, target, scanType, resultDir string, totalSteps int, cfg any) (*State, error) {
 	configData, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)

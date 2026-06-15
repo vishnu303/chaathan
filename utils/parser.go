@@ -6,6 +6,7 @@ import (
 	"net"
 	neturl "net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -366,13 +367,7 @@ func ParseFfufOutput(scanID int64, filePath string) (int, error) {
 
 func isHTTPMethod(s string) bool {
 	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
-	s = strings.ToUpper(s)
-	for _, m := range methods {
-		if s == m {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(methods, strings.ToUpper(s))
 }
 
 // --- Phase 3: New tool parsers ---

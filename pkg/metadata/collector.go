@@ -3,7 +3,7 @@ package metadata
 import (
 	"encoding/json"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -49,7 +49,7 @@ var realUserAgents = []string{
 
 // randomUA returns a random User-Agent from the pool.
 func randomUA() string {
-	return realUserAgents[rand.Intn(len(realUserAgents))]
+	return realUserAgents[rand.N(len(realUserAgents))]
 }
 
 type httpSignal struct {
@@ -152,7 +152,7 @@ func collectSignals(urls []string, proxy string) []httpSignal {
 	results := make(chan httpSignal, len(urls))
 	var wg sync.WaitGroup
 
-	for i := 0; i < defaultConcurrency; i++ {
+	for range defaultConcurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -211,7 +211,7 @@ func fetchSignal(client *http.Client, rawURL string) (httpSignal, bool) {
 		return httpSignal{}, false
 	}
 
-	headers := make(map[string]interface{}, len(resp.Header))
+	headers := make(map[string]any, len(resp.Header))
 	for key, values := range resp.Header {
 		if len(values) == 1 {
 			headers[key] = values[0]

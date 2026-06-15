@@ -113,7 +113,7 @@ func RunOriginIPBypass(ctx context.Context, c *Ctx) error {
 	resolverChan := make(chan string, 100)
 
 	// Workers for DNS resolution
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wgResolve.Add(1)
 		go func() {
 			defer wgResolve.Done()

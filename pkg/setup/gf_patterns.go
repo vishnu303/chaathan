@@ -1,7 +1,4 @@
-// GF Pattern Installation
-//
-// Installs the upstream coffinxp/GFpattren JSON files (~/.gf/) used by
-// the wildcard workflow for JS/secret scanning and URL filtering.
+// Package setup orchestrates installation of all chaathan dependency tools.
 package setup
 
 import (
@@ -9,16 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
-// ─────────────────────────────────────────────────────────────
-// installGFPatternsSection
-// ─────────────────────────────────────────────────────────────
-
-func installGFPatternsSection() (installed, skipped, failed int) {
+// installGFPatternsSection clones upstream GFpattren pack and installs the JSON files.
+func installGFPatternsSection(ctx *SetupContext) (installed, skipped, failed int) {
 	progress.Section("gf Patterns", "cloning upstream GFpattren pack for workflow scanning")
 
 	if _, err := exec.LookPath("gf"); err != nil {
@@ -49,14 +42,9 @@ func installGFPatternsSection() (installed, skipped, failed int) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	cloneCmd := exec.Command("git", "clone", "--depth", "1", "https://github.com/coffinxp/GFpattren", tempDir)
-	output, err := cloneCmd.CombinedOutput()
+	err = ctx.RunCommand("gf-patterns (clone)", "git", "clone", "--depth", "1", "https://github.com/coffinxp/GFpattren", tempDir)
 	if err != nil {
-		detail := strings.TrimSpace(string(output))
-		if detail == "" {
-			detail = err.Error()
-		}
-		progress.ItemFail("gf patterns", detail)
+		progress.ItemFail("gf patterns", err.Error())
 		return 0, 0, 1
 	}
 
@@ -76,7 +64,7 @@ func installGFPatternsSection() (installed, skipped, failed int) {
 
 		srcPath := filepath.Join(tempDir, entry.Name())
 		dstPath := filepath.Join(gfDir, entry.Name())
-		if !isForceUpdate() {
+		if !ctx.IsForceUpdate() {
 			if _, err := os.Stat(dstPath); err == nil {
 				skippedCount++
 				continue

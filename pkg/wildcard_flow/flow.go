@@ -305,7 +305,7 @@ func Run(cfg RunConfig) error {
 	}()
 
 	// ── Database record ──────────────────────────────────────
-	configJSON, _ := json.Marshal(map[string]interface{}{
+	configJSON, _ := json.Marshal(map[string]any{
 		"skip_amass":         cfg.SkipAmass,
 		"skip_nuclei":        cfg.SkipNuclei,
 		"skip_naabu":         cfg.SkipNaabu,

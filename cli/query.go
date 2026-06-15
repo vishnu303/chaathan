@@ -429,7 +429,7 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 	w.Flush()
 
 	for _, t := range targets {
-		logger.Section(fmt.Sprintf("ROI %d (N:%d %s) - %s", t.Score, t.NormalizedScore, t.Confidence, t.URL))
+		logger.Section("ROI %d (N:%d %s) - %s", t.Score, t.NormalizedScore, t.Confidence, t.URL)
 		if t.Title != "" {
 			fmt.Printf("Title: %s\n", t.Title)
 		}

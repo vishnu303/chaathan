@@ -1,8 +1,4 @@
-// MassDNS Build & Installation
-//
-// Clones the MassDNS repository, compiles it with `make`, and installs
-// the resulting binary into $GOPATH/bin.
-// MassDNS is a high-performance DNS stub resolver used by ShuffleDNS.
+// Package setup orchestrates installation of all chaathan dependency tools.
 package setup
 
 import (
@@ -15,14 +11,11 @@ import (
 	"github.com/vishnu303/chaathan/pkg/progress"
 )
 
-// ─────────────────────────────────────────────────────────────
-// installMassDNSSection
-// ─────────────────────────────────────────────────────────────
-
-func installMassDNSSection() (installed, skipped, failed int) {
+// installMassDNSSection clones, compiles, and installs MassDNS from source.
+func installMassDNSSection(ctx *SetupContext) (installed, skipped, failed int) {
 	progress.Section("MassDNS", "")
 
-	if !isForceUpdate() {
+	if !ctx.IsForceUpdate() {
 		if _, err := exec.LookPath("massdns"); err == nil {
 			progress.ItemOK("Already installed")
 			return 0, 1, 0
@@ -59,10 +52,10 @@ func installMassDNSSection() (installed, skipped, failed int) {
 
 	// Step 1 — Clone
 	tracker.Start("clone")
-	cloneCmd := exec.Command("git", "clone", "--depth", "1",
+	cloneErr := ctx.RunCommand("massdns (clone)", "git", "clone", "--depth", "1",
 		"https://github.com/blechschmidt/massdns.git", tempDir)
-	if err := captureCommandOutput(cloneCmd, "massdns (clone)"); err != nil {
-		tracker.Fail("clone", err.Error())
+	if cloneErr != nil {
+		tracker.Fail("clone", cloneErr.Error())
 		tracker.StopSpinner()
 		return 0, 0, 1
 	}
@@ -70,10 +63,9 @@ func installMassDNSSection() (installed, skipped, failed int) {
 
 	// Step 2 — Compile
 	tracker.Start("compile")
-	makeCmd := exec.Command("make", "-j", fmt.Sprintf("%d", runtime.NumCPU()))
-	makeCmd.Dir = tempDir
-	if err := captureCommandOutput(makeCmd, "massdns (compile)"); err != nil {
-		tracker.Fail("compile", err.Error())
+	compileErr := ctx.RunCommandInDir(tempDir, "massdns (compile)", "make", "-j", fmt.Sprintf("%d", runtime.NumCPU()))
+	if compileErr != nil {
+		tracker.Fail("compile", compileErr.Error())
 		tracker.StopSpinner()
 		return 0, 0, 1
 	}

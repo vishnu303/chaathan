@@ -341,7 +341,7 @@ func DefaultConfig() *Config {
 				RateLimit:      150,
 				Severity:       []string{"low", "medium", "high", "critical"},
 				ExcludeTags:    []string{"dos", "fuzz"},
-				DisableOOB:     boolPtr(true),
+				DisableOOB:     new(true),
 				MaxTimeout:     300,
 				DASTAggression: "low",
 			},
@@ -362,7 +362,7 @@ func DefaultConfig() *Config {
 			},
 			Dalfox: DalfoxConfig{
 				MaxURLs:        500,
-				SkipThirdParty: boolPtr(true),
+				SkipThirdParty: new(true),
 			},
 		},
 		Notifications: NotificationConfig{
@@ -381,10 +381,6 @@ func DefaultConfig() *Config {
 	}
 }
 
-// boolPtr returns a pointer to the given bool value.
-// Used for *bool config fields where nil means "not set by user".
-func boolPtr(v bool) *bool { return &v }
-
 func applyDefaults(cfg *Config) {
 	if cfg.General.Mode == "" {
 		cfg.General.Mode = "native"
@@ -402,7 +398,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Tools.Nuclei.MaxTimeout = 300
 	}
 	if cfg.Tools.Nuclei.DisableOOB == nil {
-		cfg.Tools.Nuclei.DisableOOB = boolPtr(true)
+		cfg.Tools.Nuclei.DisableOOB = new(true)
 	}
 	if cfg.Tools.Nuclei.DASTAggression == "" {
 		cfg.Tools.Nuclei.DASTAggression = "low"
@@ -411,7 +407,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Tools.Dalfox.MaxURLs = 500
 	}
 	if cfg.Tools.Dalfox.SkipThirdParty == nil {
-		cfg.Tools.Dalfox.SkipThirdParty = boolPtr(true)
+		cfg.Tools.Dalfox.SkipThirdParty = new(true)
 	}
 	if cfg.Notifications.MinSeverity == "" {
 		cfg.Notifications.MinSeverity = "high"

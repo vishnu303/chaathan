@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"strconv"
@@ -103,7 +103,7 @@ var realUserAgents = []string{
 
 // randomUA returns a random User-Agent from the pool.
 func randomUA() string {
-	return realUserAgents[rand.Intn(len(realUserAgents))]
+	return realUserAgents[rand.N(len(realUserAgents))]
 }
 
 // uaEnabled returns true when UA rotation is active.

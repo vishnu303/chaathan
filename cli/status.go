@@ -77,7 +77,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 			barWidth := 30
 			filled := int(float64(barWidth) * pct / 100)
 			bar := ""
-			for i := 0; i < barWidth; i++ {
+			for i := range barWidth {
 				if i < filled {
 					bar += "█"
 				} else {

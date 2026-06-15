@@ -19,13 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -670,7 +670,7 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 	var totalBytes int64
 	seenHostsWithSecrets := make(map[string]bool)
 
-	for i := 0; i < threads; i++ {
+	for range threads {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -695,7 +695,7 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 				}
 
 				// User agent setup
-				ua := localUserAgents[rand.Intn(len(localUserAgents))]
+				ua := localUserAgents[rand.N(len(localUserAgents))]
 				if c.Tb.General != nil && c.Tb.General.UserAgent != "" {
 					ua = c.Tb.General.UserAgent
 				}
@@ -1109,7 +1109,7 @@ func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, err
 		return 0, 0, err
 	}
 
-	sort.Strings(files)
+	slices.Sort(files)
 	out, err := os.Create(outputFile)
 	if err != nil {
 		return 0, 0, err

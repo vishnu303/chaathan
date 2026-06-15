@@ -2,6 +2,7 @@ package wildcard_flow
 
 import (
 	"bufio"
+	"cmp"
 	"container/heap"
 	"context"
 	"encoding/json"
@@ -9,7 +10,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -313,7 +314,7 @@ func installedGFPatterns(allowlist map[string]bool) []string {
 			patterns = append(patterns, name)
 		}
 	}
-	sort.Strings(patterns)
+	slices.Sort(patterns)
 	return patterns
 }
 
@@ -533,13 +534,13 @@ func (h urlHeap) Swap(i, j int) {
 	h[i].index = i
 	h[j].index = j
 }
-func (h *urlHeap) Push(x interface{}) {
+func (h *urlHeap) Push(x any) {
 	n := len(*h)
 	item := x.(*urlItem)
 	item.index = n
 	*h = append(*h, item)
 }
-func (h *urlHeap) Pop() interface{} {
+func (h *urlHeap) Pop() any {
 	old := *h
 	n := len(old)
 	item := old[n-1]
@@ -637,8 +638,8 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 		for pq.Len() > 0 {
 			results = append(results, heap.Pop(&pq).(*urlItem))
 		}
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].score > results[j].score
+		slices.SortFunc(results, func(a, b *urlItem) int {
+			return cmp.Compare(b.score, a.score)
 		})
 
 		f, err := os.Create(outputFile)
@@ -703,8 +704,8 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 		for _, item := range bestPerPath {
 			results = append(results, item)
 		}
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].score > results[j].score
+		slices.SortFunc(results, func(a, b *urlItem) int {
+			return cmp.Compare(b.score, a.score)
 		})
 
 		f, err := os.Create(outputFile)

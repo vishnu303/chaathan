@@ -158,7 +158,7 @@ func LogToolSkipped(tool, command string) {
 // FileDebug writes a debug-level line to the log file only.
 // It never prints to the terminal, making it safe to use for verbose internal
 // state (file sizes, skip decisions, pipeline counts) without adding noise.
-func FileDebug(format string, args ...interface{}) {
+func FileDebug(format string, args ...any) {
 	logFileMu.Lock()
 	defer logFileMu.Unlock()
 	if logFile == nil {
@@ -222,31 +222,31 @@ func InitScanUI(total int) {
 // ── Primary output functions ────────────────────────────────────────────────
 
 // Info prints a styled info message
-func Info(format string, args ...interface{}) {
+func Info(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s\n", Dim, Reset, msg))
 }
 
 // Success prints a styled success message
-func Success(format string, args ...interface{}) {
+func Success(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s✓%s %s\n", Dim, Reset, BrightGreen, Reset, msg))
 }
 
 // Warning prints a styled warning message
-func Warning(format string, args ...interface{}) {
+func Warning(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s⚠%s %s\n", Dim, Reset, BrightYellow, Reset, msg))
 }
 
 // Error prints a styled error message
-func Error(format string, args ...interface{}) {
+func Error(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logWrite(os.Stdout, fmt.Sprintf("  %s│%s %s✗%s %s%s%s\n", Dim, Reset, BrightRed, Reset, Red, msg, Reset))
 }
 
 // Debug prints a styled debug message (only visible contextually)
-func Debug(format string, args ...interface{}) {
+func Debug(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logWrite(os.Stdout, fmt.Sprintf("  %s│  %s%s\n", Dim, msg, Reset))
 }
@@ -254,14 +254,14 @@ func Debug(format string, args ...interface{}) {
 // Section prints a generic section heading without incrementing the step counter.
 // Use this in non-scan commands (status, diff, export, delete, query, etc.)
 // that don't participate in the step-tracking workflow.
-func Section(format string, args ...interface{}) {
+func Section(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logWrite(os.Stdout, fmt.Sprintf("\n  %s┌─%s %s%s%s%s\n", Cyan, Reset, BrightCyan+Bold, msg, Reset, ""))
 }
 
 // StepHeader prints a scan-step heading that increments the step counter
 // and shows elapsed time. Use this only in scan workflow phases.
-func StepHeader(format string, args ...interface{}) {
+func StepHeader(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	currentStep++
 
@@ -298,7 +298,7 @@ func ScanHeader(scanType string, target string, scanID int64) {
 }
 
 // SubStep prints an indented sub-step with arrow
-func SubStep(format string, args ...interface{}) {
+func SubStep(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	logWrite(os.Stdout, fmt.Sprintf("  %s│%s   %s▸%s %s\n", Dim, Reset, Purple, Reset, msg))
 }

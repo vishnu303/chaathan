@@ -6,6 +6,10 @@
 // descriptions never drift.
 package tools
 
+import (
+	"os/exec"
+)
+
 // ToolInfo describes one external tool that Chaathan integrates with.
 type ToolInfo struct {
 	Name        string // binary name (e.g. "subfinder")
@@ -85,4 +89,20 @@ func CountRequired() int {
 		}
 	}
 	return count
+}
+
+// CheckStatus checks if the tool is installed on the system.
+// Returns true and the resolved binary path if found, or false and empty string.
+func (t ToolInfo) CheckStatus() (bool, string) {
+	path, err := exec.LookPath(t.Name)
+	if err == nil {
+		return true, path
+	}
+	// Also check common Python script names if standard lookup fails
+	if t.Name == "sublist3r" || t.Name == "cloud_enum" {
+		if p, err := exec.LookPath(t.Name + ".py"); err == nil {
+			return true, p
+		}
+	}
+	return false, ""
 }

@@ -62,6 +62,8 @@ Activate this skill for tasks involving external binary installation, setup beha
 - Runtime invocation and argument construction live in `pkg/tools/` or the owning workflow step.
 - User-facing checks live in `cli/tools_cmd.go`; setup entry in `cli/setup.go`.
 - `AllTools` in `pkg/tools/registry.go` is the single source of truth for the tool catalogue.
+- `CheckStatus() (bool, string)` on `ToolInfo` is the canonical way to verify if a tool is installed. Use it rather than writing manual `exec.LookPath` blocks.
+- Use `RunCommand` and `RunCommandInDir` helpers on `SetupContext` for all installation execution commands in `pkg/setup/` to pipe and capture outputs automatically. Setup commands do not use timeouts.
 
 ## Failure handling
 
@@ -77,10 +79,10 @@ go test ./...
 go build -buildvcs=false -o chaathan .
 ```
 
-If developing on Windows, use WSL for all commands:
+If developing on Windows, use WSL with the installed Go path for all commands:
 ```bash
-wsl go test ./...
-wsl go build -buildvcs=false -o chaathan .
+wsl /usr/local/go/bin/go test ./...
+wsl /usr/local/go/bin/go build -buildvcs=false -o chaathan .
 ```
 
 If environment allows:

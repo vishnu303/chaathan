@@ -1,10 +1,12 @@
 package database
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -231,7 +233,7 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 					totalTechPoints += 2
 				}
 			}
-			capped := minInt(40, totalTechPoints)
+			capped := min(40, totalTechPoints)
 			if len(highValueMatches) > 0 {
 				addPoints(capped, fmt.Sprintf("%d techs (%s)", len(techs), strings.Join(highValueMatches, ", ")))
 			} else {
@@ -248,22 +250,22 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 			roi.LinkFinderCount = endpointData.BySource["golinkfinder"]
 			roi.FfufCount = endpointData.BySource["ffuf"]
 
-			addPoints(minInt(20, endpointData.Total), fmt.Sprintf("%d discovered endpoints on host", endpointData.Total))
+			addPoints(min(20, endpointData.Total), fmt.Sprintf("%d discovered endpoints on host", endpointData.Total))
 			if roi.FfufCount > 0 {
-				addPoints(minInt(16, roi.FfufCount*4), fmt.Sprintf("%d ffuf hits", roi.FfufCount))
+				addPoints(min(16, roi.FfufCount*4), fmt.Sprintf("%d ffuf hits", roi.FfufCount))
 			}
 			if roi.LinkFinderCount > 0 {
-				addPoints(minInt(12, roi.LinkFinderCount*3), fmt.Sprintf("%d JS-extracted endpoints", roi.LinkFinderCount))
+				addPoints(min(12, roi.LinkFinderCount*3), fmt.Sprintf("%d JS-extracted endpoints", roi.LinkFinderCount))
 			}
 			crawlCount := roi.KatanaCount + roi.GoSpiderCount
 			if crawlCount > 0 {
-				addPoints(minInt(14, crawlCount*2), fmt.Sprintf("%d crawler-discovered endpoints", crawlCount))
+				addPoints(min(14, crawlCount*2), fmt.Sprintf("%d crawler-discovered endpoints", crawlCount))
 			}
 		}
 
 		roi.OpenPortCount = portsByHost[host]
 		if roi.OpenPortCount > 0 {
-			addPoints(minInt(10, roi.OpenPortCount*2), fmt.Sprintf("%d open ports on host", roi.OpenPortCount))
+			addPoints(min(10, roi.OpenPortCount*2), fmt.Sprintf("%d open ports on host", roi.OpenPortCount))
 			signalCategories["ports"] = true
 		}
 
@@ -282,18 +284,18 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 		if strings.Contains(u.URL, "?") && strings.Contains(u.URL, "=") {
 			roi.IsParameterized = true
 			paramCount := countURLParams(u.URL)
-			baseParamPoints := minInt(30, paramCount*8)
+			baseParamPoints := min(30, paramCount*8)
 			addPoints(baseParamPoints, fmt.Sprintf("%d URL parameters", paramCount))
 			sensitiveCount := countSensitiveParams(u.URL)
 			if sensitiveCount > 0 {
-				addPoints(minInt(20, sensitiveCount*10), fmt.Sprintf("%d sensitive param names", sensitiveCount))
+				addPoints(min(20, sensitiveCount*10), fmt.Sprintf("%d sensitive param names", sensitiveCount))
 			}
 		}
 
 		keywords := extractInterestingKeywords(u.URL + " " + u.Title)
 		if len(keywords) > 0 {
 			roi.InterestingTerms = keywords
-			addPoints(minInt(18, len(keywords)*4), "interesting keywords: "+strings.Join(keywords, ", "))
+			addPoints(min(18, len(keywords)*4), "interesting keywords: "+strings.Join(keywords, ", "))
 		}
 
 		// Multi-source URL confirmation (Phase 4.5)
@@ -365,7 +367,7 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 				addPoints(25, "host has exposed secrets in JavaScript")
 			}
 			if meta.FormCount > 0 {
-				addPoints(minInt(15, meta.FormCount*5), fmt.Sprintf("%d HTML forms (input surfaces)", meta.FormCount))
+				addPoints(min(15, meta.FormCount*5), fmt.Sprintf("%d HTML forms (input surfaces)", meta.FormCount))
 			}
 			if meta.HasFileUpload {
 				addPoints(20, "file upload form detected")
@@ -393,7 +395,7 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 
 			// Phase 4.4: Arjun Hidden Parameters
 			if meta.ArjunParamCount > 0 {
-				addPoints(minInt(25, meta.ArjunParamCount*5), fmt.Sprintf("%d hidden params discovered by Arjun", meta.ArjunParamCount))
+				addPoints(min(25, meta.ArjunParamCount*5), fmt.Sprintf("%d hidden params discovered by Arjun", meta.ArjunParamCount))
 			}
 		}
 
@@ -508,14 +510,14 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 		results = append(results, roi)
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Score != results[j].Score {
-			return results[i].Score > results[j].Score
+	slices.SortFunc(results, func(a, b URLROI) int {
+		if a.Score != b.Score {
+			return cmp.Compare(b.Score, a.Score)
 		}
-		if results[i].EndpointCount != results[j].EndpointCount {
-			return results[i].EndpointCount > results[j].EndpointCount
+		if a.EndpointCount != b.EndpointCount {
+			return cmp.Compare(b.EndpointCount, a.EndpointCount)
 		}
-		return results[i].URL < results[j].URL
+		return cmp.Compare(a.URL, b.URL)
 	})
 
 	// Phase 5.1: Host deduplication — max 3 per host before other hosts
@@ -699,13 +701,6 @@ func isHistoricalSource(source string) bool {
 func isCrawlerSource(source string) bool {
 	source = strings.ToLower(strings.TrimSpace(source))
 	return source == "katana" || source == "gospider"
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // highValueTech maps technology names (lowercase) to their pentesting value.
@@ -1133,10 +1128,5 @@ func computeAttackSurfaces(roi *URLROI, meta mergedMetadata, gfPatterns []string
 		add("xss")
 	}
 
-	var tags []string
-	for tag := range seen {
-		tags = append(tags, tag)
-	}
-	sort.Strings(tags)
-	return tags
+	return slices.Sorted(maps.Keys(seen))
 }

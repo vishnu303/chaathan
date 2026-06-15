@@ -57,7 +57,7 @@ Keep summaries brief. If no findings, state that explicitly with residual risks 
 
 ## Validation cues
 
-**Strong evidence:** `go test ./...` (`wsl go test ./...` on Windows), `go vet ./...`, successful build, direct inspection of affected flow and all downstream readers.
+**Strong evidence:** `go test ./...` (`wsl /usr/local/go/bin/go test ./...` on Windows), `go vet ./...`, successful build, direct inspection of affected flow and all downstream readers.
 
 **Weak evidence:** README examples only, reasoning from one layer without checking the rest.
 

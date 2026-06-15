@@ -67,7 +67,7 @@ type Notifier struct {
 	// notification attempt (sent, succeeded, failed). The workflow layer
 	// wires this to logger.FileDebug so entries appear in --log files
 	// without pkg/notify depending on pkg/logger.
-	LogFunc func(format string, args ...interface{})
+	LogFunc func(format string, args ...any)
 }
 
 // New creates a new Notifier
@@ -81,7 +81,7 @@ func New(cfg *config.NotificationConfig) *Notifier {
 }
 
 // logf writes to LogFunc if set.
-func (n *Notifier) logf(format string, args ...interface{}) {
+func (n *Notifier) logf(format string, args ...any) {
 	if n.LogFunc != nil {
 		n.LogFunc(format, args...)
 	}
@@ -267,11 +267,11 @@ func (n *Notifier) SendStepComplete(step StepComplete) error {
 func (n *Notifier) sendDiscord(finding Finding) error {
 	color := getDiscordColor(finding.Severity)
 
-	embed := map[string]interface{}{
+	embed := map[string]any{
 		"title":       fmt.Sprintf("[%s] %s", strings.ToUpper(finding.Severity), finding.Name),
 		"description": finding.Description,
 		"color":       color,
-		"fields": []map[string]interface{}{
+		"fields": []map[string]any{
 			{"name": "Target", "value": finding.Target, "inline": true},
 			{"name": "Type", "value": finding.Type, "inline": true},
 		},
@@ -283,35 +283,35 @@ func (n *Notifier) sendDiscord(finding Finding) error {
 
 	if finding.URL != "" {
 		embed["url"] = finding.URL
-		embed["fields"] = append(embed["fields"].([]map[string]interface{}),
-			map[string]interface{}{"name": "URL", "value": finding.URL, "inline": false})
+		embed["fields"] = append(embed["fields"].([]map[string]any),
+			map[string]any{"name": "URL", "value": finding.URL, "inline": false})
 	}
 
 	if finding.TemplateID != "" {
-		embed["fields"] = append(embed["fields"].([]map[string]interface{}),
-			map[string]interface{}{"name": "Template", "value": finding.TemplateID, "inline": true})
+		embed["fields"] = append(embed["fields"].([]map[string]any),
+			map[string]any{"name": "Template", "value": finding.TemplateID, "inline": true})
 	}
 
-	payload := map[string]interface{}{
-		"embeds": []map[string]interface{}{embed},
+	payload := map[string]any{
+		"embeds": []map[string]any{embed},
 	}
 
 	return n.postJSON(n.cfg.DiscordWebhook, payload)
 }
 
 func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"name": "Target", "value": scan.Target, "inline": true},
 		{"name": "Duration", "value": scan.Duration.String(), "inline": true},
 	}
 
 	for k, v := range scan.Stats {
-		fields = append(fields, map[string]interface{}{
+		fields = append(fields, map[string]any{
 			"name": k, "value": fmt.Sprintf("%d", v), "inline": true,
 		})
 	}
 
-	embed := map[string]interface{}{
+	embed := map[string]any{
 		"title":       "Scan Completed",
 		"description": fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target),
 		"color":       0x00FF00, // Green
@@ -321,15 +321,15 @@ func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
 		},
 	}
 
-	payload := map[string]interface{}{
-		"embeds": []map[string]interface{}{embed},
+	payload := map[string]any{
+		"embeds": []map[string]any{embed},
 	}
 
 	return n.postJSON(n.cfg.DiscordWebhook, payload)
 }
 
 func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"name": "Target", "value": step.Target, "inline": true},
 		{"name": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "inline": true},
 		{"name": "Duration", "value": step.Duration.String(), "inline": true},
@@ -337,12 +337,12 @@ func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
 	}
 
 	if step.ScanType != "" {
-		fields = append(fields, map[string]interface{}{
+		fields = append(fields, map[string]any{
 			"name": "Scan Type", "value": step.ScanType, "inline": true,
 		})
 	}
 
-	embed := map[string]interface{}{
+	embed := map[string]any{
 		"title":       "Step Completed",
 		"description": formatStepLabel(step),
 		"color":       0x0099FF,
@@ -353,8 +353,8 @@ func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
 		},
 	}
 
-	payload := map[string]interface{}{
-		"embeds": []map[string]interface{}{embed},
+	payload := map[string]any{
+		"embeds": []map[string]any{embed},
 	}
 
 	return n.postJSON(n.cfg.DiscordWebhook, payload)
@@ -364,11 +364,11 @@ func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
 func (n *Notifier) sendSlack(finding Finding) error {
 	color := getSlackColor(finding.Severity)
 
-	attachment := map[string]interface{}{
+	attachment := map[string]any{
 		"color": color,
 		"title": fmt.Sprintf("[%s] %s", strings.ToUpper(finding.Severity), finding.Name),
 		"text":  finding.Description,
-		"fields": []map[string]interface{}{
+		"fields": []map[string]any{
 			{"title": "Target", "value": finding.Target, "short": true},
 			{"title": "Type", "value": finding.Type, "short": true},
 		},
@@ -380,26 +380,26 @@ func (n *Notifier) sendSlack(finding Finding) error {
 		attachment["title_link"] = finding.URL
 	}
 
-	payload := map[string]interface{}{
-		"attachments": []map[string]interface{}{attachment},
+	payload := map[string]any{
+		"attachments": []map[string]any{attachment},
 	}
 
 	return n.postJSON(n.cfg.SlackWebhook, payload)
 }
 
 func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"title": "Target", "value": scan.Target, "short": true},
 		{"title": "Duration", "value": scan.Duration.String(), "short": true},
 	}
 
 	for k, v := range scan.Stats {
-		fields = append(fields, map[string]interface{}{
+		fields = append(fields, map[string]any{
 			"title": k, "value": fmt.Sprintf("%d", v), "short": true,
 		})
 	}
 
-	attachment := map[string]interface{}{
+	attachment := map[string]any{
 		"color":  "good",
 		"title":  "Scan Completed",
 		"text":   fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target),
@@ -407,15 +407,15 @@ func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
 		"footer": "Chaathan Security Scanner",
 	}
 
-	payload := map[string]interface{}{
-		"attachments": []map[string]interface{}{attachment},
+	payload := map[string]any{
+		"attachments": []map[string]any{attachment},
 	}
 
 	return n.postJSON(n.cfg.SlackWebhook, payload)
 }
 
 func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"title": "Target", "value": step.Target, "short": true},
 		{"title": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "short": true},
 		{"title": "Duration", "value": step.Duration.String(), "short": true},
@@ -423,12 +423,12 @@ func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
 	}
 
 	if step.ScanType != "" {
-		fields = append(fields, map[string]interface{}{
+		fields = append(fields, map[string]any{
 			"title": "Scan Type", "value": step.ScanType, "short": true,
 		})
 	}
 
-	attachment := map[string]interface{}{
+	attachment := map[string]any{
 		"color":  "#0099FF",
 		"title":  "Step Completed",
 		"text":   formatStepLabel(step),
@@ -437,8 +437,8 @@ func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
 		"ts":     step.Timestamp.Unix(),
 	}
 
-	payload := map[string]interface{}{
-		"attachments": []map[string]interface{}{attachment},
+	payload := map[string]any{
+		"attachments": []map[string]any{attachment},
 	}
 
 	return n.postJSON(n.cfg.SlackWebhook, payload)
@@ -553,7 +553,7 @@ func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
 func (n *Notifier) sendTelegramMessage(text string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.cfg.TelegramBotToken)
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"chat_id":    n.cfg.TelegramChatID,
 		"text":       text,
 		"parse_mode": "MarkdownV2",
@@ -564,7 +564,7 @@ func (n *Notifier) sendTelegramMessage(text string) error {
 
 // Generic webhook
 func (n *Notifier) sendWebhook(finding Finding) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"event":   "finding",
 		"finding": finding,
 	}
@@ -573,7 +573,7 @@ func (n *Notifier) sendWebhook(finding Finding) error {
 }
 
 func (n *Notifier) sendWebhookStepComplete(step StepComplete) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"event": "step_complete",
 		"step":  step,
 	}
@@ -586,7 +586,7 @@ func (n *Notifier) sendWebhookStepComplete(step StepComplete) error {
 // postJSON sends a JSON payload with retry logic for transient failures.
 // Retries up to 2 times with exponential backoff (1s, 2s) for network errors
 // and 5xx server errors. Client errors (4xx) are not retried.
-func (n *Notifier) postJSON(url string, payload interface{}) error {
+func (n *Notifier) postJSON(url string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)

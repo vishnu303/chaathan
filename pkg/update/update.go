@@ -76,7 +76,7 @@ func IsNewer(current, latest string) bool {
 	lateNums := parseVersionNumbers(lateVer)
 
 	// Compare major, minor, and patch numbers
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if lateNums[i] > currNums[i] {
 			return true
 		}
@@ -116,7 +116,7 @@ func cleanVersion(v string) string {
 func parseVersionNumbers(v string) [3]int {
 	parts := strings.Split(v, ".")
 	var nums [3]int
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if i < len(parts) {
 			n, err := strconv.Atoi(parts[i])
 			if err == nil {

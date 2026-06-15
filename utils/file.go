@@ -4,15 +4,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 )
 
-// MergeAndDeduplicate reads multiple input files, merges their content,
-// deduplicates lines, sorts them, and writes to an output file.
 func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
-	uniqueLines := make(map[string]bool)
+	uniqueLines := make(map[string]struct{})
 
 	for _, file := range inputFiles {
 		if err := readFileInto(file, uniqueLines); err != nil {
@@ -21,11 +20,7 @@ func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
 	}
 
 	// Sort keys
-	result := make([]string, 0, len(uniqueLines))
-	for line := range uniqueLines {
-		result = append(result, line)
-	}
-	sort.Strings(result)
+	result := slices.Sorted(maps.Keys(uniqueLines))
 
 	// Write to output
 	f, err := os.Create(outputFile)
@@ -47,7 +42,7 @@ func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
 // readFileInto reads non-empty lines from a single file into the dest map.
 // The file handle is closed when this function returns, avoiding FD leaks
 // that occur when defer is used inside a loop.
-func readFileInto(path string, dest map[string]bool) error {
+func readFileInto(path string, dest map[string]struct{}) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil // missing files are silently skipped
 	}
@@ -62,7 +57,7 @@ func readFileInto(path string, dest map[string]bool) error {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
-			dest[line] = true
+			dest[line] = struct{}{}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -144,7 +139,7 @@ func SanitizeURLFile(filePath string) error {
 	}
 
 	var cleaned []string
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{})
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -163,8 +158,8 @@ func SanitizeURLFile(filePath string) error {
 			continue
 		}
 
-		if !seen[line] {
-			seen[line] = true
+		if _, ok := seen[line]; !ok {
+			seen[line] = struct{}{}
 			cleaned = append(cleaned, line)
 		}
 	}
@@ -174,7 +169,7 @@ func SanitizeURLFile(filePath string) error {
 	}
 	file.Close()
 
-	sort.Strings(cleaned)
+	slices.Sort(cleaned)
 	f, err := os.Create(filePath)
 	if err != nil {
 		return err
@@ -241,13 +236,13 @@ func parseHex4(s string) (rune, bool) {
 	return r, true
 }
 
-// DeduplicateSlice returns a unique, deduplicated slice of strings.
-func DeduplicateSlice(in []string) []string {
-	seen := make(map[string]bool)
-	var out []string
+// DeduplicateSlice returns a unique, deduplicated slice of comparable elements.
+func DeduplicateSlice[T comparable](in []T) []T {
+	seen := make(map[T]struct{})
+	var out []T
 	for _, val := range in {
-		if !seen[val] {
-			seen[val] = true
+		if _, ok := seen[val]; !ok {
+			seen[val] = struct{}{}
 			out = append(out, val)
 		}
 	}
