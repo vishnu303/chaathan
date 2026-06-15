@@ -233,6 +233,17 @@ Modern web applications sit behind front-end shields like Cloudflare, Akamai, an
 
 ---
 
+## 🛠️ Architecture & Development Patterns
+
+Following a comprehensive package refactor, the `cli` package has been optimized to adhere to the highest Go development standards and clean coding principles:
+
+*   **Thin CLI Pattern**: Command handlers in `cli/` focus exclusively on argument parsing, flag binding, and user-facing terminal presentation, delegating all scanning, database, and reporting workflows to dedicated packages under `pkg/`.
+*   **Centralized Helpers (`cli/helpers.go`)**: Repetitive validations, custom parsing (e.g., scan ID and age parameters), rotating configuration overrides, and path resolutions are unified inside a dedicated helpers module to avoid code duplication.
+*   **Deterministic Output & UX**: Key-value settings output (like `config set` errors) are systematically grouped and sorted using the Go `"sort"` package to guarantee stable, predictable, and clean terminal displays.
+*   **Unified Serialization**: A single `writeJSONOrPrint` routine standardizes JSON output formatting and file-writing across all database query subcommands.
+
+---
+
 ## ⚖️ Legal & Disclaimer
 
 **Disclaimer:** This utility is designed strictly for authorized penetration testing, vulnerability assessment, and approved bug bounty participation. The author assumes absolutely zero liability for unauthorized exploitation, service degradation, or system misuse. Ensure explicit written consent is secured before directing high-volume testing assets at external target nodes.

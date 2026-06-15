@@ -9,7 +9,6 @@ import (
 	"github.com/vishnu303/chaathan/pkg/database"
 	"github.com/vishnu303/chaathan/pkg/logger"
 	"github.com/vishnu303/chaathan/pkg/paths"
-	"github.com/vishnu303/chaathan/utils"
 )
 
 var deleteCmd = &cobra.Command{
@@ -116,9 +115,8 @@ func runDeleteTarget(cmd *cobra.Command, args []string) {
 }
 
 func runDeleteScan(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
@@ -151,9 +149,8 @@ func runDeleteScan(cmd *cobra.Command, args []string) {
 }
 
 func runDeleteOld(cmd *cobra.Command, args []string) {
-	days, err := utils.ParseDays(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	days, ok := parseDaysArg(args[0])
+	if !ok {
 		return
 	}
 

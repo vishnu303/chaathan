@@ -160,28 +160,18 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	// Forward Ctrl+C / 's'-key to wildcard_flow.Run() which owns signal
 	// handling and stdin listener internally.
 
-	// CLI --proxy and --rate-limit override config file values
-	if proxyURL != "" && Cfg != nil {
-		Cfg.General.Proxy = proxyURL
-	}
-	if rateLimitRPS > 0 && Cfg != nil {
-		Cfg.RateLimits.GlobalRPS = rateLimitRPS
-	}
+	overrideConfigOverrides(proxyURL, rateLimitRPS)
 
 	// Resolve wordlist/resolver paths: CLI flag > config > empty (step skips)
-	wl := wordlistPath
-	if wl == "" && Cfg != nil && Cfg.General.Wordlists.Directories != "" {
-		wl = Cfg.General.Wordlists.Directories
-	}
-
-	dnsWl := dnsWordlistPath
-	if dnsWl == "" && Cfg != nil && Cfg.General.Wordlists.Subdomains != "" {
-		dnsWl = Cfg.General.Wordlists.Subdomains
-	}
-
-	resolvers := resolversPath
-	if resolvers == "" && Cfg != nil && Cfg.General.ResolversFile != "" {
-		resolvers = Cfg.General.ResolversFile
+	var wl, dnsWl, resolvers string
+	if Cfg != nil {
+		wl = resolvePath(wordlistPath, Cfg.General.Wordlists.Directories)
+		dnsWl = resolvePath(dnsWordlistPath, Cfg.General.Wordlists.Subdomains)
+		resolvers = resolvePath(resolversPath, Cfg.General.ResolversFile)
+	} else {
+		wl = wordlistPath
+		dnsWl = dnsWordlistPath
+		resolvers = resolversPath
 	}
 
 	// Build configuration and delegate to the wildcard_flow package

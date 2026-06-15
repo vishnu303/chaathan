@@ -82,13 +82,7 @@ func runCompany(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// CLI --proxy and --rate-limit override config file values
-	if companyProxy != "" && Cfg != nil {
-		Cfg.General.Proxy = companyProxy
-	}
-	if companyRateLimit > 0 && Cfg != nil {
-		Cfg.RateLimits.GlobalRPS = companyRateLimit
-	}
+	overrideConfigOverrides(companyProxy, companyRateLimit)
 
 	if err := cf.Run(cf.RunConfig{
 		Company:        safe,

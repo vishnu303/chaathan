@@ -96,9 +96,9 @@ func runToolsList(_ *cobra.Command, _ []string) {
 
 	for _, g := range groups {
 		meta := categoryStyles[g.name]
-		fmt.Printf("  %s┌─%s %s %s%s%s%s\n",
+		fmt.Printf("  %s┌─%s %s %s%s%s\n",
 			logger.Cyan, logger.Reset,
-			meta.icon, meta.color+logger.Bold, g.name, logger.Reset, "")
+			meta.icon, meta.color+logger.Bold, g.name, logger.Reset)
 
 		for _, t := range g.toolInfos {
 			req := ""
@@ -184,9 +184,9 @@ func runToolsCheck(_ *cobra.Command, _ []string) {
 	// Render each category
 	for _, g := range groups {
 		meta := categoryStyles[g.name]
-		fmt.Printf("\n  %s┌─%s %s %s%s%s%s\n",
+		fmt.Printf("\n  %s┌─%s %s %s%s%s\n",
 			logger.Cyan, logger.Reset,
-			meta.icon, meta.color+logger.Bold, g.name, logger.Reset, "")
+			meta.icon, meta.color+logger.Bold, g.name, logger.Reset)
 
 		for _, r := range g.results {
 			if r.found {

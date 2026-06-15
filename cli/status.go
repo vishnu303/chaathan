@@ -52,7 +52,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 				ageStr = fmt.Sprintf("%.0fm ago", age.Minutes())
 			}
 
-
 			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", s.ID, s.Target, s.Type, logger.EmojiStatus(s.Status), ageStr)
 		}
 		w.Flush()

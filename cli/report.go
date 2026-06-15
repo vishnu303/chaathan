@@ -11,7 +11,6 @@ import (
 	"github.com/vishnu303/chaathan/pkg/logger"
 	"github.com/vishnu303/chaathan/pkg/paths"
 	"github.com/vishnu303/chaathan/pkg/report"
-	"github.com/vishnu303/chaathan/utils"
 )
 
 var reportCmd = &cobra.Command{
@@ -41,9 +40,8 @@ func init() {
 }
 
 func runReportGenerate(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 

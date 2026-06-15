@@ -50,9 +50,8 @@ func init() {
 }
 
 func runExport(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 

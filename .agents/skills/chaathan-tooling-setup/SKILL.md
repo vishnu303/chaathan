@@ -79,17 +79,17 @@ go test ./...
 go build -buildvcs=false -o chaathan .
 ```
 
-If developing on Windows, use WSL with the installed Go path for all commands:
+If developing on Windows, run WSL commands by changing to the `/mnt/c/Users/vishn/desktop/chaathan` directory for optimal I/O (using interactive shell `-i` to source your Go environment):
 ```bash
-wsl /usr/local/go/bin/go test ./...
-wsl /usr/local/go/bin/go build -buildvcs=false -o chaathan .
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go test ./..."
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go build -buildvcs=false -o chaathan ."
 ```
 
 If environment allows:
 ```bash
 ./chaathan tools check
 ./chaathan setup --help
-# On Windows, prefix with wsl: wsl ./chaathan tools check
+# On Windows, use WSL: wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan tools check"
 ```
 
 ## Avoid

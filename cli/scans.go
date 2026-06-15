@@ -111,9 +111,8 @@ func runScansList(cmd *cobra.Command, args []string) {
 }
 
 func runScansShow(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
@@ -170,9 +169,8 @@ func runScansShow(cmd *cobra.Command, args []string) {
 }
 
 func runScansResume(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
@@ -268,9 +266,8 @@ func runScansResume(cmd *cobra.Command, args []string) {
 }
 
 func runScansDelete(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 

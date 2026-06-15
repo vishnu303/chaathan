@@ -194,11 +194,11 @@ go vet ./...
 go build -buildvcs=false -o chaathan .
 ```
 
-If developing on Windows, use WSL with the installed Go path for all commands:
+If developing on Windows, run WSL commands by changing to the `/mnt/c/Users/vishn/desktop/chaathan` directory for optimal I/O (using interactive shell `-i` to source your Go environment):
 ```bash
-wsl /usr/local/go/bin/go test ./...
-wsl /usr/local/go/bin/go vet ./...
-wsl /usr/local/go/bin/go build -buildvcs=false -o chaathan .
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go test ./..."
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go vet ./..."
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go build -buildvcs=false -o chaathan ."
 ```
 
 Then inspect for: compile errors from struct changes, missing skip flag propagation, stale step counts, artifact filename mismatches, downstream readers assuming non-empty files.
