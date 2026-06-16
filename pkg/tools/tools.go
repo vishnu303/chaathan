@@ -354,7 +354,7 @@ func (t *ToolBox) dastAggression() string {
 	if t.Config != nil && t.Config.Nuclei.DASTAggression != "" {
 		return t.Config.Nuclei.DASTAggression
 	}
-	return "medium"
+	return "high"
 }
 
 
