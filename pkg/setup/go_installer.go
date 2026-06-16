@@ -17,6 +17,17 @@ import (
 
 // CheckGoInstalledAndAtLeast126 checks if go is in PATH and if its version is >= 1.26.
 func CheckGoInstalledAndAtLeast126() (bool, string) {
+	if runtime.GOOS == "linux" {
+		currentPath := os.Getenv("PATH")
+		goBin := "/usr/local/go/bin"
+		if !strings.Contains(currentPath, goBin) {
+			if _, err := os.Stat("/usr/local/go/bin/go"); err == nil {
+				currentPath = currentPath + string(os.PathListSeparator) + goBin
+				_ = os.Setenv("PATH", currentPath)
+			}
+		}
+	}
+
 	path, err := exec.LookPath("go")
 	if err != nil {
 		return false, ""
@@ -67,6 +78,9 @@ func downloadLatestGo(ctx *SetupContext) (string, error) {
 		return "go1.26.0", nil
 	}
 	version := strings.TrimSpace(string(body))
+	if idx := strings.Index(version, "\n"); idx >= 0 {
+		version = strings.TrimSpace(version[:idx])
+	}
 	if !strings.HasPrefix(version, "go") {
 		progress.ItemInfo("Invalid go.dev/VERSION output (using go1.26.0 as fallback)")
 		return "go1.26.0", nil
