@@ -10,13 +10,29 @@ import (
 
 	"github.com/vishnu303/chaathan/pkg/database"
 	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/tui"
 	"github.com/vishnu303/chaathan/utils"
 )
 
 var queryCmd = &cobra.Command{
-	Use:   "query",
+	Use:   "query [scan_id]",
 	Short: "Query scan results",
-	Long:  `Search and filter results from completed scans.`,
+	Long:  `Search and filter results from completed scans. Starts the interactive TUI console by default, or accepts subcommands for non-interactive text/JSON exports.`,
+	Args:  cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		var presetScanID int64 = 0
+		if len(args) > 0 {
+			var ok bool
+			presetScanID, ok = parseScanIDArg(args[0])
+			if !ok {
+				return
+			}
+		}
+
+		if err := tui.StartQueryConsole(presetScanID); err != nil {
+			logger.Error("Failed to start TUI query console: %v", err)
+		}
+	},
 }
 
 var querySubdomainsCmd = &cobra.Command{

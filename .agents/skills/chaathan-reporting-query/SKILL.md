@@ -33,6 +33,16 @@ To ensure consistency across CLI outputs and report outputs, maintain a strict b
 
 ---
 
+## Interactive TUI Query Console
+
+To allow manual findings exploration, the top-level command `chaathan query` launches a full-screen interactive TUI dashboard.
+- **Rules:**
+  1. **Dual Execution Modes:** The parent command `chaathan query [scan_id]` defaults to launching the interactive TUI dashboard (implemented in `pkg/tui/query_console.go`), while explicit subcommands (e.g. `chaathan query subdomains`) run in standard non-interactive terminal print mode.
+  2. **Filter and Search:** The TUI table views must dynamically search and filter rows in memory based on user input in the filter field.
+  3. **Detail Popup Overlay:** Keyboard `Enter` triggers a center-aligned details pop-up modal showing all structured fields, ensuring long strings are properly wrapped.
+
+---
+
 ## ROI Ranking Calculation Heuristics
 
 The Return on Investment (ROI) score helps prioritize targets by analyzing crawled metadata.
@@ -65,9 +75,10 @@ wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go test ./pkg/report/.
 
 ### Dry-run Command Checks (using a local database):
 ```bash
-# Verify CLI table formats
+# Verify CLI table formats and TUI console
 wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan query subdomains 1"
 wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan query roi 1 --json"
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan query"
 
 # Check report compilation outputs
 wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan report generate 1 --format markdown"
