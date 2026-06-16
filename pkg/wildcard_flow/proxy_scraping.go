@@ -159,6 +159,9 @@ func (c *Ctx) ensureProxyForPhase(stepName string) {
 		return
 	}
 
+	// Print a clean section heading for the proxy setup to avoid visual misalignment
+	logger.Section("Phase %d Proxy Setup", phase)
+
 	c.runProxyScrapingAndRotation(phase)
 }
 
@@ -210,7 +213,7 @@ func (c *Ctx) runProxyScrapingAndRotation(phase int) {
 		OutputDir:     filepath.Join(c.ResultDir, "intermediate_files"),
 	}
 
-	logger.Info("[Phase %d] Scraping and validating proxies (timeout: %dm)...", phase, timeoutMin)
+	logger.Info("Scraping and validating proxies (timeout: %dm)...", timeoutMin)
 
 	var result *proxy_scraping.HarvestResult
 	var harvestErr error
@@ -228,7 +231,7 @@ func (c *Ctx) runProxyScrapingAndRotation(phase int) {
 	}
 
 	if harvestErr != nil && !harvestSkipped {
-		logger.Warning("[Phase %d] Proxy scraping failed: %v — continuing without proxy", phase, harvestErr)
+		logger.Warning("Proxy scraping failed: %v — continuing without proxy", harvestErr)
 		if phase == 0 {
 			c.LastActivePhase = 1
 		} else {
@@ -239,9 +242,9 @@ func (c *Ctx) runProxyScrapingAndRotation(phase int) {
 
 	if result == nil || result.TotalValid == 0 {
 		if harvestSkipped {
-			logger.Info("  [Phase %d] Proxy scraping skipped — no valid proxies found", phase)
+			logger.Info("  Proxy scraping skipped — no valid proxies found")
 		} else {
-			logger.Warning("[Phase %d] No valid proxies found — continuing without proxy", phase)
+			logger.Warning("No valid proxies found — continuing without proxy")
 		}
 		if phase == 0 {
 			c.LastActivePhase = 1
@@ -259,12 +262,12 @@ func (c *Ctx) runProxyScrapingAndRotation(phase int) {
 	if harvestSkipped {
 		label = " (partial)"
 	}
-	logger.Success("[Phase %d] Scraped %d proxies, %d validated%s (took %s)",
-		phase, result.TotalScraped, result.TotalValid, label,
+	logger.Success("Scraped %d proxies, %d validated%s (took %s)",
+		result.TotalScraped, result.TotalValid, label,
 		result.Duration.Round(time.Second))
 
 	// ── Phase B: Start mubeng rotating proxy server ─────────
-	logger.SubStep("[Phase %d] Starting rotating proxy server (mubeng)...", phase)
+	logger.SubStep("Starting rotating proxy server (mubeng)...")
 
 	rotatorCfg := proxy_scraping.RotatorConfig{
 		ProxyListFile: result.ProxyListFile,
@@ -276,7 +279,7 @@ func (c *Ctx) runProxyScrapingAndRotation(phase int) {
 
 	rotator, err := proxy_scraping.StartRotator(c.GoCtx, rotatorCfg)
 	if err != nil {
-		logger.Warning("[Phase %d] Failed to start proxy rotator: %v — continuing without proxy", phase, err)
+		logger.Warning("Failed to start proxy rotator: %v — continuing without proxy", err)
 		if phase == 0 {
 			c.LastActivePhase = 1
 		} else {
@@ -296,8 +299,8 @@ func (c *Ctx) runProxyScrapingAndRotation(phase int) {
 		c.Tb.WithGeneral(&c.Cfg.General)
 	}
 
-	logger.Success("[Phase %d] Rotating proxy active: %s (%d proxies in pool, method: %s, rotate every: %d req)",
-		phase, rotator.ProxyURL, result.TotalValid, rotateMethod, rotateEvery)
+	logger.Success("Rotating proxy active: %s (%d proxies in pool, method: %s, rotate every: %d req)",
+		rotator.ProxyURL, result.TotalValid, rotateMethod, rotateEvery)
 
 	if phase == 0 {
 		c.LastActivePhase = 1
