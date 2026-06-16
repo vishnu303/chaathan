@@ -59,9 +59,13 @@ make clean          # Cleans up local compilation and build artifacts
 
 ### 3. Database Queries & Filtering
 
-Extract and pivot relational reconnaissance datasets directly from the local SQLite database.
+Extract, pivot, and visually explore relational reconnaissance datasets directly from the local SQLite database.
 
 ```bash
+# Interactive TUI Query Explorer
+chaathan query                              # Launch the Unified Query & Findings TUI Console
+chaathan query 12                           # Launch the TUI console pre-loaded with Scan #12
+
 # Subdomain queries
 chaathan query subdomains 1 --live          # Filter for live HTTP assets only
 chaathan query subdomains 1 --grep api      # Filter subdomains containing 'api'
