@@ -181,6 +181,12 @@ func (r *DockerRunner) Run(ctx context.Context, command string, args []string, o
 }
 
 func (r *DockerRunner) runOnce(ctx context.Context, command string, args []string, options *RunOptions) (string, error) {
+	mountDir := options.Dir
+	if mountDir == "" {
+		mountDir, _ = os.Getwd()
+	}
+	translatedArgs := translatePathsForDocker(args, mountDir)
+
 	image := getDockerImage(command)
 
 	// We do NOT use -t (tty) here because it messes up output capturing usually
@@ -190,8 +196,7 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 	if options.Dir != "" {
 		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", options.Dir))
 	} else {
-		pwd, _ := os.Getwd()
-		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", pwd))
+		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", mountDir))
 	}
 	dockerArgs = append(dockerArgs, "-w", "/data")
 
@@ -224,7 +229,7 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 		}
 	}
 
-	dockerArgs = append(dockerArgs, args...)
+	dockerArgs = append(dockerArgs, translatedArgs...)
 
 	cmdStr := fmt.Sprintf("DOCKER %s", strings.Join(dockerArgs, " "))
 	// Always write command to log file (file-only, no terminal noise)
@@ -370,5 +375,30 @@ func NewWithRetry(mode string, verbose bool, maxRetries int, retryDelay time.Dur
 		return &DockerRunner{Verbose: verbose, MaxRetries: maxRetries, RetryDelay: retryDelay}
 	}
 	return &NativeRunner{Verbose: verbose, MaxRetries: maxRetries, RetryDelay: retryDelay}
+}
+
+func translatePathsForDocker(args []string, hostDir string) []string {
+	if hostDir == "" {
+		return args
+	}
+	// Normalize hostDir to forward slashes for matching
+	hostDirNormalized := strings.ReplaceAll(hostDir, "\\", "/")
+	
+	translated := make([]string, len(args))
+	for i, arg := range args {
+		// Normalize arg to forward slashes for matching
+		argNormalized := strings.ReplaceAll(arg, "\\", "/")
+		
+		if len(argNormalized) >= len(hostDirNormalized) {
+			argPrefix := argNormalized[:len(hostDirNormalized)]
+			if strings.EqualFold(argPrefix, hostDirNormalized) {
+				rel := argNormalized[len(hostDirNormalized):]
+				translated[i] = "/data" + rel
+				continue
+			}
+		}
+		translated[i] = arg
+	}
+	return translated
 }
 

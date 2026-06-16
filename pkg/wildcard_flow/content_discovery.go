@@ -131,7 +131,9 @@ func stepURLDiscovery(c *Ctx) bool {
 		}
 	}
 
-	if urlDiscoverySkipped || waybackOK || gauOK {
+	waybackCount, _ := utils.CountFileLines(c.F.WaybackOut)
+	gauCount, _ := utils.CountFileLines(c.F.GauOut)
+	if urlDiscoverySkipped || waybackOK || gauOK || waybackCount > 0 || gauCount > 0 {
 		c.StateMgr.MarkStepComplete(c.State, "url_discovery")
 	} else {
 		c.StateMgr.MarkStepFailed(c.State, "url_discovery", fmt.Errorf("both Waybackurls and GAU failed"))
@@ -246,7 +248,9 @@ func stepWebCrawling(c *Ctx) bool {
 
 	// Mark step based on outcome: complete if at least one crawler succeeded
 	// or the step was skipped; failed only if both crawlers failed.
-	if crawlSkipped || katanaOK || gospiderOK {
+	katanaCount, _ := utils.CountFileLines(c.F.KatanaOut)
+	gospiderCount, _ := utils.CountFileLines(c.F.GospiderOut)
+	if crawlSkipped || katanaOK || gospiderOK || katanaCount > 0 || gospiderCount > 0 {
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 	} else {
 		c.StateMgr.MarkStepFailed(c.State, "web_crawling", fmt.Errorf("both Katana and GoSpider failed"))
@@ -397,16 +401,17 @@ func stepURLConsolidation(c *Ctx) bool {
 	if err := utils.MergeAndDeduplicate(sources, c.F.AllURLsRaw); err != nil {
 		c.StateMgr.MarkStepFailed(c.State, "url_consolidation", err)
 		logger.Warning("URL merge failed: %v", err)
-	} else {
-		// Sanitize: unescape \uXXXX sequences, strip non-URL lines (GoSpider tags,
-		// relative paths from GoLinkFinder), and re-deduplicate.
-		if err := utils.SanitizeURLFile(c.F.AllURLsRaw); err != nil {
-			logger.Warning("URL sanitization failed: %v", err)
-		}
-		rawCount, _ := utils.CountFileLines(c.F.AllURLsRaw)
-		logger.Info("  Merged %d unique URLs", rawCount)
-		logger.FileDebug("url_consolidation merged %d raw URLs -> %s", rawCount, c.F.AllURLsRaw)
+		return c.cancelled()
 	}
+
+	// Sanitize: unescape \uXXXX sequences, strip non-URL lines (GoSpider tags,
+	// relative paths from GoLinkFinder), and re-deduplicate.
+	if err := utils.SanitizeURLFile(c.F.AllURLsRaw); err != nil {
+		logger.Warning("URL sanitization failed: %v", err)
+	}
+	rawCount, _ := utils.CountFileLines(c.F.AllURLsRaw)
+	logger.Info("  Merged %d unique URLs", rawCount)
+	logger.FileDebug("url_consolidation merged %d raw URLs -> %s", rawCount, c.F.AllURLsRaw)
 
 	// Live-check all URLs with httpx
 	logger.SubStep("Running httpx to live-check all URLs...")
@@ -820,6 +825,7 @@ func stepJSSecretScan(c *Ctx) bool {
 			scanSkipped = true
 			logger.Info("  JS scanning skipped by user")
 		} else {
+			c.StateMgr.MarkStepFailed(c.State, "js_secret_scan", scanErr)
 			logger.Warning("JS scanning failed: %v", scanErr)
 		}
 	}

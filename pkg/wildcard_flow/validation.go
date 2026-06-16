@@ -227,6 +227,10 @@ func stepHTTPProbing(c *Ctx) bool {
 		}
 	}
 
+	if utils.FileExists(c.F.HttpxOut) {
+		collectLiveHostTargetsFromHttpx(c.F.HttpxOut, c.F.HttpxLiveHosts)
+	}
+
 	if c.ScanID > 0 && utils.FileExists(c.F.HttpxOut) {
 		count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
 		if count > 0 {
@@ -240,17 +244,6 @@ func stepHTTPProbing(c *Ctx) bool {
 			logger.Info("  Httpx skipped — no live host data from this scan")
 		} else {
 			logger.Info("  Found 0 live hosts")
-		}
-	}
-
-	// Trigger active WAF bypass Origin IP resolution
-	if err := runWithSkip(c, "WAF Origin IP Bypass", func(sCtx context.Context) error {
-		return RunOriginIPBypass(sCtx, c)
-	}); err != nil {
-		if err == ErrToolSkipped {
-			// Logged internally by runWithSkip
-		} else {
-			logger.Warning("WAF Origin IP Bypass failed: %v", err)
 		}
 	}
 

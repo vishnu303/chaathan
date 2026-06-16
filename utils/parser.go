@@ -25,6 +25,8 @@ func ParseSubdomainsFile(scanID int64, filePath, source string) (int, error) {
 
 	var domains []string
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" && !strings.HasPrefix(line, "#") {
@@ -203,6 +205,8 @@ func ParseNaabuOutput(scanID int64, filePath string) (int, error) {
 
 	count := 0
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -251,6 +255,8 @@ func ParseEndpointsFile(scanID int64, filePath, source string) (int, error) {
 
 	count := 0
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -286,6 +292,8 @@ func ParseURLsFile(scanID int64, filePath, source string) (int, error) {
 
 	count := 0
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -315,6 +323,8 @@ func ParseLiveURLsFile(scanID int64, filePath, source string) (int, error) {
 	seen := make(map[string]bool)
 	count := 0
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -507,6 +517,8 @@ func ParseUncoverOutput(scanID int64, filePath string) (subs int, ports int, err
 
 	seenHosts := make(map[string]bool)
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxScanBufferSize)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {

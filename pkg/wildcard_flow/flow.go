@@ -78,7 +78,6 @@ type RunConfig struct {
 	CustomCookie       string
 	CustomHeaders      []string
 	CustomToken        string
-	EnableOriginBypass bool
 
 	// Proxy automation
 	AutoProxy bool
@@ -380,6 +379,7 @@ func Run(cfg RunConfig) error {
 	}
 	authHeaders = append(authHeaders, cfg.CustomHeaders...)
 	infra.ToolBox.WithCustomAuth(cfg.CustomCookie, authHeaders)
+	infra.ToolBox.WithResultDir(cfg.ResultDir)
 
 	// ── Ensure output subdirectories exist ───────────────────
 	if err := os.MkdirAll(filepath.Join(cfg.ResultDir, "intermediate_files"), 0755); err != nil {

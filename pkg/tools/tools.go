@@ -20,13 +20,26 @@ import (
 // It reads per-tool settings (threads, timeouts, rate limits) from the config
 // so users can tune behavior via config.yaml instead of recompiling.
 type ToolBox struct {
-	Runner     runner.Runner
+	Runner        runner.Runner
 	Config        *config.ToolsConfig
 	General       *config.GeneralConfig   // WAF evasion settings (UA rotation, proxy, etc.)
 	RateLimits    *config.RateLimitConfig // Global rate-limit override
 	APIKeys       *config.APIKeysConfig
 	CustomCookie  string
 	CustomHeaders []string
+	ResultDir     string
+}
+
+type resultDirRunner struct {
+	base runner.Runner
+	dir  string
+}
+
+func (r *resultDirRunner) Run(ctx context.Context, command string, args []string, opts ...runner.Option) (string, error) {
+	if r.dir != "" {
+		opts = append(opts, runner.WithDir(r.dir))
+	}
+	return r.base.Run(ctx, command, args, opts...)
 }
 
 // New creates a ToolBox. If cfg is nil, sensible defaults are used.
@@ -36,6 +49,22 @@ func New(r runner.Runner, cfg ...*config.ToolsConfig) *ToolBox {
 		tb.Config = cfg[0]
 	}
 	return tb
+}
+
+// WithResultDir sets the scan result directory and wraps the runner to inject it in Docker mode.
+func (t *ToolBox) WithResultDir(dir string) *ToolBox {
+	t.ResultDir = dir
+	if dir != "" {
+		if wrapped, ok := t.Runner.(*resultDirRunner); ok {
+			wrapped.dir = dir
+		} else {
+			t.Runner = &resultDirRunner{
+				base: t.Runner,
+				dir:  dir,
+			}
+		}
+	}
+	return t
 }
 
 // WithCustomAuth attaches custom session headers and cookies to the ToolBox.
@@ -432,14 +461,10 @@ func (t *ToolBox) RunSubfinder(ctx context.Context, domain string, outputFile st
 func (t *ToolBox) RunAssetfinder(ctx context.Context, domain string, outputFile string) error {
 	args := []string{"--subs-only", domain}
 	output, err := t.Runner.Run(ctx, "assetfinder", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
+	if strings.TrimSpace(output) != "" {
+		_ = writeToFile(outputFile, output)
 	}
-	return writeToFile(outputFile, output)
+	return err
 }
 
 func (t *ToolBox) RunSublist3r(ctx context.Context, domain string, outputFile string) error {
@@ -462,15 +487,8 @@ func (t *ToolBox) RunAmass(ctx context.Context, domain string, outputFile string
 func (t *ToolBox) RunGau(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain, "--providers", "wayback", "--subs", "--o", outputFile}
 	args = t.appendProxy(args, "--proxy")
-	output, err := t.Runner.Run(ctx, "gau", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
-	}
-	return nil
+	_, err := t.Runner.Run(ctx, "gau", args)
+	return err
 }
 
 // --- DNS & Brute Force ---
@@ -750,10 +768,10 @@ func (t *ToolBox) RunNucleiDAST(ctx context.Context, urlsFile string, outputFile
 func (t *ToolBox) RunMetabigorNet(ctx context.Context, org string, outputFile string) error {
 	args := []string{"net", "--org", "-v", org}
 	output, err := t.Runner.Run(ctx, "metabigor", args)
-	if err != nil {
-		return err
+	if strings.TrimSpace(output) != "" {
+		_ = writeToFile(outputFile, output)
 	}
-	return writeToFile(outputFile, output)
+	return err
 }
 
 func (t *ToolBox) RunCloudEnum(ctx context.Context, keyword string, outputFile string) error {
@@ -808,12 +826,12 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := runBypassedCmd(ctx, cmd); err != nil {
+	err := runBypassedCmd(ctx, cmd)
+	if stdout.Len() > 0 {
+		_ = writeToFile(outputFile, stdout.String())
+	}
+	if err != nil {
 		if ctx.Err() != nil {
-			// Cancelled / skipped — save partial output if any
-			if stdout.Len() > 0 {
-				_ = writeToFile(outputFile, stdout.String())
-			}
 			return ctx.Err()
 		}
 		if stderr.Len() > 0 {
@@ -821,7 +839,7 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 		}
 		return err
 	}
-	return writeToFile(outputFile, stdout.String())
+	return nil
 }
 
 // --- URL Discovery ---
@@ -830,14 +848,10 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 func (t *ToolBox) RunWaybackurls(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain}
 	output, err := t.Runner.Run(ctx, "waybackurls", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
+	if strings.TrimSpace(output) != "" {
+		_ = writeToFile(outputFile, output)
 	}
-	return writeToFile(outputFile, output)
+	return err
 }
 
 // RunGoLinkFinder extracts endpoints from JavaScript files found at the given URL.

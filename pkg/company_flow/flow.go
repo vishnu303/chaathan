@@ -130,6 +130,7 @@ func Run(cfg RunConfig) error {
 
 	// ── Runner, ToolBox & Notifier ──────────────────────────
 	infra := orchestrate.NewInfra(cfg.Mode, cfg.Verbose, cfg.Cfg)
+	infra.ToolBox.WithResultDir(cfg.ResultDir)
 
 	// ── Build shared Ctx ─────────────────────────────────────
 	c := &Ctx{

@@ -13,7 +13,6 @@
 
 *   **Stateful 23-Step Wildcard Recon**: End-to-end domain discovery, HTTP probing, historical URL extraction, vulnerability auditing, and WAF fingerprinting.
 *   **Stateful 3-Step Company Discovery**: Network ASN mappings, reverse-WHOIS root enumeration, and public cloud asset discovery.
-*   **Universal WAF/CDN Origin Bypass**: Automatically maps WAF-shielded hosts, tests candidate origin IPs, and validates direct origin routing with browser-spoofed headers.
 *   **Relational Intelligence**: Stores all assets, open ports, vulnerabilities, URLs, and API endpoints in a high-speed local SQLite database.
 *   **Intelligent ROI Ranking**: Evaluates crawled endpoints to rank test targets by vulnerability density and potential ROI.
 *   **Continuous Monitoring & Diffs**: Compare scans over time to immediately isolate new subdomains, ports, or vulnerabilities.
@@ -54,7 +53,6 @@ make clean          # Cleans up local compilation and build artifacts
 | **Auto-Proxy + Stealth** | `chaathan wildcard -d target.com --auto-proxy --rate-limit 10` |
 | **Stateful Resume** | `chaathan wildcard -d target.com --resume <scan_id>` |
 | **Session-Authenticated Scan** | `chaathan wildcard -d target.com --cookie "PHPSESSID=abc; auth=1" -H "X-Client: Pro" --token "jwt_value"` |
-| **Origin IP Bypass Scan** | `chaathan wildcard -d target.com --origin-bypass` |
 | **Execution Logging** | `chaathan wildcard -d target.com --log` |
 | **Company Discovery** | `chaathan company -n "Acme Corporation"` |
 | **Company Discovery** *(Fast)* | `chaathan company -n "Acme Corporation" --skip-metabigor` |
@@ -218,13 +216,6 @@ Chaathan is designed to traverse hostile, firewalled networks. It includes granu
 
 ### 🔑 Authenticated State Auditing
 Allows you to audit deeply nested authenticated application zones (private APIs, parameterized endpoints, gated directories). You can feed complex session cookies (`--cookie`), customized request headers (`-H`), and shorthand OAuth authorization tokens (`--token`) directly into Chaathan. The engine transparently parses these structures and cascades them down to sub-executables like `httpx`, `katana`, `nuclei`, and `dalfox`.
-
-### 🛰️ WAF & CDN Origin IP Bypass
-Modern web applications sit behind front-end shields like Cloudflare, Akamai, and AWS CloudFront. By specifying the `--origin-bypass` switch, Chaathan actively attempts to bypass these filters:
-1. **Host Mapping:** Compiles all subdomains currently resolving to known CDN/WAF IP ranges.
-2. **Origin Discovery:** Extracts candidate non-WAF backend IP addresses discovered during the earlier stages of the scan.
-3. **Validation Probes:** Performs rapid concurrent TLS handshake probes directly against candidate origin IPs while spoofing the target domain's `Host` header, validating if the origin serves unshielded data.
-4. **Relational Tracking:** Automatically stores any validated edge bypasses in the SQLite database and triggers real-time alerts.
 
 ### 🕴️ Complete Anonymization & Routing
 - **User-Agent Rotation:** Enabled natively by default (`ua_rotation: true` in config). Chaathan dynamically swaps standard command-line user-agent headers for authentic, rotating desktop and mobile browser signatures (Chrome, Firefox, Safari) on every request, evading signature-based blocking.
