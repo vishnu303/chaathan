@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vishnu303/chaathan/pkg/logger"
+	"github.com/vishnu303/chaathan/pkg/tools"
 )
 
 // HarvestConfig controls the proxy scraping and validation.
@@ -141,7 +142,7 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 		"--check",
 		"--output", liveProxiesPath,
 		"-g", fmt.Sprintf("%d", maxConcurrent),
-		"-t", "10s",
+		"-t", "5s",
 	)
 	cmd.Dir = workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -268,7 +269,7 @@ func fetchProxySources(ctx context.Context, proxyTypes []string, outPath string)
 			if err != nil {
 				return
 			}
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+			req.Header.Set("User-Agent", tools.RandomUA())
 
 			resp, err := client.Do(req)
 			if err != nil {
@@ -320,3 +321,5 @@ func fetchProxySources(ctx context.Context, proxyTypes []string, outPath string)
 
 	return len(all), nil
 }
+
+

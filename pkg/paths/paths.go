@@ -17,11 +17,16 @@ var (
 	initErr      error
 )
 
-// Init resolves the Chaathan home directory (~/.chaathan). It must be called
-// early in main() or a PersistentPreRun. Subsequent calls are no-ops.
-// Returns an error if the user home directory cannot be determined.
+// Init resolves the Chaathan home directory. It checks the CHAATHAN_HOME
+// environment variable first; if empty or unset, it defaults to ~/.chaathan.
+// It must be called early in main() or a PersistentPreRun. Subsequent calls are no-ops.
+// Returns an error if the home directory cannot be determined.
 func Init() error {
 	initOnce.Do(func() {
+		if envHome := os.Getenv("CHAATHAN_HOME"); envHome != "" {
+			chaathanHome = filepath.Clean(envHome)
+			return
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			initErr = fmt.Errorf("cannot determine home directory: %w", err)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -215,14 +216,21 @@ func runConfigSet(cmd *cobra.Command, args []string) {
 		logger.Error("Unknown config key: %s", key)
 		logger.Info("Available keys:")
 
-		// Group keys by prefix for pretty display
+		// Group and sort keys by prefix for pretty deterministic display
 		groups := map[string][]string{}
+		var prefixes []string
 		for k := range configKeys {
 			prefix := strings.SplitN(k, ".", 2)[0]
+			if _, exists := groups[prefix]; !exists {
+				prefixes = append(prefixes, prefix)
+			}
 			groups[prefix] = append(groups[prefix], k)
 		}
-		for prefix, keys := range groups {
+		sort.Strings(prefixes)
+		for _, prefix := range prefixes {
 			logger.Info("  [%s]", prefix)
+			keys := groups[prefix]
+			sort.Strings(keys)
 			for _, k := range keys {
 				logger.Info("    %s", k)
 			}

@@ -1,8 +1,4 @@
-// Prerequisites Installation
-//
-// Checks and installs system-level packages (go, pip3, git, gcc, libpcap…)
-// required before any tool installation can begin.
-// Supports Debian/Ubuntu (apt) and Arch Linux/CachyOS (pacman).
+// Package setup orchestrates installation of all chaathan dependency tools.
 package setup
 
 import (
@@ -67,11 +63,8 @@ func containsWord(s, word string) bool {
 	return false
 }
 
-// ─────────────────────────────────────────────────────────────
-// installPrerequisites
-// ─────────────────────────────────────────────────────────────
-
-func installPrerequisites() {
+// installPrerequisites checks and installs system-level packages.
+func installPrerequisites(ctx *SetupContext) {
 	progress.Section("Prerequisites", "")
 
 	if runtime.GOOS != "linux" {
@@ -80,26 +73,30 @@ func installPrerequisites() {
 		return
 	}
 
+	// Ensure Go runtime is installed and at least 1.26
+	if _, err := EnsureGoInstalled(ctx); err != nil {
+		progress.ItemFail("Go setup failed", err.Error())
+		return
+	}
+
 	distro := detectDistro()
 	if distro == distroUnknown {
-		progress.ItemInfo("Unrecognised Linux distribution — cannot auto-install prerequisites.")
-		progress.ItemInfo("Please ensure: go, pip3, gem, git, make, gcc, libpcap")
+		progress.ItemInfo("Unrecognised Linux distribution — cannot auto-install other prerequisites.")
+		progress.ItemInfo("Please ensure: pip3, gem, git, make, gcc, libpcap")
 		ensurePathSetup()
 		return
 	}
 
 	type prereq struct {
-		name      string
-		binary    string
-		aptPkg    string // Debian/Ubuntu
-		pacmanPkg string // Arch/CachyOS
-		// dpkgPkg / pacmanQPkg are used for header-only packages with no binary
+		name       string
+		binary     string
+		aptPkg     string // Debian/Ubuntu
+		pacmanPkg  string // Arch/CachyOS
 		dpkgPkg    string // dpkg -l check on Debian
 		pacmanQPkg string // pacman -Qi check on Arch
 	}
 
 	prereqs := []prereq{
-		{"Go", "go", "golang-go", "go", "", ""},
 		{"pip3", "pip3", "python3-pip", "python-pip", "", ""},
 		{"Git", "git", "git", "git", "", ""},
 		{"Make", "make", "make", "make", "", ""},
@@ -131,15 +128,15 @@ func installPrerequisites() {
 	switch distro {
 	case distroDebian:
 		progress.ItemInfo(fmt.Sprintf("Installing %d packages via apt...", len(toInstall)))
-		runSysCmd("sudo", "apt", "update", "-qq")
-		if err := runSysCmd("sudo", append([]string{"apt", "install", "-y", "-qq"}, toInstall...)...); err != nil {
+		_ = runSysCmd(ctx, "sudo", "apt", "update", "-qq")
+		if err := runSysCmd(ctx, "sudo", append([]string{"apt", "install", "-y", "-qq"}, toInstall...)...); err != nil {
 			progress.ItemFail("apt install", err.Error())
 		} else {
 			progress.ItemOK(fmt.Sprintf("%d packages installed", len(toInstall)))
 		}
 	case distroArch:
 		progress.ItemInfo(fmt.Sprintf("Installing %d packages via pacman...", len(toInstall)))
-		if err := runSysCmd("sudo", append([]string{"pacman", "-S", "--noconfirm", "--needed"}, toInstall...)...); err != nil {
+		if err := runSysCmd(ctx, "sudo", append([]string{"pacman", "-S", "--noconfirm", "--needed"}, toInstall...)...); err != nil {
 			progress.ItemFail("pacman install", err.Error())
 		} else {
 			progress.ItemOK(fmt.Sprintf("%d packages installed", len(toInstall)))
@@ -149,10 +146,7 @@ func installPrerequisites() {
 	ensurePathSetup()
 }
 
-// ─────────────────────────────────────────────────────────────
-// isPrereqInstalled — check binary presence or package-manager install status
-// ─────────────────────────────────────────────────────────────
-
+// isPrereqInstalled check binary presence or package-manager install status.
 func isPrereqInstalled(binary, dpkgPkg, pacmanQPkg string, distro distroFamily) bool {
 	// Prefer binary check — works on all distros
 	if binary != "" {
@@ -173,22 +167,27 @@ func isPrereqInstalled(binary, dpkgPkg, pacmanQPkg string, distro distroFamily) 
 	return false
 }
 
-// ─────────────────────────────────────────────────────────────
-// runSysCmd — run a system command with inherited stdio
-// ─────────────────────────────────────────────────────────────
-
-func runSysCmd(name string, args ...string) error {
+// runSysCmd runs a system command with inherited stdio.
+func runSysCmd(ctx *SetupContext, name string, args ...string) error {
+	if ctx.Logger != nil {
+		ctx.Logger.Write("Running system command: %s %s", name, strings.Join(args, " "))
+	}
 	cmd := exec.Command(name, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	err := cmd.Run()
+	if ctx.Logger != nil {
+		if err != nil {
+			ctx.Logger.Write("System command failed: %v", err)
+		} else {
+			ctx.Logger.Write("System command completed successfully")
+		}
+	}
+	return err
 }
 
-// ─────────────────────────────────────────────────────────────
-// ensurePathSetup — add ~/.local/bin and ~/go/bin to PATH in rc files
-// ─────────────────────────────────────────────────────────────
-
+// ensurePathSetup adds ~/.local/bin and ~/go/bin to PATH in shell configuration files.
 func ensurePathSetup() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -206,36 +205,14 @@ func ensurePathSetup() {
 		filepath.Join(home, ".zshrc"),
 	}
 
+	comment := "# Chaathan PATH configuration"
+
 	for _, rc := range rcFiles {
 		if _, err := os.Stat(rc); os.IsNotExist(err) {
 			continue // skip if the user doesn't use this shell
 		}
 
-		content, err := os.ReadFile(rc)
-		if err != nil {
-			continue
-		}
-
-		fileContent := string(content)
-		added := false
-
-		f, err := os.OpenFile(rc, os.O_APPEND|os.O_WRONLY, 0644)
-		if err != nil {
-			continue
-		}
-
-		for _, p := range pathsToAdd {
-			if !strings.Contains(fileContent, p) {
-				if !added {
-					f.WriteString("\n# Chaathan PATH configuration\n")
-					added = true
-				}
-				f.WriteString(p + "\n")
-			}
-		}
-		f.Close()
-
-		if added {
+		if added, err := appendLinesToFile(rc, pathsToAdd, comment); err == nil && added {
 			progress.ItemOK(fmt.Sprintf("Added paths to %s (Restart terminal to apply)", filepath.Base(rc)))
 		}
 	}
@@ -243,34 +220,16 @@ func ensurePathSetup() {
 	// Fish shell support (CachyOS default)
 	fishConfig := filepath.Join(home, ".config", "fish", "config.fish")
 	if _, err := os.Stat(fishConfig); err == nil {
-		content, err := os.ReadFile(fishConfig)
-		if err == nil {
-			fileContent := string(content)
-			fishPaths := []string{
-				`fish_add_path -g $HOME/.local/bin`,
-				`fish_add_path -g $HOME/go/bin`,
-			}
-			added := false
-			f, err := os.OpenFile(fishConfig, os.O_APPEND|os.O_WRONLY, 0644)
-			if err == nil {
-				for _, p := range fishPaths {
-					if !strings.Contains(fileContent, p) {
-						if !added {
-							f.WriteString("\n# Chaathan PATH configuration\n")
-							added = true
-						}
-						f.WriteString(p + "\n")
-					}
-				}
-				f.Close()
-				if added {
-					progress.ItemOK("Added paths to config.fish (Restart terminal to apply)")
-				}
-			}
+		fishPaths := []string{
+			`fish_add_path -g $HOME/.local/bin`,
+			`fish_add_path -g $HOME/go/bin`,
+		}
+		if added, err := appendLinesToFile(fishConfig, fishPaths, comment); err == nil && added {
+			progress.ItemOK("Added paths to config.fish (Restart terminal to apply)")
 		}
 	}
 
-	// Also update the current Go process's PATH so that subsequent setup functions
+	// Update the current Go process's PATH so that subsequent setup functions
 	// or tool runs in this same execution session can find the new paths instantly.
 	currentPath := os.Getenv("PATH")
 	localBin := filepath.Join(home, ".local", "bin")
@@ -282,5 +241,42 @@ func ensurePathSetup() {
 	if !strings.Contains(currentPath, goBin) {
 		currentPath = goBin + string(os.PathListSeparator) + currentPath
 	}
-	os.Setenv("PATH", currentPath)
+	_ = os.Setenv("PATH", currentPath)
+}
+
+// appendLinesToFile checks if lines exist in the file, and appends them with a preceding comment if any are missing.
+func appendLinesToFile(filePath string, lines []string, comment string) (bool, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return false, err
+	}
+
+	fileContent := string(content)
+	var toAdd []string
+	for _, line := range lines {
+		if !strings.Contains(fileContent, line) {
+			toAdd = append(toAdd, line)
+		}
+	}
+
+	if len(toAdd) == 0 {
+		return false, nil
+	}
+
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString("\n" + comment + "\n"); err != nil {
+		return false, err
+	}
+	for _, line := range toAdd {
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			return false, err
+		}
+	}
+
+	return true, nil
 }

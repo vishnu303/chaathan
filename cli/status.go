@@ -12,7 +12,10 @@ import (
 	"github.com/vishnu303/chaathan/pkg/logger"
 	"github.com/vishnu303/chaathan/pkg/paths"
 	"github.com/vishnu303/chaathan/pkg/scan"
+	"github.com/vishnu303/chaathan/pkg/tui"
 )
+
+var showPlainStatus bool
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -26,10 +29,20 @@ var statusCmd = &cobra.Command{
 }
 
 func init() {
+	statusCmd.Flags().BoolVar(&showPlainStatus, "plain", false, "Output plain text instead of starting the interactive TUI dashboard")
 	rootCmd.AddCommand(statusCmd)
 }
 
 func runStatus(cmd *cobra.Command, args []string) {
+	if !showPlainStatus {
+		if err := tui.StartDashboard(); err != nil {
+			logger.Error("Failed to start TUI dashboard: %v", err)
+			// Fallback to plain text status on dashboard failure
+		} else {
+			return
+		}
+	}
+
 	logger.ScanHeader("Status", "Dashboard", 0)
 
 	// ── Recent Scans ──
@@ -51,7 +64,6 @@ func runStatus(cmd *cobra.Command, args []string) {
 			} else {
 				ageStr = fmt.Sprintf("%.0fm ago", age.Minutes())
 			}
-
 
 			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", s.ID, s.Target, s.Type, logger.EmojiStatus(s.Status), ageStr)
 		}
@@ -77,7 +89,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 			barWidth := 30
 			filled := int(float64(barWidth) * pct / 100)
 			bar := ""
-			for i := 0; i < barWidth; i++ {
+			for i := range barWidth {
 				if i < filled {
 					bar += "█"
 				} else {

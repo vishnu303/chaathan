@@ -1,35 +1,24 @@
-// Go Tools Installation
-//
-// Installs Go-based security tools sequentially via `go install`.
-// The tool list is derived from pkg/tools/registry.go — the single
-// source of truth — filtered to only Go-installable entries.
+// Package setup orchestrates installation of all chaathan dependency tools.
 package setup
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/vishnu303/chaathan/pkg/progress"
 	"github.com/vishnu303/chaathan/pkg/tools"
 )
 
-// ─────────────────────────────────────────────────────────────
-// installGoToolsSection
-// ─────────────────────────────────────────────────────────────
-
-func installGoToolsSection() (installed, skipped, failed int) {
-	// Separate already-installed tools from those that need installing
+// installGoToolsSection checks and installs Go-based tools sequentially.
+func installGoToolsSection(ctx *SetupContext) (installed, skipped, failed int) {
 	type goTool struct{ name, url string }
 	var toInstall []goTool
 	skippedCount := 0
 	for _, t := range tools.GoInstallableTools() {
-		if !isForceUpdate() {
-			if _, err := exec.LookPath(t.Name); err == nil {
+		if !ctx.IsForceUpdate() {
+			if found, _ := t.CheckStatus(); found {
 				skippedCount++
 				continue
 			}
@@ -51,62 +40,39 @@ func installGoToolsSection() (installed, skipped, failed int) {
 	tracker := progress.NewTracker(len(toInstall))
 	tracker.RunSpinner()
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 1) // sequential: prevents OOM during heavy compilation
-
 	for _, t := range toInstall {
-		wg.Add(1)
-		go func(tool goTool) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			tracker.Start(tool.name)
-			if err := installGoTool(tool.name, tool.url); err != nil {
-				tracker.Fail(tool.name, err.Error())
-			} else {
-				tracker.Complete(tool.name)
-				if tool.name == "nuclei" {
-					_ = downloadNucleiTemplates() // best effort
-				}
+		tracker.Start(t.name)
+		if err := installGoTool(ctx, t.name, t.url); err != nil {
+			tracker.Fail(t.name, err.Error())
+		} else {
+			tracker.Complete(t.name)
+			if t.name == "nuclei" {
+				_ = downloadNucleiTemplates(ctx) // best effort
 			}
-		}(t)
+		}
 	}
 
-	wg.Wait()
 	tracker.StopSpinner()
 
 	i, _, f := tracker.Stats()
 	return i, skippedCount, f
 }
 
-// ─────────────────────────────────────────────────────────────
-// installGoTool — go install with 10-minute timeout
-// ─────────────────────────────────────────────────────────────
-
-func installGoTool(name, url string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "go", "install", "-v", url)
-	return captureCommandOutput(cmd, name)
+// installGoTool runs `go install -v <url>` without timeout.
+func installGoTool(ctx *SetupContext, name, url string) error {
+	return ctx.RunCommand(name, "go", "install", "-v", url)
 }
 
 // downloadNucleiTemplates runs nuclei -update-templates to populate the templates directory.
-func downloadNucleiTemplates() error {
-	// Find nuclei binary path
-	nucleiPath, err := exec.LookPath("nuclei")
-	if err != nil {
-		// Try to find it in the standard GOPATH/bin as a fallback
-		gopath := os.Getenv("GOPATH")
-		if gopath == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				gopath = filepath.Join(home, "go")
-			}
-		}
-		if gopath != "" {
+func downloadNucleiTemplates(ctx *SetupContext) error {
+	nucleiPath := ""
+	if p, errLook := exec.LookPath("nuclei"); errLook == nil {
+		nucleiPath = p
+	} else {
+		// Fallback to GOPATH/bin
+		if gopath := resolveGOPATH(); gopath != "" {
 			candidate := filepath.Join(gopath, "bin", "nuclei")
-			if _, err := os.Stat(candidate); err == nil {
+			if _, errStat := os.Stat(candidate); errStat == nil {
 				nucleiPath = candidate
 			}
 		}
@@ -116,9 +82,5 @@ func downloadNucleiTemplates() error {
 		return fmt.Errorf("nuclei binary not found")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, nucleiPath, "-update-templates")
-	return cmd.Run()
+	return ctx.RunCommand("nuclei-templates", nucleiPath, "-update-templates")
 }

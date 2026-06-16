@@ -1,0 +1,115 @@
+package database_test
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/vishnu303/chaathan/pkg/database"
+)
+
+func TestDatabaseOperations(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+
+	// 1. Initialize
+	err := database.Initialize(dbPath)
+	if err != nil {
+		t.Fatalf("failed to initialize database: %v", err)
+	}
+	defer database.Close()
+
+	// 2. Create Scan
+	scan, err := database.CreateScan("testdomain.com", "wildcard", tempDir, `{"test": true}`)
+	if err != nil {
+		t.Fatalf("failed to create scan: %v", err)
+	}
+	if scan.Target != "testdomain.com" {
+		t.Errorf("expected target testdomain.com, got %q", scan.Target)
+	}
+
+	// 3. Update Scan Status
+	err = database.UpdateScanStatus(scan.ID, "completed")
+	if err != nil {
+		t.Errorf("failed to update scan status: %v", err)
+	}
+
+	// 4. Add Subdomain
+	err = database.AddSubdomain(scan.ID, "sub.testdomain.com", "subfinder")
+	if err != nil {
+		t.Errorf("failed to add subdomain: %v", err)
+	}
+
+	// 5. Update Subdomain Live
+	err = database.UpdateSubdomainLive(scan.ID, "sub.testdomain.com", true, "192.168.1.1")
+	if err != nil {
+		t.Errorf("failed to update subdomain live: %v", err)
+	}
+
+	// 6. Get Live Subdomains
+	liveSubs, err := database.GetLiveSubdomains(scan.ID)
+	if err != nil {
+		t.Fatalf("failed to get live subdomains: %v", err)
+	}
+	if len(liveSubs) != 1 {
+		t.Fatalf("expected 1 live subdomain, got %d", len(liveSubs))
+	}
+	if liveSubs[0].Domain != "sub.testdomain.com" || liveSubs[0].IPAddress != "192.168.1.1" {
+		t.Errorf("subdomain details mismatch: %+v", liveSubs[0])
+	}
+
+	// 7. Add Port
+	err = database.AddPort(scan.ID, "sub.testdomain.com", 80, "tcp", "http")
+	if err != nil {
+		t.Errorf("failed to add port: %v", err)
+	}
+
+	// 8. Add URL
+	err = database.AddURL(scan.ID, "http://sub.testdomain.com/index.html", 200, "text/html", "Home Page", `["jquery"]`, "httpx")
+	if err != nil {
+		t.Errorf("failed to add URL: %v", err)
+	}
+
+	// 9. Add Endpoint
+	err = database.AddEndpoint(scan.ID, "http://sub.testdomain.com/api/v1", "GET", "katana")
+	if err != nil {
+		t.Errorf("failed to add endpoint: %v", err)
+	}
+
+	// 10. Add Vulnerability
+	err = database.AddVulnerability(scan.ID, "sub.testdomain.com", "http://sub.testdomain.com/index.html", "xss", "Reflected XSS", "medium", "XSS vulnerability", "matcher", "evidence")
+	if err != nil {
+		t.Errorf("failed to add vulnerability: %v", err)
+	}
+
+	// 11. Get Vulnerabilities
+	vulns, err := database.GetVulnerabilities(scan.ID)
+	if err != nil {
+		t.Fatalf("failed to get vulnerabilities: %v", err)
+	}
+	if len(vulns) != 1 {
+		t.Fatalf("expected 1 vulnerability, got %d", len(vulns))
+	}
+	if vulns[0].Name != "Reflected XSS" || vulns[0].Severity != "medium" {
+		t.Errorf("vulnerability details mismatch: %+v", vulns[0])
+	}
+
+	// 12. Upsert Host Metadata
+	err = database.UpsertHostMetadata(scan.ID, database.HostMetadata{
+		Host:       "sub.testdomain.com",
+		SSLExpired: true,
+		WeakTLS:    false,
+	})
+	if err != nil {
+		t.Errorf("failed to upsert host metadata: %v", err)
+	}
+
+	// 13. Upsert URL Metadata
+	err = database.UpsertURLMetadata(scan.ID, database.URLMetadata{
+		URL:          "http://sub.testdomain.com/index.html",
+		Host:         "sub.testdomain.com",
+		LoginSurface: true,
+	})
+	if err != nil {
+		t.Errorf("failed to upsert URL metadata: %v", err)
+	}
+}

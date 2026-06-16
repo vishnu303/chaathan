@@ -1,6 +1,10 @@
-package update
+package update_test
+ 
+import (
+	"testing"
 
-import "testing"
+	"github.com/vishnu303/chaathan/pkg/update"
+)
 
 func TestIsNewer(t *testing.T) {
 	tests := []struct {
@@ -39,7 +43,7 @@ func TestIsNewer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.current+" vs "+tt.latest, func(t *testing.T) {
-			got := IsNewer(tt.current, tt.latest)
+			got := update.IsNewer(tt.current, tt.latest)
 			if got != tt.want {
 				t.Errorf("IsNewer(%q, %q) = %v; want %v", tt.current, tt.latest, got, tt.want)
 			}

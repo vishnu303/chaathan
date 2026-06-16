@@ -1,5 +1,5 @@
-package wildcard_flow
-
+package wildcard_flow_test
+ 
 import (
 	"os"
 	"path/filepath"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/wildcard_flow"
 )
 
 func TestCollectScopedURLs(t *testing.T) {
@@ -37,15 +38,15 @@ func TestCollectScopedURLs(t *testing.T) {
 		t.Fatalf("failed to write temp input file: %v", err)
 	}
 
-	ctx := &Ctx{
-		RunConfig: RunConfig{
+	ctx := &wildcard_flow.Ctx{
+		RunConfig: wildcard_flow.RunConfig{
 			Domain: "example.com",
 			Cfg:    config.Cfg,
 		},
 	}
 
 	// 1. Test uncapped
-	count := collectScopedURLs(ctx, inputFile, outputFile, 0)
+	count := wildcard_flow.CollectScopedURLs(ctx, inputFile, outputFile, 0)
 	if count != 3 {
 		t.Errorf("expected 3 filtered URLs, got %d", count)
 	}
@@ -66,7 +67,7 @@ func TestCollectScopedURLs(t *testing.T) {
 	}
 
 	// 2. Test capped at 1
-	countCapped := collectScopedURLs(ctx, inputFile, outputFile, 1)
+	countCapped := wildcard_flow.CollectScopedURLs(ctx, inputFile, outputFile, 1)
 	if countCapped != 1 {
 		t.Errorf("expected 1 filtered URL when capped at 1, got %d", countCapped)
 	}

@@ -200,6 +200,9 @@ func GetHostMetadata(scanID int64) ([]HostMetadata, error) {
 		}
 		metas = append(metas, meta)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return metas, nil
 }
@@ -239,6 +242,9 @@ func GetURLMetadata(scanID int64) ([]URLMetadata, error) {
 			return nil, err
 		}
 		metas = append(metas, meta)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return metas, nil

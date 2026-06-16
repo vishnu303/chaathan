@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"strconv"
@@ -20,13 +20,26 @@ import (
 // It reads per-tool settings (threads, timeouts, rate limits) from the config
 // so users can tune behavior via config.yaml instead of recompiling.
 type ToolBox struct {
-	Runner     runner.Runner
+	Runner        runner.Runner
 	Config        *config.ToolsConfig
 	General       *config.GeneralConfig   // WAF evasion settings (UA rotation, proxy, etc.)
 	RateLimits    *config.RateLimitConfig // Global rate-limit override
 	APIKeys       *config.APIKeysConfig
 	CustomCookie  string
 	CustomHeaders []string
+	ResultDir     string
+}
+
+type resultDirRunner struct {
+	base runner.Runner
+	dir  string
+}
+
+func (r *resultDirRunner) Run(ctx context.Context, command string, args []string, opts ...runner.Option) (string, error) {
+	if r.dir != "" {
+		opts = append(opts, runner.WithDir(r.dir))
+	}
+	return r.base.Run(ctx, command, args, opts...)
 }
 
 // New creates a ToolBox. If cfg is nil, sensible defaults are used.
@@ -36,6 +49,22 @@ func New(r runner.Runner, cfg ...*config.ToolsConfig) *ToolBox {
 		tb.Config = cfg[0]
 	}
 	return tb
+}
+
+// WithResultDir sets the scan result directory and wraps the runner to inject it in Docker mode.
+func (t *ToolBox) WithResultDir(dir string) *ToolBox {
+	t.ResultDir = dir
+	if dir != "" {
+		if wrapped, ok := t.Runner.(*resultDirRunner); ok {
+			wrapped.dir = dir
+		} else {
+			t.Runner = &resultDirRunner{
+				base: t.Runner,
+				dir:  dir,
+			}
+		}
+	}
+	return t
 }
 
 // WithCustomAuth attaches custom session headers and cookies to the ToolBox.
@@ -81,10 +110,10 @@ func (t *ToolBox) WithAPIKeys(keys *config.APIKeysConfig) *ToolBox {
 
 // --- User-Agent rotation pool ---
 
-// realUserAgents contains common, high-frequency browser User-Agent strings.
+// RealUserAgents contains common, high-frequency browser User-Agent strings.
 // Rotating through these prevents WAF fingerprinting from static tool UAs
 // like "httpx - Open-source project" or "Nuclei - Open-source project".
-var realUserAgents = []string{
+var RealUserAgents = []string{
 	// Chrome 147 on Windows 10
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
 	// Chrome 147 on macOS
@@ -101,9 +130,9 @@ var realUserAgents = []string{
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
 }
 
-// randomUA returns a random User-Agent from the pool.
-func randomUA() string {
-	return realUserAgents[rand.Intn(len(realUserAgents))]
+// RandomUA returns a random User-Agent from the pool.
+func RandomUA() string {
+	return RealUserAgents[rand.N(len(RealUserAgents))]
 }
 
 // uaEnabled returns true when UA rotation is active.
@@ -117,7 +146,36 @@ func (t *ToolBox) getUA() string {
 	if t.General != nil && t.General.UserAgent != "" {
 		return t.General.UserAgent
 	}
-	return randomUA()
+	return RandomUA()
+}
+
+type appendOptions struct {
+	uaHeader    bool
+	tlsOpSec    bool
+	customHFlag string // e.g. "-H"
+	cookieFlag  string // e.g. "-cookie" or "-b"
+	proxyFlag   string // e.g. "-http-proxy" or "-proxy" or "-x"
+}
+
+// appendCommon consolidates repetitive appends for User-Agent, TLS opsec,
+// custom headers, custom cookies, and proxy parameters into a single call.
+func (t *ToolBox) appendCommon(args []string, opts appendOptions) []string {
+	if opts.uaHeader {
+		args = t.appendUAHeader(args)
+	}
+	if opts.tlsOpSec {
+		args = t.appendTLSOpSec(args)
+	}
+	if opts.customHFlag != "" {
+		args = t.appendCustomHeaders(args, opts.customHFlag)
+	}
+	if opts.cookieFlag != "" {
+		args = t.appendCustomCookies(args, opts.cookieFlag)
+	}
+	if opts.proxyFlag != "" {
+		args = t.appendProxy(args, opts.proxyFlag)
+	}
+	return args
 }
 
 // appendUAHeader appends a -H "User-Agent: ..." flag pair for tools that
@@ -135,12 +193,12 @@ func (t *ToolBox) appendTLSOpSec(args []string) []string {
 	return append(args, "-tls-impersonate")
 }
 
-// appendDalfoxUA appends --header "User-Agent: ..." for dalfox.
+// appendDalfoxUA appends --user-agent "..." for dalfox.
 func (t *ToolBox) appendDalfoxUA(args []string) []string {
 	if !t.uaEnabled() {
 		return args
 	}
-	return append(args, "--header", "User-Agent: "+t.getUA())
+	return append(args, "--user-agent", t.getUA())
 }
 
 // appendGoSpiderUA appends -u "..." for gospider.
@@ -148,47 +206,39 @@ func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	if !t.uaEnabled() {
 		return args
 	}
-	// Pass User-Agent as a header to avoid parsing issues with long strings containing spaces
-	return append(args, "-H", "User-Agent: "+t.getUA())
+	return append(args, "-u", t.getUA())
 }
 
-// appendArjunHeaders appends --headers '{"Key":"Value",...}' for Arjun.
-// Arjun expects a JSON object for --headers, not the "Key: Value" plain
-// format used by httpx/nuclei. This method merges the User-Agent and any
-// custom headers into a single JSON string.
+// appendArjunHeaders appends --headers for Arjun.
+// Arjun expects a newline-separated string for --headers, not the JSON format.
+// This method merges the User-Agent and any custom headers and cookies,
+// then joins them with actual newline characters.
 func (t *ToolBox) appendArjunHeaders(args []string) []string {
-	headers := make(map[string]string)
+	var headerLines []string
 
 	// Add User-Agent
 	if t.uaEnabled() {
-		headers["User-Agent"] = t.getUA()
+		headerLines = append(headerLines, "User-Agent: "+t.getUA())
 	}
 
 	// Merge custom headers (from --header / -H CLI flags)
 	for _, h := range t.CustomHeaders {
-		parts := strings.SplitN(h, ":", 2)
-		if len(parts) == 2 {
-			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		if strings.Contains(h, ":") {
+			headerLines = append(headerLines, h)
 		}
 	}
 
 	// Merge custom cookie as a header
 	if t.CustomCookie != "" {
-		headers["Cookie"] = t.CustomCookie
+		headerLines = append(headerLines, "Cookie: "+t.CustomCookie)
 	}
 
-	if len(headers) == 0 {
+	if len(headerLines) == 0 {
 		return args
 	}
 
-	// Format headers as "Key: Value\n" separated string for Arjun
-	var headerLines []string
-	for k, v := range headers {
-		headerLines = append(headerLines, fmt.Sprintf("%s: %s", k, v))
-	}
-	
-	hString := strings.Join(headerLines, "\n")
-	return append(args, "--headers", hString)
+	// Format headers as newline-separated string for Arjun
+	return append(args, "--headers", strings.Join(headerLines, "\n"))
 }
 
 // --- Proxy helpers ---
@@ -333,7 +383,7 @@ func (t *ToolBox) dastAggression() string {
 	if t.Config != nil && t.Config.Nuclei.DASTAggression != "" {
 		return t.Config.Nuclei.DASTAggression
 	}
-	return "low"
+	return "high"
 }
 
 
@@ -411,14 +461,10 @@ func (t *ToolBox) RunSubfinder(ctx context.Context, domain string, outputFile st
 func (t *ToolBox) RunAssetfinder(ctx context.Context, domain string, outputFile string) error {
 	args := []string{"--subs-only", domain}
 	output, err := t.Runner.Run(ctx, "assetfinder", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
+	if strings.TrimSpace(output) != "" {
+		_ = writeToFile(outputFile, output)
 	}
-	return writeToFile(outputFile, output)
+	return err
 }
 
 func (t *ToolBox) RunSublist3r(ctx context.Context, domain string, outputFile string) error {
@@ -441,15 +487,8 @@ func (t *ToolBox) RunAmass(ctx context.Context, domain string, outputFile string
 func (t *ToolBox) RunGau(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain, "--providers", "wayback", "--subs", "--o", outputFile}
 	args = t.appendProxy(args, "--proxy")
-	output, err := t.Runner.Run(ctx, "gau", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
-	}
-	return nil
+	_, err := t.Runner.Run(ctx, "gau", args)
+	return err
 }
 
 // --- DNS & Brute Force ---
@@ -480,11 +519,13 @@ func (t *ToolBox) RunHttpx(ctx context.Context, domainsFile string, outputFile s
 	if t.Config != nil && t.Config.Httpx.FollowRedirects {
 		args = append(args, "-follow-redirects")
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
 	}
@@ -602,10 +643,12 @@ func (t *ToolBox) RunFfuf(ctx context.Context, url string, wordlist string, outp
 		"-t", strconv.Itoa(t.ffufThreads()),
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-b")
-	args = t.appendProxy(args, "-x")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-b",
+		proxyFlag:   "-x",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
 	}
@@ -632,10 +675,12 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 		"-t", strconv.Itoa(t.ffufThreads()),
 		"-timeout", strconv.Itoa(t.ffufTimeout()),
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-b")
-	args = t.appendProxy(args, "-x")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-b",
+		proxyFlag:   "-x",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
 	}
@@ -723,10 +768,10 @@ func (t *ToolBox) RunNucleiDAST(ctx context.Context, urlsFile string, outputFile
 func (t *ToolBox) RunMetabigorNet(ctx context.Context, org string, outputFile string) error {
 	args := []string{"net", "--org", "-v", org}
 	output, err := t.Runner.Run(ctx, "metabigor", args)
-	if err != nil {
-		return err
+	if strings.TrimSpace(output) != "" {
+		_ = writeToFile(outputFile, output)
 	}
-	return writeToFile(outputFile, output)
+	return err
 }
 
 func (t *ToolBox) RunCloudEnum(ctx context.Context, keyword string, outputFile string) error {
@@ -781,12 +826,12 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := runBypassedCmd(ctx, cmd); err != nil {
+	err := runBypassedCmd(ctx, cmd)
+	if stdout.Len() > 0 {
+		_ = writeToFile(outputFile, stdout.String())
+	}
+	if err != nil {
 		if ctx.Err() != nil {
-			// Cancelled / skipped — save partial output if any
-			if stdout.Len() > 0 {
-				_ = writeToFile(outputFile, stdout.String())
-			}
 			return ctx.Err()
 		}
 		if stderr.Len() > 0 {
@@ -794,7 +839,7 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 		}
 		return err
 	}
-	return writeToFile(outputFile, stdout.String())
+	return nil
 }
 
 // --- URL Discovery ---
@@ -803,14 +848,10 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 func (t *ToolBox) RunWaybackurls(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain}
 	output, err := t.Runner.Run(ctx, "waybackurls", args)
-	if err != nil {
-		// On skip/cancel: save whatever partial output landed in the stdout buffer.
-		if ctx.Err() != nil && strings.TrimSpace(output) != "" {
-			_ = writeToFile(outputFile, output)
-		}
-		return err
+	if strings.TrimSpace(output) != "" {
+		_ = writeToFile(outputFile, output)
 	}
-	return writeToFile(outputFile, output)
+	return err
 }
 
 // RunGoLinkFinder extracts endpoints from JavaScript files found at the given URL.
@@ -871,11 +912,13 @@ func (t *ToolBox) RunHttpxURLCheck(ctx context.Context, urlsFile string, outputF
 	if t.Config != nil && t.Config.Httpx.FollowRedirects {
 		args = append(args, "-follow-redirects")
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
 	}
@@ -907,11 +950,13 @@ func (t *ToolBox) RunHttpxFetchJS(ctx context.Context, urlsFile string, download
 		"-silent",
 		"-no-fallback",
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	_, err := t.Runner.Run(ctx, "httpx", args)
 	return err
 }
@@ -1155,11 +1200,13 @@ func (t *ToolBox) RunHttpxFingerprint(ctx context.Context, inputFile string, out
 		"-tech-detect", "-json",
 		"-o", outputFile,
 	}
-	args = t.appendUAHeader(args)
-	args = t.appendTLSOpSec(args)
-	args = t.appendCustomHeaders(args, "-H")
-	args = t.appendCustomCookies(args, "-cookie")
-	args = t.appendProxy(args, "-http-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:    true,
+		tlsOpSec:    true,
+		customHFlag: "-H",
+		cookieFlag:  "-cookie",
+		proxyFlag:   "-http-proxy",
+	})
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rl", strconv.Itoa(rps))
 	}
@@ -1184,8 +1231,10 @@ func (t *ToolBox) RunNucleiWAF(ctx context.Context, inputFile string, outputFile
 		"-o", outputFile,
 	}
 
-	args = t.appendUAHeader(args)
-	args = t.appendProxy(args, "-proxy")
+	args = t.appendCommon(args, appendOptions{
+		uaHeader:  true,
+		proxyFlag: "-proxy",
+	})
 	_, err := t.Runner.Run(ctx, "nuclei", args)
 	return err
 }

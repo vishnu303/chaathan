@@ -1,6 +1,6 @@
 # Chaathan
 
-[![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
 [![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=for-the-badge&logo=sqlite)](https://sqlite.org)
 [![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux)](https://linux.org)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
@@ -13,7 +13,6 @@
 
 *   **Stateful 23-Step Wildcard Recon**: End-to-end domain discovery, HTTP probing, historical URL extraction, vulnerability auditing, and WAF fingerprinting.
 *   **Stateful 3-Step Company Discovery**: Network ASN mappings, reverse-WHOIS root enumeration, and public cloud asset discovery.
-*   **Universal WAF/CDN Origin Bypass**: Automatically maps WAF-shielded hosts, tests candidate origin IPs, and validates direct origin routing with browser-spoofed headers.
 *   **Relational Intelligence**: Stores all assets, open ports, vulnerabilities, URLs, and API endpoints in a high-speed local SQLite database.
 *   **Intelligent ROI Ranking**: Evaluates crawled endpoints to rank test targets by vulnerability density and potential ROI.
 *   **Continuous Monitoring & Diffs**: Compare scans over time to immediately isolate new subdomains, ports, or vulnerabilities.
@@ -34,10 +33,10 @@ Run these targets from the root of the cloned repository directory to compile th
 git clone https://github.com/vishnu303/chaathan.git && cd chaathan
 
 # Orchestration targets
-make all            # Installs chaathan binary and provisions all 30 tools (Recommended)
+make all            # Installs chaathan binary and provisions all 27 tools (Recommended)
 make build          # Compiles the single chaathan binary in the local directory
 make install        # Installs the compiled binary globally to /usr/local/bin
-make setup          # Provisions and compiles all 30 third-party tools
+make setup          # Provisions and compiles all 27 third-party tools
 make test           # Executes the Go unit test suite
 make vet            # Performs static analysis and code verification
 make clean          # Cleans up local compilation and build artifacts
@@ -54,7 +53,6 @@ make clean          # Cleans up local compilation and build artifacts
 | **Auto-Proxy + Stealth** | `chaathan wildcard -d target.com --auto-proxy --rate-limit 10` |
 | **Stateful Resume** | `chaathan wildcard -d target.com --resume <scan_id>` |
 | **Session-Authenticated Scan** | `chaathan wildcard -d target.com --cookie "PHPSESSID=abc; auth=1" -H "X-Client: Pro" --token "jwt_value"` |
-| **Origin IP Bypass Scan** | `chaathan wildcard -d target.com --origin-bypass` |
 | **Execution Logging** | `chaathan wildcard -d target.com --log` |
 | **Company Discovery** | `chaathan company -n "Acme Corporation"` |
 | **Company Discovery** *(Fast)* | `chaathan company -n "Acme Corporation" --skip-metabigor` |
@@ -102,8 +100,8 @@ chaathan delete list                        # Catalog and list all scans flagged
 
 # Tooling Checks & Provisioning
 chaathan setup                              # Install missing external third-party dependencies
-chaathan setup --update                     # Force rebuild and update all 30 third-party tools to latest
-chaathan tools list                         # Show categorization list of all 30 integrated engines
+chaathan setup --update                     # Force rebuild and update all 27 third-party tools to latest
+chaathan tools list                         # Show categorization list of all 27 integrated engines
 chaathan tools check                        # Perform disk audits and check binary paths for all tools
 ```
 
@@ -144,10 +142,10 @@ chaathan diff <previous_id> <latest_id>
 
 ## 📦 System Provisioning & Requirements
 
-Chaathan is packaged as a single static binary. It acts as an orchestration engine, launching and managing 30 third-party security utilities.
+Chaathan is packaged as a single static binary. It acts as an orchestration engine, launching and managing 27 third-party security utilities.
 
 > [!IMPORTANT]  
-> **Host Requirements:** Linux operating system (tested extensively on Ubuntu, Arch, and CachyOS). Go 1.21 or greater and Git must be pre-installed on the host system.
+> **Host Requirements:** Linux operating system (tested extensively on Ubuntu, Arch, and CachyOS). Go 1.26 or greater and Git must be pre-installed on the host system.
 > All external scanning engines (such as Amass, Nuclei, Httpx, Dalfox) are dynamically compiled and verified during the `make all` bootstrap process (syntax detailed in the Command Center).
 
 ---
@@ -161,14 +159,14 @@ Chaathan orchestrates complex multi-stage recon chains, consolidating raw output
 [Proxy Scraping] ──> [Asset Discovery] ──> [DNS & Port Validation] ──> [Content crawling] ──> [Vulnerability Audits] ──> [WAF Fingerprints]
 ```
 
-| Phase | Steps | Key Tools Used | Central Artifact Generated |
+| Phase | Steps | Key Tools Used | Central Artifact Generated (in `final_files/`) |
 | :--- | :--- | :--- | :--- |
-| **Phase 0: Proxy Scraping** | 1 | `mubeng` | `proxy_pool.txt` + rotating proxy server |
-| **Phase 1: Asset Discovery** | 2–6 | `subfinder`, `assetfinder`, `amass`, `uncover`, `github-subdomains` | `all_subdomains.txt` |
-| **Phase 2: Validation** | 7–11 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_hosts.txt` |
-| **Phase 3: Content Discovery** | 12–18 | `katana`, `gospider`, `waybackurls`, `gau`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls_live.txt` |
-| **Phase 4: Vulnerability Scan** | 19–22 | `nuclei` (smart CVE + DAST rules), `dalfox` (targeted XSS scanning) | Saved to SQLite (`vulnerabilities` table) |
-| **Phase 5: Fingerprinting** | 23 | `httpx`, `nuclei` | `tech_fingerprint.json` |
+| **Phase 0: Proxy Scraping** | 1 | `mubeng`, `proxy-scraper-checker` | `proxy_pool.txt` + rotating proxy server |
+| **Phase 1: Asset Discovery** | 2–6 | `subfinder`, `assetfinder`, `sublist3r`, `amass`, `uncover`, `github-subdomains`, `hakrawler` | `final_subdomains.txt` |
+| **Phase 2: Validation** | 7–11 | `dnsx`, `shuffledns`, `httpx`, `tlsx`, `naabu` | `live_subdomains.txt`, `open_ports.txt` |
+| **Phase 3: Content Discovery** | 12–18 | `waybackurls`, `gau`, `katana`, `gospider`, `GoLinkFinder`, `arjun`, `ffuf` | `all_urls.txt`, `urls_200.txt`, `gf_secrets_findings.txt` |
+| **Phase 4: Vulnerability Scan** | 19–22 | `nuclei` (infra CVE, DAST, takeovers), `dalfox` | `vulnerabilities.txt`, `vulnerabilities_critical_high.txt`, `dalfox_xss.jsonl` |
+| **Phase 5: Fingerprinting** | 23 | `httpx`, `nuclei` | `httpx_tech.json`, `nuclei_waf.json` |
 
 <details>
 <summary>🔍 Expand Detailed 23-Step Pipeline Spec</summary>
@@ -218,13 +216,6 @@ Chaathan is designed to traverse hostile, firewalled networks. It includes granu
 
 ### 🔑 Authenticated State Auditing
 Allows you to audit deeply nested authenticated application zones (private APIs, parameterized endpoints, gated directories). You can feed complex session cookies (`--cookie`), customized request headers (`-H`), and shorthand OAuth authorization tokens (`--token`) directly into Chaathan. The engine transparently parses these structures and cascades them down to sub-executables like `httpx`, `katana`, `nuclei`, and `dalfox`.
-
-### 🛰️ WAF & CDN Origin IP Bypass
-Modern web applications sit behind front-end shields like Cloudflare, Akamai, and AWS CloudFront. By specifying the `--origin-bypass` switch, Chaathan actively attempts to bypass these filters:
-1. **Host Mapping:** Compiles all subdomains currently resolving to known CDN/WAF IP ranges.
-2. **Origin Discovery:** Extracts candidate non-WAF backend IP addresses discovered during the earlier stages of the scan.
-3. **Validation Probes:** Performs rapid concurrent TLS handshake probes directly against candidate origin IPs while spoofing the target domain's `Host` header, validating if the origin serves unshielded data.
-4. **Relational Tracking:** Automatically stores any validated edge bypasses in the SQLite database and triggers real-time alerts.
 
 ### 🕴️ Complete Anonymization & Routing
 - **User-Agent Rotation:** Enabled natively by default (`ua_rotation: true` in config). Chaathan dynamically swaps standard command-line user-agent headers for authentic, rotating desktop and mobile browser signatures (Chrome, Firefox, Safari) on every request, evading signature-based blocking.

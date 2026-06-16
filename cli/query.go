@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -100,13 +99,13 @@ func init() {
 }
 
 func runQuerySubdomains(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
 	var subs []database.Subdomain
+	var err error
 
 	if queryLiveOnly {
 		subs, err = database.GetLiveSubdomains(scanID)
@@ -131,12 +130,7 @@ func runQuerySubdomains(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, err := json.MarshalIndent(subs, "", "  ")
-		if err != nil {
-			logger.Error("Failed to marshal JSON: %v", err)
-			return
-		}
-		fmt.Println(string(data))
+		writeJSONOrPrint(subs, "")
 		return
 	}
 
@@ -160,9 +154,8 @@ func runQuerySubdomains(cmd *cobra.Command, args []string) {
 }
 
 func runQueryPorts(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
@@ -173,12 +166,7 @@ func runQueryPorts(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, err := json.MarshalIndent(ports, "", "  ")
-		if err != nil {
-			logger.Error("Failed to marshal JSON: %v", err)
-			return
-		}
-		fmt.Println(string(data))
+		writeJSONOrPrint(ports, "")
 		return
 	}
 
@@ -198,13 +186,13 @@ func runQueryPorts(cmd *cobra.Command, args []string) {
 }
 
 func runQueryVulns(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
 	var vulns []database.Vulnerability
+	var err error
 
 	if querySeverity != "" {
 		vulns, err = database.GetVulnerabilitiesBySeverity(scanID, querySeverity)
@@ -218,12 +206,7 @@ func runQueryVulns(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, err := json.MarshalIndent(vulns, "", "  ")
-		if err != nil {
-			logger.Error("Failed to marshal JSON: %v", err)
-			return
-		}
-		fmt.Println(string(data))
+		writeJSONOrPrint(vulns, "")
 		return
 	}
 
@@ -255,9 +238,8 @@ func runQueryVulns(cmd *cobra.Command, args []string) {
 }
 
 func runQueryUrls(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
@@ -268,12 +250,7 @@ func runQueryUrls(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, err := json.MarshalIndent(urls, "", "  ")
-		if err != nil {
-			logger.Error("Failed to marshal JSON: %v", err)
-			return
-		}
-		fmt.Println(string(data))
+		writeJSONOrPrint(urls, "")
 		return
 	}
 
@@ -297,9 +274,8 @@ func runQueryUrls(cmd *cobra.Command, args []string) {
 }
 
 func runQueryEndpoints(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
@@ -310,12 +286,7 @@ func runQueryEndpoints(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, err := json.MarshalIndent(endpoints, "", "  ")
-		if err != nil {
-			logger.Error("Failed to marshal JSON: %v", err)
-			return
-		}
-		fmt.Println(string(data))
+		writeJSONOrPrint(endpoints, "")
 		return
 	}
 
@@ -335,9 +306,8 @@ func runQueryEndpoints(cmd *cobra.Command, args []string) {
 }
 
 func runQueryROI(cmd *cobra.Command, args []string) {
-	scanID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	scanID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
 
@@ -389,20 +359,7 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 	}
 
 	if queryOutputJSON {
-		data, err := json.MarshalIndent(targets, "", "  ")
-		if err != nil {
-			logger.Error("Failed to marshal JSON: %v", err)
-			return
-		}
-		if queryOutputFile != "" {
-			if err := os.WriteFile(queryOutputFile, data, 0644); err != nil {
-				logger.Error("Failed to write ROI output: %v", err)
-				return
-			}
-			logger.Success("ROI results saved to: %s", queryOutputFile)
-			return
-		}
-		fmt.Println(string(data))
+		writeJSONOrPrint(targets, queryOutputFile)
 		return
 	}
 
@@ -429,7 +386,7 @@ func runQueryROI(cmd *cobra.Command, args []string) {
 	w.Flush()
 
 	for _, t := range targets {
-		logger.Section(fmt.Sprintf("ROI %d (N:%d %s) - %s", t.Score, t.NormalizedScore, t.Confidence, t.URL))
+		logger.Section("ROI %d (N:%d %s) - %s", t.Score, t.NormalizedScore, t.Confidence, t.URL)
 		if t.Title != "" {
 			fmt.Printf("Title: %s\n", t.Title)
 		}

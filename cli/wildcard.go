@@ -43,7 +43,6 @@ var (
 	customCookie      string
 	customHeaders     []string
 	customToken       string
-	enableOriginBypass bool
 	autoProxy          bool
 )
 
@@ -123,7 +122,6 @@ func init() {
 	wildcardCmd.Flags().StringVar(&customCookie, "cookie", "", "Custom session cookie string (e.g. 'auth=123; PHPSESSID=abc')")
 	wildcardCmd.Flags().StringSliceVarP(&customHeaders, "header", "H", nil, "Custom request header (can be repeated, e.g. -H 'Authorization: Bearer token')")
 	wildcardCmd.Flags().StringVar(&customToken, "token", "", "Bearer token shorthand (injects 'Authorization: Bearer <token>')")
-	wildcardCmd.Flags().BoolVar(&enableOriginBypass, "origin-bypass", false, "Enable active WAF bypass Origin IP resolution check")
 	wildcardCmd.Flags().BoolVar(&autoProxy, "auto-proxy", false, "Auto-scrape free proxies, validate against target, and rotate IPs during scan")
 	wildcardCmd.MarkFlagRequired("domain")
 	rootCmd.AddCommand(wildcardCmd)
@@ -160,28 +158,18 @@ func runWildcard(cmd *cobra.Command, args []string) {
 	// Forward Ctrl+C / 's'-key to wildcard_flow.Run() which owns signal
 	// handling and stdin listener internally.
 
-	// CLI --proxy and --rate-limit override config file values
-	if proxyURL != "" && Cfg != nil {
-		Cfg.General.Proxy = proxyURL
-	}
-	if rateLimitRPS > 0 && Cfg != nil {
-		Cfg.RateLimits.GlobalRPS = rateLimitRPS
-	}
+	overrideConfigOverrides(proxyURL, rateLimitRPS)
 
 	// Resolve wordlist/resolver paths: CLI flag > config > empty (step skips)
-	wl := wordlistPath
-	if wl == "" && Cfg != nil && Cfg.General.Wordlists.Directories != "" {
-		wl = Cfg.General.Wordlists.Directories
-	}
-
-	dnsWl := dnsWordlistPath
-	if dnsWl == "" && Cfg != nil && Cfg.General.Wordlists.Subdomains != "" {
-		dnsWl = Cfg.General.Wordlists.Subdomains
-	}
-
-	resolvers := resolversPath
-	if resolvers == "" && Cfg != nil && Cfg.General.ResolversFile != "" {
-		resolvers = Cfg.General.ResolversFile
+	var wl, dnsWl, resolvers string
+	if Cfg != nil {
+		wl = resolvePath(wordlistPath, Cfg.General.Wordlists.Directories)
+		dnsWl = resolvePath(dnsWordlistPath, Cfg.General.Wordlists.Subdomains)
+		resolvers = resolvePath(resolversPath, Cfg.General.ResolversFile)
+	} else {
+		wl = wordlistPath
+		dnsWl = dnsWordlistPath
+		resolvers = resolversPath
 	}
 
 	// Build configuration and delegate to the wildcard_flow package
@@ -213,7 +201,6 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		CustomCookie:      customCookie,
 		CustomHeaders:     customHeaders,
 		CustomToken:       customToken,
-		EnableOriginBypass: enableOriginBypass,
 		AutoProxy:          autoProxy,
 	}
 

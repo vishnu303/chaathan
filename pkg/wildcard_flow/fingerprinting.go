@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,9 +22,8 @@ import (
 
 // stepFingerprinting runs httpx for tech-detect and nuclei for WAF detection.
 func stepFingerprinting(c *Ctx) bool {
-	if c.State.IsStepCompleted("tech_waf_fingerprinting") {
-		logger.StepHeader("Step 22: Technology & WAF Fingerprinting [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("tech_waf_fingerprinting", "Step 22: Technology & WAF Fingerprinting"); skipped {
+		return cancelled
 	}
 
 	if c.SkipFingerprint {
@@ -32,8 +31,6 @@ func stepFingerprinting(c *Ctx) bool {
 		c.StateMgr.MarkStepComplete(c.State, "tech_waf_fingerprinting")
 		return c.cancelled()
 	}
-
-	logger.StepHeader("Step 22: Technology & WAF Fingerprinting")
 
 	// 1. HTTPX Tech Detection
 	if utils.FileExists(c.F.HttpxLiveHosts) {
@@ -143,14 +140,7 @@ func logFingerprintSummary(c *Ctx) {
 			}
 			host := v.Host
 			// Deduplicate hosts per WAF
-			found := false
-			for _, h := range wafHosts[wafName] {
-				if h == host {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !slices.Contains(wafHosts[wafName], host) {
 				wafHosts[wafName] = append(wafHosts[wafName], host)
 			}
 		}
@@ -169,7 +159,7 @@ func logFingerprintSummary(c *Ctx) {
 			for tech := range techCounts {
 				parts = append(parts, tech)
 			}
-			sort.Strings(parts)
+			slices.Sort(parts)
 			// Print in compact groups of ~6 technologies per line for readability
 			for i := 0; i < len(parts); i += 6 {
 				end := i + 6

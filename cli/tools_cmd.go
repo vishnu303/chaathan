@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -97,9 +96,9 @@ func runToolsList(_ *cobra.Command, _ []string) {
 
 	for _, g := range groups {
 		meta := categoryStyles[g.name]
-		fmt.Printf("  %s┌─%s %s %s%s%s%s\n",
+		fmt.Printf("  %s┌─%s %s %s%s%s\n",
 			logger.Cyan, logger.Reset,
-			meta.icon, meta.color+logger.Bold, g.name, logger.Reset, "")
+			meta.icon, meta.color+logger.Bold, g.name, logger.Reset)
 
 		for _, t := range g.toolInfos {
 			req := ""
@@ -153,22 +152,16 @@ func runToolsCheck(_ *cobra.Command, _ []string) {
 	seen := map[string]int{}
 
 	for _, t := range allTools {
-		path, err := exec.LookPath(t.Name)
-		if err != nil {
-			// Also check common Python script locations
-			if t.Name == "sublist3r" || t.Name == "cloud_enum" {
-				path, err = exec.LookPath(t.Name + ".py")
-			}
-		}
+		found, path := t.CheckStatus()
 
 		result := toolResult{
 			name:     t.Name,
 			required: t.Required,
-			found:    err == nil,
+			found:    found,
 			path:     path,
 		}
 
-		if err == nil {
+		if found {
 			installed++
 		} else {
 			missing++
@@ -191,9 +184,9 @@ func runToolsCheck(_ *cobra.Command, _ []string) {
 	// Render each category
 	for _, g := range groups {
 		meta := categoryStyles[g.name]
-		fmt.Printf("\n  %s┌─%s %s %s%s%s%s\n",
+		fmt.Printf("\n  %s┌─%s %s %s%s%s\n",
 			logger.Cyan, logger.Reset,
-			meta.icon, meta.color+logger.Bold, g.name, logger.Reset, "")
+			meta.icon, meta.color+logger.Bold, g.name, logger.Reset)
 
 		for _, r := range g.results {
 			if r.found {

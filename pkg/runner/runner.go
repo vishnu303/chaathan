@@ -100,9 +100,9 @@ func retryRun(ctx context.Context, command string, maxRetries int, retryDelay ti
 	return "", lastErr
 }
 
-// ── NativeRunner ────────────────────────────────────────────────────────────
-
-func (r *NativeRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
+// executeWithRetry abstracts the option processing, per-tool timeout context creation,
+// and retry loop execution shared by both NativeRunner and DockerRunner.
+func executeWithRetry(ctx context.Context, command string, maxRetries int, retryDelay time.Duration, opts []Option, runOnceFn func(context.Context, *RunOptions) (string, error)) (string, error) {
 	options := &RunOptions{}
 	for _, o := range opts {
 		o(options)
@@ -116,7 +116,15 @@ func (r *NativeRunner) Run(ctx context.Context, command string, args []string, o
 		defer cancel()
 	}
 
-	return retryRun(runCtx, command, r.MaxRetries, r.RetryDelay, func(rCtx context.Context) (string, error) {
+	return retryRun(runCtx, command, maxRetries, retryDelay, func(rCtx context.Context) (string, error) {
+		return runOnceFn(rCtx, options)
+	})
+}
+
+// ── NativeRunner ────────────────────────────────────────────────────────────
+
+func (r *NativeRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
+	return executeWithRetry(ctx, command, r.MaxRetries, r.RetryDelay, opts, func(rCtx context.Context, options *RunOptions) (string, error) {
 		return r.runOnce(rCtx, command, args, options)
 	})
 }
@@ -167,25 +175,18 @@ func (r *NativeRunner) runOnce(ctx context.Context, command string, args []strin
 // ── DockerRunner ────────────────────────────────────────────────────────────
 
 func (r *DockerRunner) Run(ctx context.Context, command string, args []string, opts ...Option) (string, error) {
-	options := &RunOptions{}
-	for _, o := range opts {
-		o(options)
-	}
-
-	// Apply per-tool timeout if configured
-	runCtx := ctx
-	if options.Timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, options.Timeout)
-		defer cancel()
-	}
-
-	return retryRun(runCtx, command, r.MaxRetries, r.RetryDelay, func(rCtx context.Context) (string, error) {
+	return executeWithRetry(ctx, command, r.MaxRetries, r.RetryDelay, opts, func(rCtx context.Context, options *RunOptions) (string, error) {
 		return r.runOnce(rCtx, command, args, options)
 	})
 }
 
 func (r *DockerRunner) runOnce(ctx context.Context, command string, args []string, options *RunOptions) (string, error) {
+	mountDir := options.Dir
+	if mountDir == "" {
+		mountDir, _ = os.Getwd()
+	}
+	translatedArgs := translatePathsForDocker(args, mountDir)
+
 	image := getDockerImage(command)
 
 	// We do NOT use -t (tty) here because it messes up output capturing usually
@@ -195,8 +196,7 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 	if options.Dir != "" {
 		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", options.Dir))
 	} else {
-		pwd, _ := os.Getwd()
-		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", pwd))
+		dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:/data", mountDir))
 	}
 	dockerArgs = append(dockerArgs, "-w", "/data")
 
@@ -229,7 +229,7 @@ func (r *DockerRunner) runOnce(ctx context.Context, command string, args []strin
 		}
 	}
 
-	dockerArgs = append(dockerArgs, args...)
+	dockerArgs = append(dockerArgs, translatedArgs...)
 
 	cmdStr := fmt.Sprintf("DOCKER %s", strings.Join(dockerArgs, " "))
 	// Always write command to log file (file-only, no terminal noise)
@@ -375,5 +375,30 @@ func NewWithRetry(mode string, verbose bool, maxRetries int, retryDelay time.Dur
 		return &DockerRunner{Verbose: verbose, MaxRetries: maxRetries, RetryDelay: retryDelay}
 	}
 	return &NativeRunner{Verbose: verbose, MaxRetries: maxRetries, RetryDelay: retryDelay}
+}
+
+func translatePathsForDocker(args []string, hostDir string) []string {
+	if hostDir == "" {
+		return args
+	}
+	// Normalize hostDir to forward slashes for matching
+	hostDirNormalized := strings.ReplaceAll(hostDir, "\\", "/")
+	
+	translated := make([]string, len(args))
+	for i, arg := range args {
+		// Normalize arg to forward slashes for matching
+		argNormalized := strings.ReplaceAll(arg, "\\", "/")
+		
+		if len(argNormalized) >= len(hostDirNormalized) {
+			argPrefix := argNormalized[:len(hostDirNormalized)]
+			if strings.EqualFold(argPrefix, hostDirNormalized) {
+				rel := argNormalized[len(hostDirNormalized):]
+				translated[i] = "/data" + rel
+				continue
+			}
+		}
+		translated[i] = arg
+	}
+	return translated
 }
 

@@ -1,11 +1,13 @@
 package utils
 
 import (
+	"bufio"
 	"fmt"
-	"github.com/vishnu303/chaathan/pkg/database"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/vishnu303/chaathan/pkg/database"
 )
 
 // ExportResults exports all scan results to text files in the result directory
@@ -61,11 +63,13 @@ func ExportSubdomains(scanID int64, resultDir string) error {
 	}
 	defer f.Close()
 
+	w := bufio.NewWriter(f)
 	for _, s := range subs {
-		fmt.Fprintln(f, s.Domain)
+		if _, err := fmt.Fprintln(w, s.Domain); err != nil {
+			return err
+		}
 	}
-
-	return nil
+	return w.Flush()
 }
 
 // ExportLiveSubdomains exports only live subdomains.
@@ -83,15 +87,19 @@ func ExportLiveSubdomains(scanID int64, resultDir string) error {
 	}
 	defer f.Close()
 
+	w := bufio.NewWriter(f)
 	for _, s := range subs {
+		var err error
 		if s.IPAddress != "" {
-			fmt.Fprintf(f, "%s,%s\n", s.Domain, s.IPAddress)
+			_, err = fmt.Fprintf(w, "%s,%s\n", s.Domain, s.IPAddress)
 		} else {
-			fmt.Fprintln(f, s.Domain)
+			_, err = fmt.Fprintln(w, s.Domain)
+		}
+		if err != nil {
+			return err
 		}
 	}
-
-	return nil
+	return w.Flush()
 }
 
 // ExportPorts exports open ports.
@@ -109,15 +117,17 @@ func ExportPorts(scanID int64, resultDir string) error {
 	}
 	defer f.Close()
 
+	w := bufio.NewWriter(f)
 	for _, p := range ports {
 		service := p.Service
 		if service == "" {
 			service = "unknown"
 		}
-		fmt.Fprintf(f, "%s:%d (%s/%s)\n", p.Host, p.Port, p.Protocol, service)
+		if _, err := fmt.Fprintf(w, "%s:%d (%s/%s)\n", p.Host, p.Port, p.Protocol, service); err != nil {
+			return err
+		}
 	}
-
-	return nil
+	return w.Flush()
 }
 
 // ExportURLs exports discovered URLs.
@@ -137,12 +147,20 @@ func ExportURLs(scanID int64, resultDir string) error {
 	}
 	defer f.Close()
 
+	w := bufio.NewWriter(f)
 	for _, u := range urls {
+		var err error
 		if u.StatusCode > 0 {
-			fmt.Fprintf(f, "[%d] %s\n", u.StatusCode, u.URL)
+			_, err = fmt.Fprintf(w, "[%d] %s\n", u.StatusCode, u.URL)
 		} else {
-			fmt.Fprintln(f, u.URL)
+			_, err = fmt.Fprintln(w, u.URL)
 		}
+		if err != nil {
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return err
 	}
 
 	// 200 OK URLs only
@@ -153,13 +171,15 @@ func ExportURLs(scanID int64, resultDir string) error {
 	}
 	defer f200.Close()
 
+	w200 := bufio.NewWriter(f200)
 	for _, u := range urls {
 		if u.StatusCode == 200 {
-			fmt.Fprintln(f200, u.URL)
+			if _, err := fmt.Fprintln(w200, u.URL); err != nil {
+				return err
+			}
 		}
 	}
-
-	return nil
+	return w200.Flush()
 }
 
 // ExportVulnerabilities exports vulnerabilities.
@@ -179,24 +199,46 @@ func ExportVulnerabilities(scanID int64, resultDir string) error {
 	}
 	defer f.Close()
 
+	w := bufio.NewWriter(f)
 	for _, v := range vulns {
-		fmt.Fprintf(f, "================================================================================\n")
-		fmt.Fprintf(f, "[%s] %s\n", strings.ToUpper(v.Severity), v.Name)
-		fmt.Fprintf(f, "================================================================================\n")
-		fmt.Fprintf(f, "Host:     %s\n", v.Host)
+		if _, err := fmt.Fprintf(w, "================================================================================\n"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "[%s] %s\n", strings.ToUpper(v.Severity), v.Name); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "================================================================================\n"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "Host:     %s\n", v.Host); err != nil {
+			return err
+		}
 		if v.URL != "" {
-			fmt.Fprintf(f, "URL:      %s\n", v.URL)
+			if _, err := fmt.Fprintf(w, "URL:      %s\n", v.URL); err != nil {
+				return err
+			}
 		}
 		if v.TemplateID != "" {
-			fmt.Fprintf(f, "Template: %s\n", v.TemplateID)
+			if _, err := fmt.Fprintf(w, "Template: %s\n", v.TemplateID); err != nil {
+				return err
+			}
 		}
 		if v.Description != "" {
-			fmt.Fprintf(f, "Description:\n%s\n", v.Description)
+			if _, err := fmt.Fprintf(w, "Description:\n%s\n", v.Description); err != nil {
+				return err
+			}
 		}
 		if v.Evidence != "" {
-			fmt.Fprintf(f, "Evidence:\n%s\n", v.Evidence)
+			if _, err := fmt.Fprintf(w, "Evidence:\n%s\n", v.Evidence); err != nil {
+				return err
+			}
 		}
-		fmt.Fprintln(f)
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return err
 	}
 
 	// Critical and High only — compact
@@ -207,18 +249,26 @@ func ExportVulnerabilities(scanID int64, resultDir string) error {
 	}
 	defer fCritical.Close()
 
+	wCritical := bufio.NewWriter(fCritical)
 	for _, v := range vulns {
 		if v.Severity == "critical" || v.Severity == "high" {
-			fmt.Fprintf(fCritical, "[%s] %s\n", strings.ToUpper(v.Severity), v.Name)
-			fmt.Fprintf(fCritical, "  Host: %s\n", v.Host)
-			if v.URL != "" {
-				fmt.Fprintf(fCritical, "  URL:  %s\n", v.URL)
+			if _, err := fmt.Fprintf(wCritical, "[%s] %s\n", strings.ToUpper(v.Severity), v.Name); err != nil {
+				return err
 			}
-			fmt.Fprintln(fCritical)
+			if _, err := fmt.Fprintf(wCritical, "  Host: %s\n", v.Host); err != nil {
+				return err
+			}
+			if v.URL != "" {
+				if _, err := fmt.Fprintf(wCritical, "  URL:  %s\n", v.URL); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprintln(wCritical); err != nil {
+				return err
+			}
 		}
 	}
-
-	return nil
+	return wCritical.Flush()
 }
 
 // ExportEndpoints exports API endpoints.
@@ -238,15 +288,23 @@ func ExportEndpoints(scanID int64, resultDir string) error {
 	}
 	defer f.Close()
 
+	w := bufio.NewWriter(f)
 	for _, e := range endpoints {
+		var err error
 		if e.Method != "" {
-			fmt.Fprintf(f, "%s %s\n", e.Method, e.URL)
+			_, err = fmt.Fprintf(w, "%s %s\n", e.Method, e.URL)
 		} else {
-			fmt.Fprintln(f, e.URL)
+			_, err = fmt.Fprintln(w, e.URL)
+		}
+		if err != nil {
+			return err
 		}
 	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
 
-	// Interesting endpoints (API, admin, etc.)
+	// Interesting endpoints (API, admin, etc.) using package patterns
 	pathInteresting := filepath.Join(resultDir, "endpoints_interesting.txt")
 	fInteresting, err := os.Create(pathInteresting)
 	if err != nil {
@@ -254,32 +312,25 @@ func ExportEndpoints(scanID int64, resultDir string) error {
 	}
 	defer fInteresting.Close()
 
-	interestingPatterns := []string{
-		"/api/", "/v1/", "/v2/", "/v3/",
-		"/admin", "/login", "/auth",
-		"/graphql", "/rest/",
-		"/upload", "/download",
-		"/config", "/settings",
-		"/debug", "/test",
-		".json", ".xml",
-		"/swagger", "/docs",
-	}
-
+	wInteresting := bufio.NewWriter(fInteresting)
 	for _, e := range endpoints {
 		urlLower := strings.ToLower(e.URL)
-		for _, pattern := range interestingPatterns {
+		for _, pattern := range InterestingEndpointsPatterns {
 			if strings.Contains(urlLower, pattern) {
+				var err error
 				if e.Method != "" {
-					fmt.Fprintf(fInteresting, "%s %s\n", e.Method, e.URL)
+					_, err = fmt.Fprintf(wInteresting, "%s %s\n", e.Method, e.URL)
 				} else {
-					fmt.Fprintln(fInteresting, e.URL)
+					_, err = fmt.Fprintln(wInteresting, e.URL)
+				}
+				if err != nil {
+					return err
 				}
 				break
 			}
 		}
 	}
-
-	return nil
+	return wInteresting.Flush()
 }
 
 // ExportSummary creates a summary text file
@@ -296,50 +347,124 @@ func ExportSummary(scanID int64, resultDir string, target string) error {
 	}
 	defer f.Close()
 
-	fmt.Fprintln(f, "================================================================================")
-	fmt.Fprintln(f, "                        CHAATHAN SCAN SUMMARY")
-	fmt.Fprintln(f, "================================================================================")
-	fmt.Fprintf(f, "\nTarget: %s\n", target)
-	fmt.Fprintf(f, "Scan ID: %d\n\n", scanID)
+	w := bufio.NewWriter(f)
 
-	fmt.Fprintln(f, "STATISTICS")
-	fmt.Fprintln(f, "----------")
-	fmt.Fprintf(f, "Total Subdomains:    %d\n", stats.TotalSubdomains)
-	fmt.Fprintf(f, "Live Subdomains:     %d\n", stats.LiveSubdomains)
-	fmt.Fprintf(f, "Open Ports:          %d\n", stats.TotalPorts)
-	fmt.Fprintf(f, "URLs Discovered:     %d\n", stats.TotalURLs)
-	fmt.Fprintf(f, "Endpoints Found:     %d\n", stats.TotalEndpoints)
+	if _, err := fmt.Fprintln(w, "================================================================================"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "                        CHAATHAN SCAN SUMMARY"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "================================================================================"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "\nTarget: %s\n", target); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Scan ID: %d\n\n", scanID); err != nil {
+		return err
+	}
 
-	fmt.Fprintln(f, "\nVULNERABILITIES")
-	fmt.Fprintln(f, "---------------")
+	if _, err := fmt.Fprintln(w, "STATISTICS"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "----------"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Total Subdomains:    %d\n", stats.TotalSubdomains); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Live Subdomains:     %d\n", stats.LiveSubdomains); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Open Ports:          %d\n", stats.TotalPorts); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "URLs Discovered:     %d\n", stats.TotalURLs); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Endpoints Found:     %d\n", stats.TotalEndpoints); err != nil {
+		return err
+	}
+
+	if _, err := fmt.Fprintln(w, "\nVULNERABILITIES"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "---------------"); err != nil {
+		return err
+	}
 	totalVulns := 0
 	for sev, count := range stats.Vulnerabilities {
-		fmt.Fprintf(f, "%-10s: %d\n", strings.ToUpper(sev), count)
+		if _, err := fmt.Fprintf(w, "%-10s: %d\n", strings.ToUpper(sev), count); err != nil {
+			return err
+		}
 		totalVulns += count
 	}
-	fmt.Fprintf(f, "%-10s: %d\n", "TOTAL", totalVulns)
+	if _, err := fmt.Fprintf(w, "%-10s: %d\n", "TOTAL", totalVulns); err != nil {
+		return err
+	}
 
-	fmt.Fprintln(f, "\nOUTPUT FILES  (all files are inside final_files/)")
-	fmt.Fprintln(f, "------------")
-	fmt.Fprintln(f, "final_subdomains.txt              - All discovered subdomains")
-	fmt.Fprintln(f, "live_subdomains.txt               - Live/responsive subdomains (with IP)")
-	fmt.Fprintln(f, "open_ports.txt                    - Open ports (host:port proto/service)")
-	fmt.Fprintln(f, "all_urls.txt                      - All discovered URLs with status codes")
-	fmt.Fprintln(f, "urls_200.txt                      - URLs returning HTTP 200 OK")
-	fmt.Fprintln(f, "vulnerabilities.txt               - All vulnerabilities (detailed)")
-	fmt.Fprintln(f, "vulnerabilities_critical_high.txt - Critical/High severity vulns only")
-	fmt.Fprintln(f, "endpoints.txt                     - All discovered endpoints (with method)")
-	fmt.Fprintln(f, "endpoints_interesting.txt         - Interesting endpoints (API, admin, etc.)")
-	fmt.Fprintln(f, "gf_secrets_findings.txt           - JS secret and JS sink matches from downloaded JS")
-	fmt.Fprintln(f, "nuclei_vulns.json                 - Nuclei infra scan raw output")
-	fmt.Fprintln(f, "nuclei_url_vulns.json             - Nuclei URL scan raw output")
-	fmt.Fprintln(f, "dalfox_xss.jsonl                  - Dalfox XSS scan structured JSONL output")
-	fmt.Fprintln(f, "")
-	fmt.Fprintln(f, "Raw tool outputs are in intermediate_files/ (subfinder, gau, httpx, etc.)")
+	if _, err := fmt.Fprintln(w, "\nOUTPUT FILES  (all files are inside final_files/)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "------------"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "final_subdomains.txt              - All discovered subdomains"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "live_subdomains.txt               - Live/responsive subdomains (with IP)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "open_ports.txt                    - Open ports (host:port proto/service)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "all_urls.txt                      - All discovered URLs with status codes"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "urls_200.txt                      - URLs returning HTTP 200 OK"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "vulnerabilities.txt               - All vulnerabilities (detailed)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "vulnerabilities_critical_high.txt - Critical/High severity vulns only"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "endpoints.txt                     - All discovered endpoints (with method)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "endpoints_interesting.txt         - Interesting endpoints (API, admin, etc.)"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "gf_secrets_findings.txt           - JS secret and JS sink matches from downloaded JS"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "nuclei_vulns.json                 - Nuclei infra scan raw output"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "nuclei_url_vulns.json             - Nuclei URL scan raw output"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "dalfox_xss.jsonl                  - Dalfox XSS scan structured JSONL output"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, ""); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "Raw tool outputs are in intermediate_files/ (subfinder, gau, httpx, etc.)"); err != nil {
+		return err
+	}
 
-	fmt.Fprintln(f, "\n================================================================================")
-	fmt.Fprintln(f, "Generated by Chaathan - https://github.com/yourusername/chaathan")
-	fmt.Fprintln(f, "================================================================================")
+	if _, err := fmt.Fprintln(w, "\n================================================================================"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "Generated by Chaathan - https://github.com/yourusername/chaathan"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "================================================================================"); err != nil {
+		return err
+	}
 
-	return nil
+	return w.Flush()
 }

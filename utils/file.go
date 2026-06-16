@@ -4,15 +4,16 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 )
 
-// MergeAndDeduplicate reads multiple input files, merges their content,
-// deduplicates lines, sorts them, and writes to an output file.
+// MergeAndDeduplicate merges unique non-empty lines from multiple files and writes them sorted to outputFile.
 func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
-	uniqueLines := make(map[string]bool)
+	uniqueLines := make(map[string]struct{})
 
 	for _, file := range inputFiles {
 		if err := readFileInto(file, uniqueLines); err != nil {
@@ -21,39 +22,23 @@ func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
 	}
 
 	// Sort keys
-	result := make([]string, 0, len(uniqueLines))
-	for line := range uniqueLines {
-		result = append(result, line)
-	}
-	sort.Strings(result)
+	result := slices.Sorted(maps.Keys(uniqueLines))
 
-	// Write to output
-	f, err := os.Create(outputFile)
-	if err != nil {
-		return fmt.Errorf("failed to create output file %s: %w", outputFile, err)
+	// Write to output using the shared helper
+	if err := writeLines(outputFile, result); err != nil {
+		return fmt.Errorf("failed to write output file %s: %w", outputFile, err)
 	}
-	defer f.Close()
-
-	writer := bufio.NewWriter(f)
-	for _, line := range result {
-		_, err := writer.WriteString(line + "\n")
-		if err != nil {
-			return err
-		}
-	}
-	return writer.Flush()
+	return nil
 }
 
 // readFileInto reads non-empty lines from a single file into the dest map.
-// The file handle is closed when this function returns, avoiding FD leaks
-// that occur when defer is used inside a loop.
-func readFileInto(path string, dest map[string]bool) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil // missing files are silently skipped
-	}
-
+// The file handle is closed when this function returns, avoiding FD leaks.
+func readFileInto(path string, dest map[string]struct{}) error {
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // missing files are silently skipped
+		}
 		return fmt.Errorf("failed to open %s: %w", path, err)
 	}
 	defer f.Close()
@@ -62,7 +47,7 @@ func readFileInto(path string, dest map[string]bool) error {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
-			dest[line] = true
+			dest[line] = struct{}{}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -80,7 +65,8 @@ func FileExists(filename string) bool {
 	return !info.IsDir()
 }
 
-// CountFileLines returns the number of non-empty lines in a file
+// CountFileLines returns the number of non-empty lines in a file.
+// Uses allocation-free scanner.Bytes() matching to optimize performance.
 func CountFileLines(filePath string) (int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -91,20 +77,30 @@ func CountFileLines(filePath string) (int, error) {
 	count := 0
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) != "" {
+		if isNonWhitespace(scanner.Bytes()) {
 			count++
 		}
 	}
 	return count, scanner.Err()
 }
 
-// FilterFileLines reads a file, keeps only lines where keep() returns true,
-// and writes the result back in place. Empty lines are always dropped.
-func FilterFileLines(filePath string, keep func(string) bool) error {
+// isNonWhitespace returns true if the slice contains any non-whitespace characters.
+func isNonWhitespace(b []byte) bool {
+	for _, c := range b {
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			return true
+		}
+	}
+	return false
+}
+
+// readFilteredLines reads a file and returns only non-empty lines that match keep().
+func readFilteredLines(filePath string, keep func(string) bool) ([]string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer file.Close()
 
 	var kept []string
 	scanner := bufio.NewScanner(file)
@@ -115,36 +111,48 @@ func FilterFileLines(filePath string, keep func(string) bool) error {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		file.Close()
-		return err
+		return nil, err
 	}
-	file.Close()
+	return kept, nil
+}
 
+// writeLines writes a slice of strings to a file using buffered I/O.
+func writeLines(filePath string, lines []string) error {
 	f, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+
 	w := bufio.NewWriter(f)
-	for _, line := range kept {
-		w.WriteString(line)
-		w.WriteByte('\n')
+	for _, line := range lines {
+		if _, err := w.WriteString(line + "\n"); err != nil {
+			return err
+		}
 	}
 	return w.Flush()
 }
 
-// SanitizeURLFile reads a URL file, cleans each line (unescaping unicode,
-// stripping non-URL lines), and writes the result back in place.
-// This prevents downstream tools (Nuclei, Dalfox, httpx) from receiving
-// malformed URLs that contain literal \uXXXX sequences or GoSpider tags.
-func SanitizeURLFile(filePath string) error {
-	file, err := os.Open(filePath)
+// FilterFileLines reads a file, keeps only lines where keep() returns true,
+// and writes the result back in place. Empty lines are always dropped.
+func FilterFileLines(filePath string, keep func(string) bool) error {
+	kept, err := readFilteredLines(filePath, keep)
 	if err != nil {
 		return err
 	}
+	return writeLines(filePath, kept)
+}
+
+// readSanitizedURLLines reads a file and returns sanitized, distinct URLs.
+func readSanitizedURLLines(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
 	var cleaned []string
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{})
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -153,7 +161,7 @@ func SanitizeURLFile(filePath string) error {
 		}
 
 		// Unescape \\uXXXX → \uXXXX → actual character
-		line = unescapeUnicodeURL(line)
+		line = UnescapeUnicodeURL(line)
 
 		// Strip trailing backslashes left over from JS string extraction
 		line = strings.TrimRight(line, "\\")
@@ -163,37 +171,32 @@ func SanitizeURLFile(filePath string) error {
 			continue
 		}
 
-		if !seen[line] {
-			seen[line] = true
+		if _, ok := seen[line]; !ok {
+			seen[line] = struct{}{}
 			cleaned = append(cleaned, line)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		file.Close()
-		return err
+		return nil, err
 	}
-	file.Close()
+	return cleaned, nil
+}
 
-	sort.Strings(cleaned)
-	f, err := os.Create(filePath)
+// SanitizeURLFile reads a URL file, cleans each line (unescaping unicode,
+// stripping non-URL lines), and writes the result back in place.
+// This prevents downstream tools (Nuclei, Dalfox, httpx) from receiving
+// malformed URLs that contain literal \uXXXX sequences or GoSpider tags.
+func SanitizeURLFile(filePath string) error {
+	cleaned, err := readSanitizedURLLines(filePath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	for _, line := range cleaned {
-		w.WriteString(line)
-		w.WriteByte('\n')
-	}
-	return w.Flush()
+	slices.Sort(cleaned)
+	return writeLines(filePath, cleaned)
 }
 
-// unescapeUnicodeURL replaces literal \uXXXX sequences with their
-// actual characters. GoLinkFinder extracts URLs from JavaScript source
-// where & is encoded as \u0026, producing URLs like:
-//   http://example.com/?a=1\u0026b=2
-// Tools like Nuclei and Dalfox need the real & character.
-func unescapeUnicodeURL(s string) string {
+// UnescapeUnicodeURL replaces literal \uXXXX sequences with their actual characters.
+func UnescapeUnicodeURL(s string) string {
 	// Handle double-escaped \\u first
 	s = strings.ReplaceAll(s, "\\\\u", "\\u")
 
@@ -208,7 +211,7 @@ func unescapeUnicodeURL(s string) string {
 		if i+5 < len(s) && s[i] == '\\' && s[i+1] == 'u' {
 			// Try to parse 4 hex digits after \u
 			hex := s[i+2 : i+6]
-			if r, ok := parseHex4(hex); ok {
+			if r, ok := ParseHex4(hex); ok {
 				b.WriteRune(r)
 				i += 5 // skip \uXXXX (loop adds 1)
 				continue
@@ -219,35 +222,25 @@ func unescapeUnicodeURL(s string) string {
 	return b.String()
 }
 
-// parseHex4 parses exactly 4 hex digits into a rune.
-func parseHex4(s string) (rune, bool) {
+// ParseHex4 parses exactly 4 hex digits into a rune using standard library strconv.
+func ParseHex4(s string) (rune, bool) {
 	if len(s) != 4 {
 		return 0, false
 	}
-	var r rune
-	for _, c := range []byte(s) {
-		r <<= 4
-		switch {
-		case c >= '0' && c <= '9':
-			r |= rune(c - '0')
-		case c >= 'a' && c <= 'f':
-			r |= rune(c - 'a' + 10)
-		case c >= 'A' && c <= 'F':
-			r |= rune(c - 'A' + 10)
-		default:
-			return 0, false
-		}
+	val, err := strconv.ParseUint(s, 16, 16)
+	if err != nil {
+		return 0, false
 	}
-	return r, true
+	return rune(val), true
 }
 
-// DeduplicateSlice returns a unique, deduplicated slice of strings.
-func DeduplicateSlice(in []string) []string {
-	seen := make(map[string]bool)
-	var out []string
+// DeduplicateSlice returns a unique, deduplicated slice of comparable elements.
+func DeduplicateSlice[T comparable](in []T) []T {
+	seen := make(map[T]struct{}, len(in))
+	var out []T
 	for _, val := range in {
-		if !seen[val] {
-			seen[val] = true
+		if _, ok := seen[val]; !ok {
+			seen[val] = struct{}{}
 			out = append(out, val)
 		}
 	}

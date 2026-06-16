@@ -130,3 +130,16 @@ var InterestingParameters = []string{
 	"email",
 	"callback",
 }
+
+// InterestingEndpointsPatterns are path substrings used to identify high-value or sensitive API endpoints.
+var InterestingEndpointsPatterns = []string{
+	"/api/", "/v1/", "/v2/", "/v3/",
+	"/admin", "/login", "/auth",
+	"/graphql", "/rest/",
+	"/upload", "/download",
+	"/config", "/settings",
+	"/debug", "/test",
+	".json", ".xml",
+	"/swagger", "/docs",
+}
+

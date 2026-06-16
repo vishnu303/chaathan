@@ -3,92 +3,140 @@ name: chaathan-dev
 description: Use when making code changes in the Chaathan repository — CLI commands, Go package wiring, build/test flows, or any development task. Provides navigation patterns and project-specific rules.
 ---
 
-# Chaathan Dev
+# Chaathan Dev Guide
 
 ## When to use
 
-Activate this skill for any normal development work in this repository.
+Activate this skill for any normal development, feature addition, bug fixing, or CLI wiring task in this repository.
 
-## Repository shape
+## Repository Shape
 
 ```
 main.go              → paths.Init(), defer database.Close(), cli.Execute()
-cli/                 → Cobra commands, flag parsing, delegates to pkg/
-pkg/wildcard_flow/   → 23-step domain recon (6 files: proxy_scraping, asset_discovery, validation,
-                       content_discovery, vulnerability_scanning, fingerprinting)
-pkg/company_flow/    → 3-step company recon (asn_discovery, domain_discovery, cloud_enum)
-pkg/orchestrate/     → signal handling, infra bootstrap (runner + toolbox + notifier)
-pkg/database/        → SQLite persistence, queries, ROI ranking, metadata storage
-pkg/report/          → report assembly and multi-format export (md/json/html/txt)
-pkg/scan/            → scan state, resume, WildcardSteps/CompanySteps definitions
-pkg/setup/           → external tool installation (go_tools, python_tools, massdns, gf_patterns, proxy_tools)
-pkg/tools/           → tool registry (30 tools) and runtime wrappers
-pkg/proxy_scraping/   → automated proxy scraping (proxy-scraper-checker) + IP rotation (mubeng)
-pkg/runner/          → command execution, retry, docker mode, timeout, UA/proxy injection
-pkg/config/          → YAML config loading, defaults, rate limits
-pkg/metadata/        → host metadata collection (CSP, headers, tech fingerprints)
-pkg/scope/           → in/out-of-scope filtering, IP exclusion
-pkg/notify/          → Discord, Slack, Telegram, webhook notifications
-pkg/logger/          → styled terminal output, colors, scan UI headers
-pkg/progress/        → spinners and progress bars
-pkg/paths/           → centralised ~/.chaathan directory paths
-utils/               → file I/O, parsers, export helpers, validation, formatting
+cli/                 → Cobra commands, flag parsing, maps flags to RunConfig
+pkg/wildcard_flow/   → 23-step domain recon workflow (6 phases)
+pkg/company_flow/    → 3-step company recon workflow
+pkg/orchestrate/     → Signal traps, tool-runner bootstrap, notifications wiring
+pkg/database/        → SQLite models, ROI priorities, metadata schema, database actions
+pkg/report/          │ Report formatting engine (Markdown, HTML, JSON, TXT)
+pkg/scan/            → Scan states, step definitions (WildcardSteps, CompanySteps)
+pkg/setup/           → Install scripts (Go, Python, massdns compilation, proxy tools)
+pkg/tools/           → Catalog of external tools (30 tools) and execution wrappers
+pkg/proxy_scraping/   → Scraping proxy feeds and starting mubeng rotation
+pkg/runner/          → Command execution with retry limits, proxy injection, and limits
+pkg/config/          → Config YAML loading, parsing logic, rate limits
+pkg/metadata/        → WAF detection, technology headers, security parameters
+pkg/scope/           → Target parsing, inclusion/exclusion rules
+pkg/notify/          → Notifier client implementations (Discord, Slack, Telegram)
+pkg/logger/          → Formatted logging layout, UI panels, file logging triggers
+pkg/progress/        → Terminal progress animations and bars
+pkg/paths/           → Centralized config/data path management (~/.chaathan)
+utils/               → File utilities, parse maps, text writers
 ```
 
-## Default working pattern
+## Standard Development Pattern
 
-1. Read the relevant Cobra command in `cli/` first.
-2. Follow the call into the owning package in `pkg/`.
-3. Change the narrowest layer that owns the behavior.
-4. Verify with targeted Go commands before broadening scope.
+```
+                       ┌───────────────┐
+                       │  cli/*.go     │  Define command flags
+                       └───────┬───────┘
+                               │ maps to RunConfig
+                               ▼
+                       ┌───────────────┐
+                       │  flow.go      │  Initialize Context (Ctx)
+                       └───────┬───────┘
+                               │ executes step matching scan.go registry
+                               ▼
+                       ┌───────────────┐
+                       │  phase_*.go   │  Run step function
+                       └───────────────┘
+```
 
-## Common edit routes
+---
 
-| Task | Start at | Then check |
-|------|----------|------------|
-| New flag or command | `cli/*.go` | owning `pkg/` package |
-| Wildcard scan change | `cli/wildcard.go` | `pkg/wildcard_flow/flow.go` → phase file |
-| Company scan change | `cli/company.go` | `pkg/company_flow/flow.go` |
-| Query/report/export | `cli/query.go`, `cli/report.go` | `pkg/database/`, `pkg/report/`, `utils/` |
-| Tool install/setup | `cli/setup.go` | `pkg/setup/`, `pkg/tools/registry.go` |
-| Notification change | — | `pkg/notify/`, `pkg/wildcard_flow/flow.go` |
-| Config change | `cli/config.go` | `pkg/config/config.go` |
+## Standard Workflow Step Function Template
 
-## Project-specific rules
+Every step function in a workflow must follow this template strictly to maintain correct logger output, skip/resume logic, context propagation, and state machine consistency:
 
-- Extend `RunConfig`, `Ctx`, or `Files` structs — never thread long parameter lists.
-- Keep CLI → workflow → storage separation strict.
-- External tools are host dependencies; do not replace with in-process logic.
-- Keep user-visible counts accurate: 22 steps across 5 phases for wildcard, 3 steps for company.
-- Every step function must return `c.cancelled()`, never `return false`.
-- Never call `MarkStepComplete` after `MarkStepFailed` in the same error path.
-- `WildcardSteps` in `pkg/scan/scan.go` must match execution order in `flow.go`.
-- `SaveLog` (`--log` flag) mirrors scan output to `~/.chaathan/logs/<domain>_<scanID>_<timestamp>.log`. The log path is stored on `Ctx.LogFilePath` and shown in next-steps hints. Any new logging option follows the same pattern: add to `RunConfig`, open file in `Run()`, store path on `Ctx`.
+```go
+func stepExampleTool(c *Ctx) bool {
+	stepName := "example_step"
+	stepHeader := "Phase X: Running Example Step"
 
-## Validation
+	// 1. Check for scan resume state or skip condition
+	if resume, skip := c.resumeOrSkip(stepName, stepHeader); skip {
+		return resume
+	}
 
+	// 2. Initialize step execution
+	logger.Info("Starting example tool execution...")
+	
+	// Prepare input file path
+	inputPath := c.F.LiveHosts
+	outputPath := c.F.ExampleToolOut
+
+	// 3. Invoke external tool through wrapper
+	err := c.Tb.RunExampleTool(c.GoCtx, inputPath, outputPath)
+	if err != nil {
+		logger.Error("Example tool failed: %v", err)
+		c.StateMgr.MarkStepFailed(c.State, stepName, err)
+		// Return c.cancelled() instead of hardcoded false to allow graceful exits on signals
+		return c.cancelled()
+	}
+
+	// 4. Save results to Database if needed
+	if err := database.SaveExampleFindings(c.ScanID, outputPath); err != nil {
+		logger.Warning("Failed to persist findings: %v", err)
+	}
+
+	// 5. Finalize step state (clears failed steps, sets completion flag)
+	return c.markStepCompleteIfNoFailure(stepName)
+}
+```
+
+---
+
+## Technical Development Rules
+
+1. **Step Registries Alignment:** The step list in `pkg/scan/scan.go` (e.g., `WildcardSteps`) must match the execution order in `pkg/wildcard_flow/flow.go` exactly.
+2. **Step Counts:**
+   - **Wildcard Scan:** Exactly **23 steps across 6 phases (Phases 0 to 5)**.
+   - **Company Scan:** Exactly **3 steps**.
+3. **No Short-Circuit Returns:** Step functions must never return hardcoded `false` on failure. Always log the error, register the failure via `MarkStepFailed`, and return `c.cancelled()`.
+4. **CLI Flag Propagation:**
+   - Flags defined in `cli/` are bound to variables.
+   - Transfer these variables to `RunConfig` in the `Run` call.
+   - Access config parameters within step files via the embedded `Ctx` (e.g., `c.SkipAmass`).
+5. **Logs Redirection:** If `--log` is supplied, logs are written to `~/.chaathan/logs/<domain>_<scanID>_<timestamp>.log`. Ensure any custom logs redirect through `logger.Info` or `logger.Write` to mirror them correctly.
+
+---
+
+## Validation Procedures
+
+Run all tests, lints, and builds inside the WSL environment if developing on a Windows machine.
+
+### WSL Test Pipeline:
 ```bash
-go test ./...       # all tests
-go vet ./...        # static analysis
-go build -buildvcs=false -o chaathan .  # build check
+# Verify unit tests
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go test ./..."
+
+# Run static checks
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go vet ./..."
+
+# Build application binary
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && go build -buildvcs=false -o chaathan ."
 ```
 
-If developing on Windows, use WSL for all commands:
+### Manual CLI Verification:
 ```bash
-wsl go test ./...       # all tests
-wsl go vet ./...        # static analysis
-wsl go build -buildvcs=false -o chaathan .  # build check
+# Check syntax / help texts
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan --help"
+wsl bash -i -c "cd /mnt/c/Users/vishn/desktop/chaathan && ./chaathan wildcard --help"
 ```
 
-If CLI wiring changed:
-```bash
-./chaathan --help
-./chaathan <subcommand> --help
-# On Windows, prefix with wsl: wsl ./chaathan --help
-```
+## Anti-patterns to Avoid
 
-## Avoid
-
-- Do not hardcode machine-specific paths (except intentional defaults like `~/` or `/usr/local/bin`).
-- Do not introduce destructive cleanup of user scan data unless the task explicitly concerns deletion.
-- Do not move business logic into README examples or shell scripts.
+- Writing inline bash or python runner scripts inside `cli/` or workflows.
+- Bypassing the `paths` package to hardcode `/home/user/` or `C:\` configurations.
+- Using `os.Exit()` inside packages. Only `main.go` and Cobra commands may call `os.Exit()`.
+- Mutating public API schemas in `pkg/database/` without validating report engines.

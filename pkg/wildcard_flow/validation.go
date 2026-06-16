@@ -28,11 +28,9 @@ import (
 // stepDNSConsolidation merges all passive sources and resolves them with DNSx.
 // Returns true if the scan should be cancelled.
 func stepDNSConsolidation(c *Ctx) bool {
-	if c.State.IsStepCompleted("dns_resolution") {
-		logger.StepHeader("Step 6: Consolidation & DNS Resolution [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("dns_resolution", "Step 6: Consolidation & DNS Resolution"); skipped {
+		return cancelled
 	}
-	logger.StepHeader("Step 6: Consolidating Subdomains")
 	writeEmptyFile(c.F.DnsxOut)
 
 	passiveSources := existingFiles(
@@ -108,17 +106,7 @@ func stepDNSConsolidation(c *Ctx) bool {
 		}
 	}
 
-	// Only mark complete if not failed
-	hasFailure := false
-	for _, fs := range c.State.FailedSteps {
-		if fs.Name == "dns_resolution" {
-			hasFailure = true
-			break
-		}
-	}
-	if !hasFailure {
-		c.StateMgr.MarkStepComplete(c.State, "dns_resolution")
-	}
+	c.markStepCompleteIfNoFailure("dns_resolution")
 	return c.cancelled()
 }
 
@@ -129,88 +117,85 @@ func stepDNSConsolidation(c *Ctx) bool {
 // stepDNSBruteforce runs ShuffleDNS when a dns-wordlist is provided.
 // Returns true if the scan should be cancelled.
 func stepDNSBruteforce(c *Ctx) bool {
-	if c.State.IsStepCompleted("dns_bruteforce") {
-		logger.StepHeader("Step 7: DNS Brute-force (ShuffleDNS) [RESUMED — skipping]")
-	} else if !c.SkipShuffleDNS && c.DNSWordlistPath != "" {
-		logger.StepHeader("Step 7: DNS Brute-force (ShuffleDNS)")
-		writeEmptyFile(c.F.ShufflednsOut)
-
-		// Validate DNS wordlist exists (may be a default config path like seclists)
-		if !utils.FileExists(c.DNSWordlistPath) {
-			logger.Warning("DNS wordlist not found: %s", c.DNSWordlistPath)
-			logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --dns-wordlist path")
-			logger.FileDebug("shuffledns skipped: wordlist does not exist at %s", c.DNSWordlistPath)
-			c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
-		} else if c.ResolversPath != "" && !utils.FileExists(c.ResolversPath) {
-			// Resolvers file was explicitly provided but doesn't exist
-			logger.Warning("Resolvers file not found: %s", c.ResolversPath)
-			logger.Info("  Provide a valid --resolvers file path")
-			logger.FileDebug("shuffledns skipped: resolvers file does not exist at %s", c.ResolversPath)
-			c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
-		} else {
-			logger.SubStep("Running ShuffleDNS with wordlist: %s", c.DNSWordlistPath)
-			logger.FileDebug("shuffledns input: domain=%s wordlist=%s resolvers=%s out=%s",
-				c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
-
-			var shufflednsSkipped bool
-			if err := runWithSkip(c, "shuffledns", func(sCtx context.Context) error {
-				return c.Tb.RunShuffleDNS(sCtx, c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
-			}); err != nil {
-				if err == ErrToolSkipped {
-					shufflednsSkipped = true
-				} else {
-					c.StateMgr.MarkStepFailed(c.State, "dns_bruteforce", err)
-					logger.Warning("ShuffleDNS failed: %v", err)
-				}
-			} else {
-				// Merge brute-forced subs back into the consolidated list
-				utils.MergeAndDeduplicate(
-					[]string{c.F.ConsolidatedSubs, c.F.ShufflednsOut},
-					c.F.ConsolidatedSubs,
-				)
-				if merged, _ := utils.CountFileLines(c.F.ConsolidatedSubs); merged > 0 {
-					logger.FileDebug("consolidated subs after shuffledns merge: %d", merged)
-				}
-			}
-
-			if c.ScanID > 0 && utils.FileExists(c.F.ShufflednsOut) {
-				count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.ShufflednsOut, "shuffledns")
-				if count > 0 {
-					label := ""
-					if shufflednsSkipped {
-						label = " (partial)"
-					}
-					logger.Info("  Found %d subdomains via DNS brute-force%s", count, label)
-					logger.FileDebug("shuffledns output: %d subdomains -> %s", count, c.F.ShufflednsOut)
-				} else if shufflednsSkipped {
-					logger.Info("  ShuffleDNS skipped — no subdomains found")
-				} else {
-					logger.Info("  Found 0 subdomains via DNS brute-force")
-				}
-			}
-
-			// Only mark complete if not failed
-			hasFailure := false
-			for _, fs := range c.State.FailedSteps {
-				if fs.Name == "dns_bruteforce" {
-					hasFailure = true
-					break
-				}
-			}
-			if !hasFailure {
-				c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
-			}
-		}
-	} else if c.SkipShuffleDNS {
-		logger.StepHeader("Step 7: Skipping ShuffleDNS (--skip-shuffledns)")
-		logger.FileDebug("shuffledns skipped via --skip-shuffledns flag")
-		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
-	} else {
-		logger.StepHeader("Step 7: Skipping ShuffleDNS (no --dns-wordlist provided)")
-		logger.Info("Use --dns-wordlist to enable DNS brute-force")
-		logger.FileDebug("shuffledns skipped: no --dns-wordlist provided")
-		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
+	if skipped, cancelled := c.resumeOrSkip("dns_bruteforce", "Step 7: DNS Brute-force (ShuffleDNS)"); skipped {
+		return cancelled
 	}
+
+	if c.SkipShuffleDNS || c.DNSWordlistPath == "" {
+		if c.SkipShuffleDNS {
+			logger.StepHeader("Step 7: Skipping ShuffleDNS (--skip-shuffledns)")
+			logger.FileDebug("shuffledns skipped via --skip-shuffledns flag")
+		} else {
+			logger.StepHeader("Step 7: Skipping ShuffleDNS (no --dns-wordlist provided)")
+			logger.Info("Use --dns-wordlist to enable DNS brute-force")
+			logger.FileDebug("shuffledns skipped: no --dns-wordlist provided")
+		}
+		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
+		return c.cancelled()
+	}
+
+	writeEmptyFile(c.F.ShufflednsOut)
+
+	// Validate DNS wordlist exists (may be a default config path like seclists)
+	if !utils.FileExists(c.DNSWordlistPath) {
+		logger.Warning("DNS wordlist not found: %s", c.DNSWordlistPath)
+		logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --dns-wordlist path")
+		logger.FileDebug("shuffledns skipped: wordlist does not exist at %s", c.DNSWordlistPath)
+		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
+		return c.cancelled()
+	}
+
+	if c.ResolversPath != "" && !utils.FileExists(c.ResolversPath) {
+		// Resolvers file was explicitly provided but doesn't exist
+		logger.Warning("Resolvers file not found: %s", c.ResolversPath)
+		logger.Info("  Provide a valid --resolvers file path")
+		logger.FileDebug("shuffledns skipped: resolvers file does not exist at %s", c.ResolversPath)
+		c.StateMgr.MarkStepComplete(c.State, "dns_bruteforce")
+		return c.cancelled()
+	}
+
+	logger.SubStep("Running ShuffleDNS with wordlist: %s", c.DNSWordlistPath)
+	logger.FileDebug("shuffledns input: domain=%s wordlist=%s resolvers=%s out=%s",
+		c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
+
+	var shufflednsSkipped bool
+	if err := runWithSkip(c, "shuffledns", func(sCtx context.Context) error {
+		return c.Tb.RunShuffleDNS(sCtx, c.Domain, c.DNSWordlistPath, c.ResolversPath, c.F.ShufflednsOut)
+	}); err != nil {
+		if err == ErrToolSkipped {
+			shufflednsSkipped = true
+		} else {
+			c.StateMgr.MarkStepFailed(c.State, "dns_bruteforce", err)
+			logger.Warning("ShuffleDNS failed: %v", err)
+		}
+	} else {
+		// Merge brute-forced subs back into the consolidated list
+		utils.MergeAndDeduplicate(
+			[]string{c.F.ConsolidatedSubs, c.F.ShufflednsOut},
+			c.F.ConsolidatedSubs,
+		)
+		if merged, _ := utils.CountFileLines(c.F.ConsolidatedSubs); merged > 0 {
+			logger.FileDebug("consolidated subs after shuffledns merge: %d", merged)
+		}
+	}
+
+	if c.ScanID > 0 && utils.FileExists(c.F.ShufflednsOut) {
+		count, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.ShufflednsOut, "shuffledns")
+		if count > 0 {
+			label := ""
+			if shufflednsSkipped {
+				label = " (partial)"
+			}
+			logger.Info("  Found %d subdomains via DNS brute-force%s", count, label)
+			logger.FileDebug("shuffledns output: %d subdomains -> %s", count, c.F.ShufflednsOut)
+		} else if shufflednsSkipped {
+			logger.Info("  ShuffleDNS skipped — no subdomains found")
+		} else {
+			logger.Info("  Found 0 subdomains via DNS brute-force")
+		}
+	}
+
+	c.markStepCompleteIfNoFailure("dns_bruteforce")
 	return c.cancelled()
 }
 
@@ -221,11 +206,9 @@ func stepDNSBruteforce(c *Ctx) bool {
 // stepHTTPProbing probes all consolidated subdomains with Httpx.
 // Returns true if the scan should be cancelled.
 func stepHTTPProbing(c *Ctx) bool {
-	if c.State.IsStepCompleted("http_probing") {
-		logger.StepHeader("Step 8: Live Web Server Probing [RESUMED — skipping]")
-		return c.cancelled()
+	if skipped, cancelled := c.resumeOrSkip("http_probing", "Step 8: Live Web Server Probing"); skipped {
+		return cancelled
 	}
-	logger.StepHeader("Step 8: Live Web Server Probing")
 	writeEmptyFile(c.F.HttpxOut)
 	writeEmptyFile(c.F.HttpxLiveHosts)
 	logger.SubStep("Running Httpx...")
@@ -244,6 +227,10 @@ func stepHTTPProbing(c *Ctx) bool {
 		}
 	}
 
+	if utils.FileExists(c.F.HttpxOut) {
+		collectLiveHostTargetsFromHttpx(c.F.HttpxOut, c.F.HttpxLiveHosts)
+	}
+
 	if c.ScanID > 0 && utils.FileExists(c.F.HttpxOut) {
 		count, _ := utils.ParseHttpxOutput(c.ScanID, c.F.HttpxOut)
 		if count > 0 {
@@ -260,28 +247,7 @@ func stepHTTPProbing(c *Ctx) bool {
 		}
 	}
 
-	// Trigger active WAF bypass Origin IP resolution
-	if err := runWithSkip(c, "WAF Origin IP Bypass", func(sCtx context.Context) error {
-		return RunOriginIPBypass(sCtx, c)
-	}); err != nil {
-		if err == ErrToolSkipped {
-			// Logged internally by runWithSkip
-		} else {
-			logger.Warning("WAF Origin IP Bypass failed: %v", err)
-		}
-	}
-
-	// Only mark complete if not failed
-	hasFailure := false
-	for _, fs := range c.State.FailedSteps {
-		if fs.Name == "http_probing" {
-			hasFailure = true
-			break
-		}
-	}
-	if !hasFailure {
-		c.StateMgr.MarkStepComplete(c.State, "http_probing")
-	}
+	c.markStepCompleteIfNoFailure("http_probing")
 	return c.cancelled()
 }
 
@@ -292,10 +258,14 @@ func stepHTTPProbing(c *Ctx) bool {
 // stepTLSAnalysis examines TLS certificates and enriches host metadata.
 // Returns true if the scan should be cancelled.
 func stepTLSAnalysis(c *Ctx) bool {
-	if c.State.IsStepCompleted("tls_analysis") {
-		logger.StepHeader("Step 9: TLS Certificate Analysis (tlsx) [RESUMED — skipping]")
-	} else if !c.SkipTlsx {
-		logger.StepHeader("Step 9: TLS Certificate Analysis (tlsx)")
+	if skipped, cancelled := c.resumeOrSkip("tls_analysis", "Step 9: TLS Certificate Analysis (tlsx)"); skipped {
+		return cancelled
+	}
+
+	if c.SkipTlsx {
+		logger.StepHeader("Step 9: Skipping tlsx (--skip-tlsx)")
+		c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
+	} else {
 		writeEmptyFile(c.F.TlsxOut)
 		logger.SubStep("Running tlsx — extracting SANs and checking cert issues...")
 		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
@@ -333,20 +303,7 @@ func stepTLSAnalysis(c *Ctx) bool {
 			}
 		}
 
-		// Only mark complete if not failed
-		hasFailure := false
-		for _, fs := range c.State.FailedSteps {
-			if fs.Name == "tls_analysis" {
-				hasFailure = true
-				break
-			}
-		}
-		if !hasFailure {
-			c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
-		}
-	} else {
-		logger.StepHeader("Step 9: Skipping tlsx (--skip-tlsx)")
-		c.StateMgr.MarkStepComplete(c.State, "tls_analysis")
+		c.markStepCompleteIfNoFailure("tls_analysis")
 	}
 
 	// Host metadata enrichment (always attempted after step 9)
@@ -381,10 +338,14 @@ func stepTLSAnalysis(c *Ctx) bool {
 // stepPortScanning runs Naabu against all discovered subdomains.
 // Returns true if the scan should be cancelled.
 func stepPortScanning(c *Ctx) bool {
-	if c.State.IsStepCompleted("port_scanning") {
-		logger.StepHeader("Step 10: Port Scanning [RESUMED — skipping]")
-	} else if !c.SkipNaabu {
-		logger.StepHeader("Step 10: Port Scanning")
+	if skipped, cancelled := c.resumeOrSkip("port_scanning", "Step 10: Port Scanning"); skipped {
+		return cancelled
+	}
+
+	if c.SkipNaabu {
+		logger.StepHeader("Step 10: Skipping Naabu (--skip-naabu)")
+		c.StateMgr.MarkStepComplete(c.State, "port_scanning")
+	} else {
 		writeEmptyFile(c.F.NaabuOut)
 		logger.SubStep("Running Naabu on all discovered subdomains...")
 		inputCount, _ := utils.CountFileLines(c.F.ConsolidatedSubs)
@@ -417,20 +378,7 @@ func stepPortScanning(c *Ctx) bool {
 			}
 		}
 
-		// Only mark complete if not failed
-		hasFailure := false
-		for _, fs := range c.State.FailedSteps {
-			if fs.Name == "port_scanning" {
-				hasFailure = true
-				break
-			}
-		}
-		if !hasFailure {
-			c.StateMgr.MarkStepComplete(c.State, "port_scanning")
-		}
-	} else {
-		logger.StepHeader("Step 10: Skipping Naabu (--skip-naabu)")
-		c.StateMgr.MarkStepComplete(c.State, "port_scanning")
+		c.markStepCompleteIfNoFailure("port_scanning")
 	}
 	return c.cancelled()
 }

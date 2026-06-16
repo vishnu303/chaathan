@@ -111,7 +111,7 @@ func NewManager(stateDir string) *Manager {
 }
 
 // CreateState creates a new scan state
-func (m *Manager) CreateState(scanID int64, target, scanType, resultDir string, totalSteps int, cfg interface{}) (*State, error) {
+func (m *Manager) CreateState(scanID int64, target, scanType, resultDir string, totalSteps int, cfg any) (*State, error) {
 	configData, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
@@ -175,10 +175,8 @@ func (m *Manager) MarkStepComplete(state *State, stepName string) error {
 	}
 
 	// Avoid double-counting steps (common when resume/skip paths re-mark).
-	for _, s := range state.CompletedSteps {
-		if s == stepName {
-			return m.UpdateState(state)
-		}
+	if state.IsStepCompleted(stepName) {
+		return m.UpdateState(state)
 	}
 	state.CompletedSteps = append(state.CompletedSteps, stepName)
 	// Keep CurrentStep aligned to the number of unique completed steps.

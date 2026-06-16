@@ -78,7 +78,6 @@ type RunConfig struct {
 	CustomCookie       string
 	CustomHeaders      []string
 	CustomToken        string
-	EnableOriginBypass bool
 
 	// Proxy automation
 	AutoProxy bool
@@ -240,9 +239,10 @@ type Ctx struct {
 	LogFilePath string
 
 	// Proxy rotation
-	Rotator          *proxy_scraping.Rotator // mubeng background process (nil if not using auto-proxy)
-	ProxyTotalScraped int                    // total proxies found during fetch phase
-	ProxyTotalValid   int                    // proxies that passed target domain validation
+	Rotator            *proxy_scraping.Rotator // mubeng background process (nil if not using auto-proxy)
+	ProxyTotalScraped  int                    // total proxies found during fetch phase
+	ProxyTotalValid    int                    // proxies that passed target domain validation
+	LastActivePhase    int                    // tracks the last phase (1-5) for which proxies were scraped/checked
 
 	// Findings
 	FfufTotalFindings int // total valid fuzzing discoveries
@@ -305,7 +305,7 @@ func Run(cfg RunConfig) error {
 	}()
 
 	// ── Database record ──────────────────────────────────────
-	configJSON, _ := json.Marshal(map[string]interface{}{
+	configJSON, _ := json.Marshal(map[string]any{
 		"skip_amass":         cfg.SkipAmass,
 		"skip_nuclei":        cfg.SkipNuclei,
 		"skip_naabu":         cfg.SkipNaabu,
@@ -380,6 +380,7 @@ func Run(cfg RunConfig) error {
 	}
 	authHeaders = append(authHeaders, cfg.CustomHeaders...)
 	infra.ToolBox.WithCustomAuth(cfg.CustomCookie, authHeaders)
+	infra.ToolBox.WithResultDir(cfg.ResultDir)
 
 	// ── Ensure output subdirectories exist ───────────────────
 	if err := os.MkdirAll(filepath.Join(cfg.ResultDir, "intermediate_files"), 0755); err != nil {
@@ -404,6 +405,7 @@ func Run(cfg RunConfig) error {
 		F:                  newFiles(cfg.ResultDir),
 		NotifyStepComplete: cfg.Cfg != nil && cfg.Cfg.Notifications.StepComplete,
 		LogFilePath:        logFilePath,
+		LastActivePhase:    -1,
 	}
 
 	// Wire proxy from config
@@ -477,6 +479,7 @@ func Run(cfg RunConfig) error {
 	}
 
 	for _, step := range steps {
+		c.ensureProxyForPhase(step.name)
 		if executeStep(c, step.name, step.fn) {
 			finalizeScan(c, "cancelled")
 			return nil

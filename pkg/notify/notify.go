@@ -14,6 +14,46 @@ import (
 	"github.com/vishnu303/chaathan/pkg/config"
 )
 
+var telegramEscaper = strings.NewReplacer(
+	"_", "\\_",
+	"*", "\\*",
+	"[", "\\[",
+	"]", "\\]",
+	"`", "\\`",
+	"~", "\\~",
+	">", "\\>",
+	"#", "\\#",
+	"+", "\\+",
+	"-", "\\-",
+	"=", "\\=",
+	"|", "\\|",
+	"{", "\\{",
+	"}", "\\}",
+	".", "\\.",
+	"!", "\\!",
+	"(", "\\(",
+	")", "\\)",
+)
+
+// GetOrderedStatsKeys returns the stats keys ordered by preference for display.
+func GetOrderedStatsKeys(stats map[string]int) []string {
+	preferred := []string{"subdomains", "live", "urls", "endpoints", "ports", "vulnerabilities"}
+	var keys []string
+	seen := make(map[string]bool)
+	for _, k := range preferred {
+		if _, ok := stats[k]; ok {
+			keys = append(keys, k)
+			seen[k] = true
+		}
+	}
+	for k := range stats {
+		if !seen[k] {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 // Severity levels for comparison
 var severityLevels = map[string]int{
 	"info":     1,
@@ -67,7 +107,7 @@ type Notifier struct {
 	// notification attempt (sent, succeeded, failed). The workflow layer
 	// wires this to logger.FileDebug so entries appear in --log files
 	// without pkg/notify depending on pkg/logger.
-	LogFunc func(format string, args ...interface{})
+	LogFunc func(format string, args ...any)
 }
 
 // New creates a new Notifier
@@ -81,7 +121,7 @@ func New(cfg *config.NotificationConfig) *Notifier {
 }
 
 // logf writes to LogFunc if set.
-func (n *Notifier) logf(format string, args ...interface{}) {
+func (n *Notifier) logf(format string, args ...any) {
 	if n.LogFunc != nil {
 		n.LogFunc(format, args...)
 	}
@@ -267,11 +307,11 @@ func (n *Notifier) SendStepComplete(step StepComplete) error {
 func (n *Notifier) sendDiscord(finding Finding) error {
 	color := getDiscordColor(finding.Severity)
 
-	embed := map[string]interface{}{
+	embed := map[string]any{
 		"title":       fmt.Sprintf("[%s] %s", strings.ToUpper(finding.Severity), finding.Name),
 		"description": finding.Description,
 		"color":       color,
-		"fields": []map[string]interface{}{
+		"fields": []map[string]any{
 			{"name": "Target", "value": finding.Target, "inline": true},
 			{"name": "Type", "value": finding.Type, "inline": true},
 		},
@@ -283,35 +323,35 @@ func (n *Notifier) sendDiscord(finding Finding) error {
 
 	if finding.URL != "" {
 		embed["url"] = finding.URL
-		embed["fields"] = append(embed["fields"].([]map[string]interface{}),
-			map[string]interface{}{"name": "URL", "value": finding.URL, "inline": false})
+		embed["fields"] = append(embed["fields"].([]map[string]any),
+			map[string]any{"name": "URL", "value": finding.URL, "inline": false})
 	}
 
 	if finding.TemplateID != "" {
-		embed["fields"] = append(embed["fields"].([]map[string]interface{}),
-			map[string]interface{}{"name": "Template", "value": finding.TemplateID, "inline": true})
+		embed["fields"] = append(embed["fields"].([]map[string]any),
+			map[string]any{"name": "Template", "value": finding.TemplateID, "inline": true})
 	}
 
-	payload := map[string]interface{}{
-		"embeds": []map[string]interface{}{embed},
+	payload := map[string]any{
+		"embeds": []map[string]any{embed},
 	}
 
 	return n.postJSON(n.cfg.DiscordWebhook, payload)
 }
 
 func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"name": "Target", "value": scan.Target, "inline": true},
 		{"name": "Duration", "value": scan.Duration.String(), "inline": true},
 	}
 
-	for k, v := range scan.Stats {
-		fields = append(fields, map[string]interface{}{
-			"name": k, "value": fmt.Sprintf("%d", v), "inline": true,
+	for _, k := range GetOrderedStatsKeys(scan.Stats) {
+		fields = append(fields, map[string]any{
+			"name": TitleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "inline": true,
 		})
 	}
 
-	embed := map[string]interface{}{
+	embed := map[string]any{
 		"title":       "Scan Completed",
 		"description": fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target),
 		"color":       0x00FF00, // Green
@@ -321,15 +361,15 @@ func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
 		},
 	}
 
-	payload := map[string]interface{}{
-		"embeds": []map[string]interface{}{embed},
+	payload := map[string]any{
+		"embeds": []map[string]any{embed},
 	}
 
 	return n.postJSON(n.cfg.DiscordWebhook, payload)
 }
 
 func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"name": "Target", "value": step.Target, "inline": true},
 		{"name": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "inline": true},
 		{"name": "Duration", "value": step.Duration.String(), "inline": true},
@@ -337,12 +377,12 @@ func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
 	}
 
 	if step.ScanType != "" {
-		fields = append(fields, map[string]interface{}{
+		fields = append(fields, map[string]any{
 			"name": "Scan Type", "value": step.ScanType, "inline": true,
 		})
 	}
 
-	embed := map[string]interface{}{
+	embed := map[string]any{
 		"title":       "Step Completed",
 		"description": formatStepLabel(step),
 		"color":       0x0099FF,
@@ -353,8 +393,8 @@ func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
 		},
 	}
 
-	payload := map[string]interface{}{
-		"embeds": []map[string]interface{}{embed},
+	payload := map[string]any{
+		"embeds": []map[string]any{embed},
 	}
 
 	return n.postJSON(n.cfg.DiscordWebhook, payload)
@@ -364,11 +404,11 @@ func (n *Notifier) sendDiscordStepComplete(step StepComplete) error {
 func (n *Notifier) sendSlack(finding Finding) error {
 	color := getSlackColor(finding.Severity)
 
-	attachment := map[string]interface{}{
+	attachment := map[string]any{
 		"color": color,
 		"title": fmt.Sprintf("[%s] %s", strings.ToUpper(finding.Severity), finding.Name),
 		"text":  finding.Description,
-		"fields": []map[string]interface{}{
+		"fields": []map[string]any{
 			{"title": "Target", "value": finding.Target, "short": true},
 			{"title": "Type", "value": finding.Type, "short": true},
 		},
@@ -380,26 +420,26 @@ func (n *Notifier) sendSlack(finding Finding) error {
 		attachment["title_link"] = finding.URL
 	}
 
-	payload := map[string]interface{}{
-		"attachments": []map[string]interface{}{attachment},
+	payload := map[string]any{
+		"attachments": []map[string]any{attachment},
 	}
 
 	return n.postJSON(n.cfg.SlackWebhook, payload)
 }
 
 func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"title": "Target", "value": scan.Target, "short": true},
 		{"title": "Duration", "value": scan.Duration.String(), "short": true},
 	}
 
-	for k, v := range scan.Stats {
-		fields = append(fields, map[string]interface{}{
-			"title": k, "value": fmt.Sprintf("%d", v), "short": true,
+	for _, k := range GetOrderedStatsKeys(scan.Stats) {
+		fields = append(fields, map[string]any{
+			"title": TitleCase(k), "value": fmt.Sprintf("%d", scan.Stats[k]), "short": true,
 		})
 	}
 
-	attachment := map[string]interface{}{
+	attachment := map[string]any{
 		"color":  "good",
 		"title":  "Scan Completed",
 		"text":   fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target),
@@ -407,15 +447,15 @@ func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
 		"footer": "Chaathan Security Scanner",
 	}
 
-	payload := map[string]interface{}{
-		"attachments": []map[string]interface{}{attachment},
+	payload := map[string]any{
+		"attachments": []map[string]any{attachment},
 	}
 
 	return n.postJSON(n.cfg.SlackWebhook, payload)
 }
 
 func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{"title": "Target", "value": step.Target, "short": true},
 		{"title": "Step", "value": fmt.Sprintf("%d/%d", step.StepNumber, step.TotalSteps), "short": true},
 		{"title": "Duration", "value": step.Duration.String(), "short": true},
@@ -423,12 +463,12 @@ func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
 	}
 
 	if step.ScanType != "" {
-		fields = append(fields, map[string]interface{}{
+		fields = append(fields, map[string]any{
 			"title": "Scan Type", "value": step.ScanType, "short": true,
 		})
 	}
 
-	attachment := map[string]interface{}{
+	attachment := map[string]any{
 		"color":  "#0099FF",
 		"title":  "Step Completed",
 		"text":   formatStepLabel(step),
@@ -437,8 +477,8 @@ func (n *Notifier) sendSlackStepComplete(step StepComplete) error {
 		"ts":     step.Timestamp.Unix(),
 	}
 
-	payload := map[string]interface{}{
-		"attachments": []map[string]interface{}{attachment},
+	payload := map[string]any{
+		"attachments": []map[string]any{attachment},
 	}
 
 	return n.postJSON(n.cfg.SlackWebhook, payload)
@@ -456,22 +496,22 @@ func (n *Notifier) sendTelegram(finding Finding) error {
 			"━━━━━━━━━━━━━━━━━━━━\n"+
 			"🎯 *Target*    %s\n"+
 			"🔖 *Type*    %s",
-		header, escapeMarkdown(sev),
-		sev, escapeMarkdown(finding.Name),
-		escapeMarkdown(finding.Target),
-		escapeMarkdown(finding.Type),
+		header, EscapeMarkdown(sev),
+		sev, EscapeMarkdown(finding.Name),
+		EscapeMarkdown(finding.Target),
+		EscapeMarkdown(finding.Type),
 	)
 
 	if finding.Description != "" {
-		text += fmt.Sprintf("\n📝 *Details*    %s", escapeMarkdown(finding.Description))
+		text += fmt.Sprintf("\n📝 *Details*    %s", EscapeMarkdown(finding.Description))
 	}
 
 	if finding.URL != "" {
-		text += fmt.Sprintf("\n🔗 *URL*    %s", escapeMarkdown(finding.URL))
+		text += fmt.Sprintf("\n🔗 *URL*    %s", EscapeMarkdown(finding.URL))
 	}
 
 	if finding.TemplateID != "" {
-		text += fmt.Sprintf("\n🗂 *Template*    %s", escapeMarkdown(finding.TemplateID))
+		text += fmt.Sprintf("\n🗂 *Template*    %s", EscapeMarkdown(finding.TemplateID))
 	}
 
 	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
@@ -487,31 +527,20 @@ func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
 			"🔢 *Scan ID*    %d\n"+
 			"━━━━━━━━━━━━━━━━━━━━\n"+
 			"📊 *Results*\n",
-		escapeMarkdown(scan.Target),
+		EscapeMarkdown(scan.Target),
 		scan.ScanID,
 	)
 
-	// Display stats with per-metric emojis in a preferred order
-	orderedKeys := []string{"subdomains", "live", "urls", "endpoints", "ports", "vulnerabilities"}
-	printed := make(map[string]bool)
-	for _, k := range orderedKeys {
-		if v, ok := scan.Stats[k]; ok {
-			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), v)
-			printed[k] = true
-		}
-	}
-	// Any remaining keys not in the preferred order
-	for k, v := range scan.Stats {
-		if !printed[k] {
-			text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), escapeMarkdown(titleCase(k)), v)
-		}
+	// Display stats in preferred order
+	for _, k := range GetOrderedStatsKeys(scan.Stats) {
+		text += fmt.Sprintf("%s %s    %d\n", statEmoji(k), EscapeMarkdown(TitleCase(k)), scan.Stats[k])
 	}
 
 	text += fmt.Sprintf(
 		"━━━━━━━━━━━━━━━━━━━━\n"+
 			"⏱ *Duration*    %s\n"+
 			"_Chaathan Scanner_",
-		escapeMarkdown(formatDuration(scan.Duration)),
+		EscapeMarkdown(FormatDuration(scan.Duration)),
 	)
 
 	return n.sendTelegramMessage(text)
@@ -533,16 +562,16 @@ func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
 			"📋 *Step*    %s\n"+
 			"⏱ *Duration*    %s\n"+
 			"🔍 *Findings*    %s",
-		escapeMarkdown(step.Target),
+		EscapeMarkdown(step.Target),
 		step.StepNumber,
 		step.TotalSteps,
-		escapeMarkdown(formatStepLabel(step)),
-		escapeMarkdown(formatDuration(step.Duration)),
+		EscapeMarkdown(formatStepLabel(step)),
+		EscapeMarkdown(FormatDuration(step.Duration)),
 		findings,
 	)
 
 	if step.ScanType != "" {
-		text += fmt.Sprintf("\n🏷 *Type*    %s", escapeMarkdown(step.ScanType))
+		text += fmt.Sprintf("\n🏷 *Type*    %s", EscapeMarkdown(step.ScanType))
 	}
 
 	text += "\n━━━━━━━━━━━━━━━━━━━━\n_Chaathan Scanner_"
@@ -553,7 +582,7 @@ func (n *Notifier) sendTelegramStepComplete(step StepComplete) error {
 func (n *Notifier) sendTelegramMessage(text string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.cfg.TelegramBotToken)
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"chat_id":    n.cfg.TelegramChatID,
 		"text":       text,
 		"parse_mode": "MarkdownV2",
@@ -564,7 +593,7 @@ func (n *Notifier) sendTelegramMessage(text string) error {
 
 // Generic webhook
 func (n *Notifier) sendWebhook(finding Finding) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"event":   "finding",
 		"finding": finding,
 	}
@@ -573,7 +602,7 @@ func (n *Notifier) sendWebhook(finding Finding) error {
 }
 
 func (n *Notifier) sendWebhookStepComplete(step StepComplete) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"event": "step_complete",
 		"step":  step,
 	}
@@ -586,7 +615,7 @@ func (n *Notifier) sendWebhookStepComplete(step StepComplete) error {
 // postJSON sends a JSON payload with retry logic for transient failures.
 // Retries up to 2 times with exponential backoff (1s, 2s) for network errors
 // and 5xx server errors. Client errors (4xx) are not retried.
-func (n *Notifier) postJSON(url string, payload interface{}) error {
+func (n *Notifier) postJSON(url string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
@@ -696,37 +725,17 @@ func formatStepLabel(step StepComplete) string {
 	return step.StepName
 }
 
-func escapeMarkdown(s string) string {
+func EscapeMarkdown(s string) string {
 	// Escape all Telegram MarkdownV2 special characters to prevent
 	// injection from attacker-controlled finding names, template IDs, etc.
 	// Backslash MUST be escaped first to avoid double-escaping the
 	// backslashes we insert for the other characters.
 	s = strings.ReplaceAll(s, "\\", "\\\\")
-	replacer := strings.NewReplacer(
-		"_", "\\_",
-		"*", "\\*",
-		"[", "\\[",
-		"]", "\\]",
-		"`", "\\`",
-		"~", "\\~",
-		">", "\\>",
-		"#", "\\#",
-		"+", "\\+",
-		"-", "\\-",
-		"=", "\\=",
-		"|", "\\|",
-		"{", "\\{",
-		"}", "\\}",
-		".", "\\.",
-		"!", "\\!",
-		"(", "\\(",
-		")", "\\)",
-	)
-	return replacer.Replace(s)
+	return telegramEscaper.Replace(s)
 }
 
-// titleCase capitalises the first rune of s (replaces deprecated strings.Title).
-func titleCase(s string) string {
+// TitleCase capitalises the first rune of s (replaces deprecated strings.Title).
+func TitleCase(s string) string {
 	if s == "" {
 		return s
 	}
@@ -735,9 +744,9 @@ func titleCase(s string) string {
 	return string(runes)
 }
 
-// formatDuration converts a duration to a clean human-readable string.
+// FormatDuration converts a duration to a clean human-readable string.
 // e.g. 19m56.166s → "19m 56s", 3723s → "1h 2m", 45s → "45s"
-func formatDuration(d time.Duration) string {
+func FormatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))

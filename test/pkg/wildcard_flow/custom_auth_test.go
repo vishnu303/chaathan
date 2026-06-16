@@ -1,13 +1,9 @@
-package wildcard_flow
+package wildcard_flow_test
 
 import (
 	"context"
-	"net"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vishnu303/chaathan/pkg/runner"
 	"github.com/vishnu303/chaathan/pkg/tools"
@@ -23,33 +19,6 @@ func (m *MockRunner) Run(ctx context.Context, command string, args []string, opt
 	m.LastCmd = command
 	m.LastArgs = args
 	return "", nil
-}
-
-func TestWafIPCheck(t *testing.T) {
-	tests := []struct {
-		ip       string
-		expected bool
-	}{
-		// Cloudflare
-		{"104.16.5.9", true},
-		{"172.64.0.1", true},
-		// Fastly
-		{"151.101.1.1", true},
-		// CloudFront
-		{"54.230.15.42", true},
-		// Direct/Non-WAF
-		{"8.8.8.8", false},
-		{"127.0.0.1", false},
-		{"203.0.113.80", false},
-		{"invalid-ip", false},
-	}
-
-	for _, tc := range tests {
-		res := isWafIP(tc.ip)
-		if res != tc.expected {
-			t.Errorf("expected isWafIP(%s) to be %v, got %v", tc.ip, tc.expected, res)
-		}
-	}
 }
 
 func TestCustomAuthPropagation(t *testing.T) {
@@ -110,53 +79,5 @@ func TestVulnerabilityEngineCustomAuth(t *testing.T) {
 	}
 	if !strings.Contains(argsJoined, "-H Cookie: PHPSESSID=v_cookie") {
 		t.Errorf("expected Nuclei to receive custom Cookie header, got: %s", argsJoined)
-	}
-}
-
-func TestVerifyOriginBypassMatch(t *testing.T) {
-	// Start a mock HTTP server behaving as an origin server bypass
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if strings.Contains(host, "protected.example.com") {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("<html><head><title>Secure Page</title></head><body>Welcome Admin!</body></html>"))
-		} else {
-			// standard fallback/default IP response
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte("Forbidden: Direct IP access not allowed"))
-		}
-	}))
-	defer server.Close()
-
-	// Extract the test server's raw port/IP
-	rawAddr := server.Listener.Addr().String()
-	ip, _, err := net.SplitHostPort(rawAddr)
-	if err != nil {
-		t.Fatalf("failed to parse mock server address: %v", err)
-	}
-
-	client := &http.Client{
-		Timeout: 2 * time.Second,
-	}
-
-	// 1. Verify baseline behavior (requesting direct IP with raw IP host header)
-	baselineCode, _, err := makeRawRequest(context.Background(), client, server.URL, ip)
-	if err != nil {
-		t.Fatalf("baseline request failed: %v", err)
-	}
-	if baselineCode != http.StatusForbidden {
-		t.Errorf("expected baseline to return 403 Forbidden, got %d", baselineCode)
-	}
-
-	// 2. Verify WAF Bypass behavior (injecting matching Host header)
-	probeCode, probeBody, err := makeRawRequest(context.Background(), client, server.URL, "protected.example.com")
-	if err != nil {
-		t.Fatalf("probe request failed: %v", err)
-	}
-	if probeCode != http.StatusOK {
-		t.Errorf("expected probe to return 200 OK, got %d", probeCode)
-	}
-	if !strings.Contains(probeBody, "Secure Page") {
-		t.Errorf("expected probe body to return the bypassed secure content, got: %s", probeBody)
 	}
 }

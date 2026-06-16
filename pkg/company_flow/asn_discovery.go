@@ -15,8 +15,8 @@ import (
 // ─────────────────────────────────────────────────────────────
 
 // stepMetabigor discovers ASN/network ranges for the target organisation.
-// Returns true if the scan should be cancelled.
-func stepMetabigor(c *Ctx) bool {
+// Returns (cancelled, error).
+func stepMetabigor(c *Ctx) (bool, error) {
 	c.Total++
 
 	if !c.SkipMetabigor {
@@ -27,6 +27,7 @@ func stepMetabigor(c *Ctx) bool {
 		if err := c.Tb.RunMetabigorNet(c.GoCtx, c.Company, asnOut); err != nil {
 			logger.Error("Metabigor failed: %v", err)
 			c.Failed++
+			return c.cancelled(), err
 		} else {
 			count, _ := utils.CountFileLines(asnOut)
 			logger.Success("Found %d ASN/network ranges", count)
@@ -37,5 +38,5 @@ func stepMetabigor(c *Ctx) bool {
 		c.Completed++
 	}
 
-	return c.cancelled()
+	return c.cancelled(), nil
 }

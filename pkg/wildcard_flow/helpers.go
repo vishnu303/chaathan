@@ -2,14 +2,16 @@ package wildcard_flow
 
 import (
 	"bufio"
+	"cmp"
 	"container/heap"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	neturl "net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,6 +41,35 @@ var secretGFPatterns = map[string]bool{
 
 // ErrToolSkipped is returned by runWithSkip when the user presses 's'.
 var ErrToolSkipped = fmt.Errorf("tool skipped by user")
+
+// resumeOrSkip checks if a step is already completed.
+// If it is, it logs the resumed header and returns true with context cancelled status.
+// Otherwise, it logs the normal step header and returns false.
+func (c *Ctx) resumeOrSkip(stepName, stepHeader string) (bool, bool) {
+	if c.State != nil && c.State.IsStepCompleted(stepName) {
+		logger.StepHeader("%s [RESUMED — skipping]", stepHeader)
+		return true, c.cancelled()
+	}
+	logger.StepHeader("%s", stepHeader)
+	return false, false
+}
+
+// markStepCompleteIfNoFailure marks the step as completed in the StateManager only if it hasn't failed.
+func (c *Ctx) markStepCompleteIfNoFailure(stepName string) {
+	if c.StateMgr == nil || c.State == nil {
+		return
+	}
+	hasFailure := false
+	for _, fs := range c.State.FailedSteps {
+		if fs.Name == stepName {
+			hasFailure = true
+			break
+		}
+	}
+	if !hasFailure {
+		c.StateMgr.MarkStepComplete(c.State, stepName)
+	}
+}
 
 // runWithSkip executes fn in a goroutine and monitors the skip channel.
 // If the user presses 's', fn's context is cancelled and ErrToolSkipped
@@ -104,13 +135,22 @@ func existingFiles(paths ...string) []string {
 	return out
 }
 
-// copyFile copies src to dst, creating dst if needed.
+// copyFile copies src to dst using memory-efficient io.Copy.
 func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0644)
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
 }
 
 // fileModifiedAfter returns true if the file at path was modified after the
@@ -313,7 +353,7 @@ func installedGFPatterns(allowlist map[string]bool) []string {
 			patterns = append(patterns, name)
 		}
 	}
-	sort.Strings(patterns)
+	slices.Sort(patterns)
 	return patterns
 }
 
@@ -533,13 +573,13 @@ func (h urlHeap) Swap(i, j int) {
 	h[i].index = i
 	h[j].index = j
 }
-func (h *urlHeap) Push(x interface{}) {
+func (h *urlHeap) Push(x any) {
 	n := len(*h)
 	item := x.(*urlItem)
 	item.index = n
 	*h = append(*h, item)
 }
-func (h *urlHeap) Pop() interface{} {
+func (h *urlHeap) Pop() any {
 	old := *h
 	n := len(old)
 	item := old[n-1]
@@ -548,8 +588,8 @@ func (h *urlHeap) Pop() interface{} {
 	return item
 }
 
-// collectScopedURLs filters all_urls_live.txt for DAST-suitable URLs using O(1) heap pipelines.
-func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
+// CollectScopedURLs filters all_urls_live.txt for DAST-suitable URLs using O(1) heap pipelines.
+func CollectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 	file, err := os.Open(inputFile)
 	if err != nil {
 		return 0
@@ -637,8 +677,8 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 		for pq.Len() > 0 {
 			results = append(results, heap.Pop(&pq).(*urlItem))
 		}
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].score > results[j].score
+		slices.SortFunc(results, func(a, b *urlItem) int {
+			return cmp.Compare(b.score, a.score)
 		})
 
 		f, err := os.Create(outputFile)
@@ -703,8 +743,8 @@ func collectScopedURLs(c *Ctx, inputFile, outputFile string, maxURLs int) int {
 		for _, item := range bestPerPath {
 			results = append(results, item)
 		}
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].score > results[j].score
+		slices.SortFunc(results, func(a, b *urlItem) int {
+			return cmp.Compare(b.score, a.score)
 		})
 
 		f, err := os.Create(outputFile)
@@ -760,5 +800,5 @@ func collectScopedParamURLs(c *Ctx, inputFile, outputFile string) int {
 	if c.Cfg != nil && c.Cfg.Tools.Dalfox.MaxURLs > 0 {
 		maxURLs = c.Cfg.Tools.Dalfox.MaxURLs
 	}
-	return collectScopedURLs(c, inputFile, outputFile, maxURLs)
+	return CollectScopedURLs(c, inputFile, outputFile, maxURLs)
 }

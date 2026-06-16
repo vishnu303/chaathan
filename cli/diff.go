@@ -9,7 +9,6 @@ import (
 
 	"github.com/vishnu303/chaathan/pkg/database"
 	"github.com/vishnu303/chaathan/pkg/logger"
-	"github.com/vishnu303/chaathan/utils"
 )
 
 var diffCmd = &cobra.Command{
@@ -75,14 +74,12 @@ func diffSets[T any, K comparable](old, new []T, key func(T) K) diffResult[T] {
 // ─────────────────────────────────────────────────────────────
 
 func runDiff(cmd *cobra.Command, args []string) {
-	oldID, err := utils.ParseScanID(args[0])
-	if err != nil {
-		logger.Error("%v", err)
+	oldID, ok := parseScanIDArg(args[0])
+	if !ok {
 		return
 	}
-	newID, err := utils.ParseScanID(args[1])
-	if err != nil {
-		logger.Error("%v", err)
+	newID, ok := parseScanIDArg(args[1])
+	if !ok {
 		return
 	}
 
