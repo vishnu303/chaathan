@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,7 +142,7 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 		"--check",
 		"--output", liveProxiesPath,
 		"-g", fmt.Sprintf("%d", maxConcurrent),
-		"-t", "10s",
+		"-t", "5s",
 	)
 	cmd.Dir = workDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -211,12 +210,6 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 				allValid = append(allValid, line)
 			}
 		}
-	}
-
-	// Filter out proxies blocked by the target domain's WAF
-	if len(allValid) > 0 && cfg.Domain != "" {
-		logger.SubStep("Filtering proxies against target domain WAF (%s)...", cfg.Domain)
-		allValid = filterByTargetDomain(ctx, allValid, cfg.Domain)
 	}
 
 	// 7. Write to pool
@@ -329,166 +322,4 @@ func fetchProxySources(ctx context.Context, proxyTypes []string, outPath string)
 	return len(all), nil
 }
 
-func filterByTargetDomain(ctx context.Context, proxies []string, domain string) []string {
-	if len(proxies) == 0 {
-		return proxies
-	}
 
-	targetURL := "https://" + domain
-	logger.FileDebug("Establishing baseline check directly to %s...", targetURL)
-
-	// Establish baseline check without proxy
-	baselineClient := &http.Client{
-		Timeout: 7 * time.Second,
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-	if err != nil {
-		logger.Warning("WAF check: failed to create baseline request: %v", err)
-		return proxies // fallback to returning all proxies if baseline fails
-	}
-	req.Header.Set("User-Agent", tools.RandomUA())
-
-	baselineStatus := 0
-	baselineResp, err := baselineClient.Do(req)
-	if err != nil {
-		// Try HTTP as fallback
-		targetURL = "http://" + domain
-		logger.FileDebug("Baseline HTTPS failed, trying HTTP baseline to %s...", targetURL)
-		req, err = http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-		if err == nil {
-			req.Header.Set("User-Agent", tools.RandomUA())
-			baselineResp, err = baselineClient.Do(req)
-		}
-	}
-
-	if err != nil {
-		logger.Warning("WAF check: baseline connection to %s failed: %v — skipping WAF filtering to prevent false positives", domain, err)
-		return proxies
-	}
-	baselineStatus = baselineResp.StatusCode
-	baselineResp.Body.Close()
-	logger.FileDebug("Baseline status code for %s is %d", targetURL, baselineStatus)
-
-	// Bounded concurrency pool
-	const concurrencyLimit = 20
-	sem := make(chan struct{}, concurrencyLimit)
-	var mu sync.Mutex
-	var filteredProxies []string
-
-	var wg sync.WaitGroup
-	for _, proxyStr := range proxies {
-		wg.Add(1)
-		go func(p string) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			defer func() { <-sem }()
-
-			if checkProxyAgainstTarget(ctx, p, targetURL, baselineStatus) {
-				mu.Lock()
-				filteredProxies = append(filteredProxies, p)
-				mu.Unlock()
-			}
-		}(proxyStr)
-	}
-
-	wg.Wait()
-	logger.Success("WAF validation complete: %d/%d proxies successfully reached %s without WAF blocking",
-		len(filteredProxies), len(proxies), domain)
-
-	return filteredProxies
-}
-
-func checkProxyAgainstTarget(ctx context.Context, proxyStr, targetURL string, baselineStatus int) bool {
-	proxyURL, err := url.Parse(proxyStr)
-	if err != nil {
-		return false
-	}
-
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   5 * time.Second,
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("User-Agent", tools.RandomUA())
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		logger.FileDebug("Proxy %s failed to connect: %v", proxyStr, err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	// If status code matches the baseline, we can assume it's valid
-	if resp.StatusCode == baselineStatus {
-		if isWAFResponse(resp) {
-			logger.FileDebug("Proxy %s returned a WAF signature despite matching baseline status code", proxyStr)
-			return false
-		}
-		return true
-	}
-
-	// If it doesn't match baseline, check if it's a standard success code (less than 400)
-	if resp.StatusCode < 400 {
-		if isWAFResponse(resp) {
-			logger.FileDebug("Proxy %s returned a WAF signature with success status code %d", proxyStr, resp.StatusCode)
-			return false
-		}
-		return true
-	}
-
-	logger.FileDebug("Proxy %s blocked/failed (Status: %d, expected %d)", proxyStr, resp.StatusCode, baselineStatus)
-	return false
-}
-
-func isWAFResponse(resp *http.Response) bool {
-	for k, v := range resp.Header {
-		kl := strings.ToLower(k)
-		if kl == "cf-ray" || kl == "cf-cache-status" || strings.Contains(kl, "sucuri") || strings.Contains(kl, "incapsula") || strings.Contains(kl, "waf") {
-			return true
-		}
-		for _, val := range v {
-			valL := strings.ToLower(val)
-			if strings.Contains(valL, "cloudflare") || strings.Contains(valL, "sucuri") || strings.Contains(valL, "incapsula") {
-				return true
-			}
-		}
-	}
-
-	bodyBytes := make([]byte, 1024)
-	n, _ := resp.Body.Read(bodyBytes)
-	if n > 0 {
-		bodyStr := strings.ToLower(string(bodyBytes[:n]))
-		wafSignatures := []string{
-			"access denied",
-			"blocked by",
-			"security challenge",
-			"please complete the security check",
-			"ddos protection by cloudflare",
-			"one more step",
-			"captcha",
-			"ray id:",
-		}
-		for _, sig := range wafSignatures {
-			if strings.Contains(bodyStr, sig) {
-				return true
-			}
-		}
-	}
-
-	return false
-}

@@ -19,8 +19,7 @@ import (
 	"github.com/vishnu303/chaathan/pkg/proxy_scraping"
 )
 
-// stepProxyScraping scrapes free proxies, validates them against the target
-// domain, and starts a mubeng rotating proxy server.
+// stepProxyScraping scrapes free proxies, validates them, and starts a mubeng rotating proxy server.
 // Returns true if the scan should be cancelled.
 func stepProxyScraping(c *Ctx) bool {
 	const stepName = "proxy_scraping"
@@ -83,7 +82,7 @@ func stepProxyScraping(c *Ctx) bool {
 		OutputDir:     filepath.Join(c.ResultDir, "intermediate_files"),
 	}
 
-	logger.Info("Scraping proxies and validating against %s (timeout: %dm)...", c.Domain, timeoutMin)
+	logger.Info("Scraping and validating proxies (timeout: %dm)...", timeoutMin)
 
 	var result *proxy_scraping.HarvestResult
 	var harvestErr error
@@ -129,7 +128,7 @@ func stepProxyScraping(c *Ctx) bool {
 	if harvestSkipped {
 		label = " (partial)"
 	}
-	logger.Success("Scraped %d proxies, %d passed WAF check%s (took %s)",
+	logger.Success("Scraped %d proxies, %d validated%s (took %s)",
 		result.TotalScraped, result.TotalValid, label,
 		result.Duration.Round(time.Second))
 
