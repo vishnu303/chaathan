@@ -98,6 +98,11 @@ func Run(cfg RunConfig) {
 	totalSkipped += int32(s)
 	totalFailed += int32(f)
 
+	i, s, f = installSecListsSection(ctx)
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
 	if ctx.Logger != nil {
 		ctx.Logger.Write("=== Setup Complete ===")
 		ctx.Logger.Write("Duration: %s", time.Since(start).Round(time.Second))

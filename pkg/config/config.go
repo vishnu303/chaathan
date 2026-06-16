@@ -464,13 +464,17 @@ func (c *Config) GetAPIKey(name string) string {
 }
 
 // resolveSeclistsBase returns the seclists installation base directory.
-// Arch Linux (CachyOS, BlackArch) installs to /usr/share/seclists/,
-// while Debian/Kali uses /usr/share/wordlists/seclists/.
+// It checks ~/.chaathan/seclists first, then Arch Linux (/usr/share/seclists),
+// and finally Debian/Kali (/usr/share/wordlists/seclists).
 // Returns whichever path exists, falling back to the Debian path.
 func resolveSeclistsBase() string {
+	localPath := filepath.Join(paths.ChaathanHome(), "seclists")
 	archPath := "/usr/share/seclists"
 	debianPath := "/usr/share/wordlists/seclists"
 
+	if info, err := os.Stat(localPath); err == nil && info.IsDir() {
+		return localPath
+	}
 	if info, err := os.Stat(archPath); err == nil && info.IsDir() {
 		return archPath
 	}
