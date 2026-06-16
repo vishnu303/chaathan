@@ -362,7 +362,7 @@ func (q *QueryConsole) switchTab(tabIdx int) {
 func (q *QueryConsole) loadScanData(scanID int64) {
 	q.ScanID = scanID
 
-	q.subdomains, _ = database.GetSubdomains(scanID)
+	q.subdomains, _ = database.GetLiveSubdomains(scanID)
 	q.ports, _ = database.GetPorts(scanID)
 	q.vulns, _ = database.GetVulnerabilities(scanID)
 	q.urls, _ = database.GetURLs(scanID)
