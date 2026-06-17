@@ -27,6 +27,15 @@ const (
 	ColorOrange   = "#fab387" // Orange
 )
 
+// ResumeSignal is returned when the user triggers a scan resume action in the TUI.
+type ResumeSignal struct {
+	ScanID int64
+}
+
+func (r ResumeSignal) Error() string {
+	return fmt.Sprintf("resume scan: %d", r.ScanID)
+}
+
 // StartDashboard boots up the interactive tview dashboard.
 func StartDashboard() error {
 	// Configure global tview styles to use terminal transparent background
@@ -85,8 +94,8 @@ func StartDashboard() error {
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
 	footerHelp.SetText(fmt.Sprintf(
-		" [%s]Keys:[-] Up/Down: Navigate scans  |  [%s]R[-] Refresh database  |  [%s]Q/Ctrl+C[-] Exit",
-		ColorActive, ColorActive, ColorActive,
+		" [%s]Keys:[-] Up/Down: Navigate  |  [%s]Ctrl+R/F5[-] Refresh  |  [%s]R[-] Resume  |  [%s]D[-] Delete  |  [%s]Q/Ctrl+C[-] Exit",
+		ColorActive, ColorActive, ColorActive, ColorActive, ColorActive,
 	))
 
 	// 3-pane horizontal flex column layout
@@ -103,6 +112,11 @@ func StartDashboard() error {
 		AddItem(topStats, 3, 0, false).
 		AddItem(mainFlex, 0, 1, true).
 		AddItem(footerHelp, 1, 0, false)
+
+	pages := tview.NewPages().
+		AddPage("main", layout, true, true)
+
+	var resumeScanID int64 = 0
 
 	// Keep track of fetched scans list to resolve indices
 	var scansList []database.Scan
@@ -334,18 +348,51 @@ func StartDashboard() error {
 
 	// Setup input captures (Global hotkeys)
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if pages.HasPage("delete_confirm") {
+			return event
+		}
+
 		switch event.Rune() {
 		case 'q', 'Q':
 			app.Stop()
 			return nil
+		case 'd', 'D':
+			idx := leftList.GetCurrentItem()
+			if idx >= 0 && idx < len(scansList) {
+				s := scansList[idx]
+				modal := tview.NewModal().
+					SetText(fmt.Sprintf("Are you sure you want to delete scan #%d for %s?\nThis action cannot be undone.", s.ID, s.Target)).
+					AddButtons([]string{"Yes", "No"}).
+					SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+						if buttonLabel == "Yes" {
+							if err := database.DeleteScan(s.ID); err == nil {
+								reloadData()
+							}
+						}
+						pages.RemovePage("delete_confirm")
+						app.SetFocus(leftList)
+					})
+				pages.AddPage("delete_confirm", modal, true, true)
+			}
+			return nil
 		case 'r', 'R':
+			idx := leftList.GetCurrentItem()
+			if idx >= 0 && idx < len(scansList) {
+				s := scansList[idx]
+				resumeScanID = s.ID
+				app.Stop()
+			}
+			return nil
+		}
+
+		if event.Key() == tcell.KeyCtrlR || event.Key() == tcell.KeyF5 {
 			reloadData()
-			// Focus first item
 			if leftList.GetItemCount() > 0 {
 				leftList.SetCurrentItem(0)
 			}
 			return nil
 		}
+
 		// Also support Escape and Ctrl+C to quit
 		if event.Key() == tcell.KeyCtrlC || event.Key() == tcell.KeyEscape {
 			app.Stop()
@@ -361,8 +408,11 @@ func StartDashboard() error {
 	}
 
 	// Draw full screen layout container
-	if err := app.SetRoot(layout, true).EnableMouse(true).Run(); err != nil {
+	if err := app.SetRoot(pages, true).EnableMouse(true).Run(); err != nil {
 		return err
+	}
+	if resumeScanID > 0 {
+		return ResumeSignal{ScanID: resumeScanID}
 	}
 	return nil
 }

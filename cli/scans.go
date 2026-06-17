@@ -173,7 +173,10 @@ func runScansResume(cmd *cobra.Command, args []string) {
 	if !ok {
 		return
 	}
+	resumeScanByID(scanID)
+}
 
+func resumeScanByID(scanID int64) {
 	mgr := scan.NewManager(paths.StateDir())
 
 	state, err := mgr.LoadState(scanID)
