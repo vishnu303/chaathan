@@ -127,6 +127,12 @@ type ToolsConfig struct {
 
 	// Dalfox specific settings
 	Dalfox DalfoxConfig `yaml:"dalfox"`
+
+	// Katana specific settings
+	Katana KatanaConfig `yaml:"katana"`
+
+	// GoSpider specific settings
+	GoSpider GoSpiderConfig `yaml:"gospider"`
 }
 
 type SubfinderConfig struct {
@@ -144,7 +150,7 @@ type NucleiConfig struct {
 	ExcludeTags    []string `yaml:"exclude_tags"`    // template tags to exclude (default: [dos, fuzz])
 	Severity       []string `yaml:"severity"`        // severities to scan (default: [low, medium, high, critical])
 	DisableOOB     *bool    `yaml:"disable_oob"`     // disable Interactsh OOB checks — prevents hangs (default: true)
-	MaxTimeout     int      `yaml:"max_timeout_min"` // hard process timeout per Nuclei run in minutes (default: 300)
+	MaxTimeout     int      `yaml:"max_timeout_min"` // hard process timeout per Nuclei run in minutes (default: 180)
 	DASTAggression string   `yaml:"dast_aggression"` // DAST fuzzing payload count: low/medium/high (default: high)
 }
 
@@ -164,12 +170,22 @@ type NaabuConfig struct {
 	Threads int    `yaml:"threads"` // concurrent scanning threads (default: 25)
 	Rate    int    `yaml:"rate"`    // packets per second (default: 1000)
 	Ports   string `yaml:"ports"`   // port spec: "top-1000", "80,443,8080", or range (default: top-1000)
+	Timeout int    `yaml:"timeout"` // max runtime in minutes for Naabu (default: 240)
 }
 
 type FfufConfig struct {
 	Threads    int   `yaml:"threads"`     // concurrent fuzzing threads (default: 50)
 	Timeout    int   `yaml:"timeout"`     // per-request timeout in seconds (default: 10)
 	MatchCodes []int `yaml:"match_codes"` // HTTP status codes to report as findings (default: 200,201,204,301,...)
+	MaxTimeout int   `yaml:"max_timeout_min"` // hard process timeout per ffuf run in minutes (default: 180)
+}
+
+type KatanaConfig struct {
+	Timeout int `yaml:"timeout"` // max runtime in minutes for Katana (default: 300)
+}
+
+type GoSpiderConfig struct {
+	Timeout int `yaml:"timeout"` // max runtime in minutes for GoSpider (default: 300)
 }
 
 type NotificationConfig struct {
@@ -343,7 +359,7 @@ func DefaultConfig() *Config {
 				Severity:       []string{"low", "medium", "high", "critical"},
 				ExcludeTags:    []string{"dos", "fuzz"},
 				DisableOOB:     newBool(true),
-				MaxTimeout:     300,
+				MaxTimeout:     180,
 				DASTAggression: "high",
 			},
 			Httpx: HttpxConfig{
@@ -355,15 +371,23 @@ func DefaultConfig() *Config {
 			Naabu: NaabuConfig{
 				Threads: 25,
 				Rate:    1000,
+				Timeout: 240,
 			},
 			Ffuf: FfufConfig{
 				Threads:    50,
 				Timeout:    10,
 				MatchCodes: []int{200, 201, 204, 301, 302, 307, 401, 403, 405, 500},
+				MaxTimeout: 180,
 			},
 			Dalfox: DalfoxConfig{
 				MaxURLs:        500,
 				SkipThirdParty: newBool(true),
+			},
+			Katana: KatanaConfig{
+				Timeout: 300,
+			},
+			GoSpider: GoSpiderConfig{
+				Timeout: 300,
 			},
 		},
 		Notifications: NotificationConfig{
@@ -403,7 +427,7 @@ func applyDefaults(cfg *Config) {
 	defaultInt(&cfg.General.JSLimit, 2000)
 	defaultInt(&cfg.Tools.Nuclei.Concurrency, 25)
 	defaultInt(&cfg.Tools.Nuclei.RateLimit, 150)
-	defaultInt(&cfg.Tools.Nuclei.MaxTimeout, 300)
+	defaultInt(&cfg.Tools.Nuclei.MaxTimeout, 180)
 	if cfg.Tools.Nuclei.DisableOOB == nil {
 		cfg.Tools.Nuclei.DisableOOB = newBool(true)
 	}
@@ -412,6 +436,10 @@ func applyDefaults(cfg *Config) {
 	if cfg.Tools.Dalfox.SkipThirdParty == nil {
 		cfg.Tools.Dalfox.SkipThirdParty = newBool(true)
 	}
+	defaultInt(&cfg.Tools.Naabu.Timeout, 240)
+	defaultInt(&cfg.Tools.Ffuf.MaxTimeout, 180)
+	defaultInt(&cfg.Tools.Katana.Timeout, 300)
+	defaultInt(&cfg.Tools.GoSpider.Timeout, 300)
 	defaultString(&cfg.Notifications.MinSeverity, "high")
 
 	// Proxy scraping defaults
