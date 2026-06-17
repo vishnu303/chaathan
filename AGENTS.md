@@ -53,6 +53,7 @@ chaathan-flow/
 4. **Extend, don't scatter.** Add fields to `RunConfig`, `Ctx`, or `Files` instead of threading long parameter lists.
 5. **Stable interfaces.** DB rows, output files, and JSON output are product surfaces — check all readers before changing shapes.
 6. **Step functions return `c.cancelled()`.** Never hard-code `return false`. Never call `MarkStepComplete` after `MarkStepFailed` in the same error path.
+7. **Documentation Sync (Meta-Rule).** Every time you make changes to the codebase (e.g., CLI options, scan steps, tool integrations), you **must** update the corresponding `.agents/skills/*.md` files and the root `README.md` to ensure documentation is always in sync with implementation (only if necessary).
 
 ## Validation baseline
 

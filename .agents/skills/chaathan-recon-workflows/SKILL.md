@@ -57,23 +57,23 @@ Phase 5: Fingerprinting (Step 23)      ──► Output: WAF/Tech JSON
 ### Phase 2 — Validation (`validation.go`)
 - **Step 7: `dns_resolution`** (dnsx validation of gathered subdomains).
 - **Step 8: `dns_bruteforce`** (shuffledns + massdns brute forcing; skip with `--skip-shuffledns`).
-- **Step 9: `http_probing`** (httpx probing for live web servers; runs Origin IP Bypass if `--origin-bypass` enabled).
-- **Step 10: `tls_analysis`** (tlsx certificate extraction; skip with `--skip-tlsx`). Collects metadata.
-- **Step 11: `port_scanning`** (naabu TCP scan; skip with `--skip-naabu`).
+- **Step 9: `port_scanning`** (naabu TCP scan; skip with `--skip-naabu`). Open ports are merged into the target list for subsequent probing.
+- **Step 10: `http_probing`** (httpx probing for live web servers on both standard ports and naabu-discovered ports; runs Origin IP Bypass if `--origin-bypass` enabled).
+- **Step 11: `tls_analysis`** (tlsx certificate extraction; skip with `--skip-tlsx`). Extracts newly discovered subdomains from SANs, probes them, and merges them back.
 
 ### Phase 3 — Content Discovery (`content_discovery.go`)
 - **Step 12: `url_discovery`** (waybackurls + gau passive crawl).
 - **Step 13: `web_crawling`** (katana + gospider crawling; skip with `--skip-crawl`).
-- **Step 14: `js_analysis`** (GoLinkFinder parsing of JS links).
-- **Step 15: `param_discovery`** (arjun parameter discovery; skip with `--skip-arjun`).
-- **Step 16: `url_consolidation`** (httpx live URL validation and ROI metadata collection).
-- **Step 17: `js_secret_scan`** (downloads JS files, runs gf secret search pattern).
-- **Step 18: `dir_fuzzing`** (ffuf directory fuzzing; requires `--wordlist`).
+- **Step 14: `js_analysis`** (GoLinkFinder parsing of JS links on all live hosts, capped at top 50).
+- **Step 15: `dir_fuzzing`** (ffuf directory fuzzing on up to 25 live hosts; requires `--wordlist`). Fuzzing results write to `ffuf_discovered_urls.txt`.
+- **Step 16: `param_discovery`** (arjun parameter discovery; skip with `--skip-arjun`). Natively routes through the rotating proxy using `HTTP_PROXY`/`HTTPS_PROXY` environment variables. Targets ONLY curated dynamic endpoints (up to 150 extracted from crawls) and fuzzed directory URLs, completely bypassing flat live hostlists.
+- **Step 17: `url_consolidation`** (httpx live URL validation and ROI metadata collection).
+- **Step 18: `js_secret_scan`** (downloads JS files, runs gf secret search pattern).
 
 ### Phase 4 — Vulnerability Scanning (`vulnerability_scanning.go`)
-- **Step 19: `vuln_scanning`** (Nuclei infra scan: CVE check + misconfigs).
-- **Step 20: `vuln_scanning_urls`** (Nuclei DAST fuzzing mode on URL lists).
-- **Step 21: `takeover_detection`** (Nuclei takeover checking on CNAME-filtered subdomains).
+- **Step 19: `takeover_detection`** (Nuclei takeover checking on CNAME-filtered subdomains; runs first in Phase 4 for early alerts).
+- **Step 20: `vuln_scanning`** (Nuclei infra scan: CVE check + misconfigs).
+- **Step 21: `vuln_scanning_urls`** (Nuclei DAST fuzzing mode on consolidated URL lists).
 - **Step 22: `xss_scanning`** (dalfox parameter fuzzing; skip with `--skip-dalfox`).
 
 ### Phase 5 — Fingerprinting (`fingerprinting.go`)
@@ -114,3 +114,4 @@ Implemented in validation phases:
    return c.markStepCompleteIfNoFailure(stepName)
    ```
 4. **Context Propagation:** Ensure all tool executions receive `c.GoCtx` to enable clean halts when receiving SIGINT/SIGTERM.
+5. **Documentation Integrity (Meta-Rule):** Every time you make changes to scan pipelines, workflow steps, or execution ordering in the codebase, you **must** update this `SKILL.md` and the root `README.md` to keep all step definitions, indices, and tool configurations in sync (only if necessary).

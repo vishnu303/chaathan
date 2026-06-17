@@ -899,7 +899,15 @@ func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile str
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
 	args = t.appendArjunHeaders(args)
-	_, err := t.Runner.Run(ctx, "arjun", args)
+	var opts []runner.Option
+	if p := t.proxy(); p != "" {
+		opts = append(opts, runner.WithEnv(
+			"HTTP_PROXY="+p, "HTTPS_PROXY="+p,
+			"http_proxy="+p, "https_proxy="+p,
+			"ALL_PROXY="+p, "all_proxy="+p,
+		))
+	}
+	_, err := t.Runner.Run(ctx, "arjun", args, opts...)
 	return err
 }
 
@@ -911,7 +919,15 @@ func (t *ToolBox) RunArjunWithWordlist(ctx context.Context, inputFile string, ou
 		args = append(args, "-w", wordlist)
 	}
 	args = t.appendArjunHeaders(args)
-	_, err := t.Runner.Run(ctx, "arjun", args)
+	var opts []runner.Option
+	if p := t.proxy(); p != "" {
+		opts = append(opts, runner.WithEnv(
+			"HTTP_PROXY="+p, "HTTPS_PROXY="+p,
+			"http_proxy="+p, "https_proxy="+p,
+			"ALL_PROXY="+p, "all_proxy="+p,
+		))
+	}
+	_, err := t.Runner.Run(ctx, "arjun", args, opts...)
 	return err
 }
 
@@ -923,7 +939,15 @@ func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, output
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
 	args = t.appendArjunHeaders(args)
-	_, err := t.Runner.Run(ctx, "arjun", args)
+	var opts []runner.Option
+	if p := t.proxy(); p != "" {
+		opts = append(opts, runner.WithEnv(
+			"HTTP_PROXY="+p, "HTTPS_PROXY="+p,
+			"http_proxy="+p, "https_proxy="+p,
+			"ALL_PROXY="+p, "all_proxy="+p,
+		))
+	}
+	_, err := t.Runner.Run(ctx, "arjun", args, opts...)
 	return err
 }
 

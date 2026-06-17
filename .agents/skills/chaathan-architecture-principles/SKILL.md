@@ -98,6 +98,9 @@ Chaathan orchestrates third-party recon utilities. Never silently replace extern
 ### 6. Fail Soft in Scans, Fail Loud at Boundaries
 Within multi-step scans, individual tool failures log and continue. At command boundaries, bad input or broken setup returns explicit errors.
 
+### 7. Documentation Sync (Meta-Rule)
+Every time changes are made to the codebase—specifically CLI options, workflow step indices, command runner integrations, or architecture topology—you **must** update the corresponding `.agents/skills/*.md` files and the root `README.md` to keep all steps, options, and guidelines in sync (only if necessary).
+
 ---
 
 ## Preferred Extension Patterns
