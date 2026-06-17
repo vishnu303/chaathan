@@ -428,6 +428,34 @@ func (t *ToolBox) ffufMatchCodes() string {
 	return "200,201,204,301,302,307,401,403,405,500"
 }
 
+func (t *ToolBox) naabuMaxTimeout() time.Duration {
+	if t.Config != nil && t.Config.Naabu.Timeout > 0 {
+		return time.Duration(t.Config.Naabu.Timeout) * time.Minute
+	}
+	return 240 * time.Minute
+}
+
+func (t *ToolBox) ffufMaxTimeout() time.Duration {
+	if t.Config != nil && t.Config.Ffuf.MaxTimeout > 0 {
+		return time.Duration(t.Config.Ffuf.MaxTimeout) * time.Minute
+	}
+	return 180 * time.Minute
+}
+
+func (t *ToolBox) katanaMaxTimeout() time.Duration {
+	if t.Config != nil && t.Config.Katana.Timeout > 0 {
+		return time.Duration(t.Config.Katana.Timeout) * time.Minute
+	}
+	return 300 * time.Minute
+}
+
+func (t *ToolBox) goSpiderMaxTimeout() time.Duration {
+	if t.Config != nil && t.Config.GoSpider.Timeout > 0 {
+		return time.Duration(t.Config.GoSpider.Timeout) * time.Minute
+	}
+	return 300 * time.Minute
+}
+
 // --- Passive Enumeration ---
 
 func (t *ToolBox) RunSubfinder(ctx context.Context, domain string, outputFile string) error {
@@ -557,7 +585,7 @@ func (t *ToolBox) RunNaabu(ctx context.Context, host string, outputFile string) 
 		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
 	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "naabu", args)
+	_, err := t.Runner.Run(ctx, "naabu", args, runner.WithTimeout(t.naabuMaxTimeout()))
 	return err
 }
 
@@ -585,7 +613,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 		args = append(args, "-top-ports", strconv.Itoa(t.naabuTopPorts()))
 	}
 	args = t.appendProxy(args, "-proxy")
-	_, err := t.Runner.Run(ctx, "naabu", args)
+	_, err := t.Runner.Run(ctx, "naabu", args, runner.WithTimeout(t.naabuMaxTimeout()))
 	return err
 }
 
@@ -594,7 +622,7 @@ func (t *ToolBox) RunNaabuList(ctx context.Context, inputFile string, outputFile
 func (t *ToolBox) RunGoSpider(ctx context.Context, inputFile string, outputFile string) error {
 	args := []string{"-S", inputFile, "-q", "-c", "10", "-d", "3", "-t", "10"} // -t = per-request timeout (seconds)
 	args = t.appendGoSpiderUA(args)
-	output, err := t.Runner.Run(ctx, "gospider", args)
+	output, err := t.Runner.Run(ctx, "gospider", args, runner.WithTimeout(t.goSpiderMaxTimeout()))
 	if strings.TrimSpace(output) != "" {
 		if writeErr := writeToFile(outputFile, output); writeErr != nil {
 			return writeErr
@@ -626,7 +654,7 @@ func (t *ToolBox) RunKatana(ctx context.Context, inputFile string, outputFile st
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate-limit", strconv.Itoa(rps))
 	}
-	_, err := t.Runner.Run(ctx, "katana", args)
+	_, err := t.Runner.Run(ctx, "katana", args, runner.WithTimeout(t.katanaMaxTimeout()))
 	return err
 }
 
@@ -652,7 +680,7 @@ func (t *ToolBox) RunFfuf(ctx context.Context, url string, wordlist string, outp
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
 	}
-	_, err := t.Runner.Run(ctx, "ffuf", args)
+	_, err := t.Runner.Run(ctx, "ffuf", args, runner.WithTimeout(t.ffufMaxTimeout()))
 	return err
 }
 
@@ -684,7 +712,7 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 	if rps := t.globalRPS(); rps > 0 {
 		args = append(args, "-rate", strconv.Itoa(rps))
 	}
-	_, err := t.Runner.Run(ctx, "ffuf", args)
+	_, err := t.Runner.Run(ctx, "ffuf", args, runner.WithTimeout(t.ffufMaxTimeout()))
 	return err
 }
 
