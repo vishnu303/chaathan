@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
@@ -722,17 +723,101 @@ func loadGFPatterns(allowlist map[string]bool) (map[string][]*regexp.Regexp, err
 	return compiledPatterns, nil
 }
 
+// shannonEntropy calculates the Shannon entropy of a string.
+func shannonEntropy(s string) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	counts := make(map[rune]float64)
+	for _, r := range s {
+		counts[r]++
+	}
+	var entropy float64
+	length := float64(len(s))
+	for _, count := range counts {
+		p := count / length
+		entropy -= p * math.Log2(p)
+	}
+	return entropy
+}
+
+// isLikelySecret checks if a string is likely to be a real secret.
+func isLikelySecret(patternName, val string) bool {
+	valLower := strings.ToLower(val)
+	// Blacklist common placeholder patterns
+	placeholders := []string{"placeholder", "undefined", "null", "false", "true", "your_token", "your_secret", "api_key_here"}
+	for _, ph := range placeholders {
+		if valLower == ph {
+			return false
+		}
+	}
+	// Basic entropy check for generic api-keys
+	if patternName == "api-keys" {
+		if len(val) < 8 {
+			return false
+		}
+		entropy := shannonEntropy(val)
+		if entropy < 3.0 {
+			return false
+		}
+		// Filter out simple repeating sequences (e.g. "aaaaaaaaaa")
+		if len(val) >= 10 {
+			allSame := true
+			for i := 1; i < len(val); i++ {
+				if val[i] != val[0] {
+					allSame = false
+					break
+				}
+			}
+			if allSame {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// extractContext returns the matched text with a snippet of context before and after.
+func extractContext(line string, start, end, contextSize int) string {
+	lineLen := len(line)
+	if start < 0 || end > lineLen || start > end {
+		return ""
+	}
+	ctxStart := start - contextSize
+	if ctxStart < 0 {
+		ctxStart = 0
+	}
+	ctxEnd := end + contextSize
+	if ctxEnd > lineLen {
+		ctxEnd = lineLen
+	}
+	prefix := ""
+	if ctxStart > 0 {
+		prefix = "..."
+	}
+	suffix := ""
+	if ctxEnd < lineLen {
+		suffix = "..."
+	}
+	return fmt.Sprintf("%s%s%s", prefix, strings.TrimSpace(line[ctxStart:ctxEnd]), suffix)
+}
+
 // getFallbackGFPatterns returns hardcoded regexes for offline execution or when ~/.gf is empty.
 func getFallbackGFPatterns(allowlist map[string]bool) map[string][]*regexp.Regexp {
 	fallbacks := map[string]string{
-		"aws-keys": `(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}`,
-		"api-keys": `(?i)(api_key|apikey|secret|token|auth|password|key|credentials)[=:]["'][a-zA-Z0-9_\-\.\~]{10,80}["']`,
-		"jwt":      `eyJhbGciOi`,
-		"firebase": `firebaseio\.com`,
-		"github":   `(?i)github_token[=:]["'][a-zA-Z0-9]{35,40}["']`,
-		"domxss":   `\.(innerHTML|outerHTML|location|href|write|writeln|src|location\.href)`,
-		"js-sinks": `(eval|setTimeout|setInterval|Function)\(`,
-		"execs":    `exec\(`,
+		"aws-keys":      `(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}`,
+		"api-keys":      `(?i)(?:api_key|apikey|secret|token|auth|password|key|credentials)[=:]["']([a-zA-Z0-9_\-\.\~]{10,80})["']`,
+		"jwt":           `eyJhbGciOi`,
+		"firebase":      `firebaseio\.com`,
+		"github":        `(?i)github_token[=:]["']([a-zA-Z0-9]{35,40})["']`,
+		"domxss":        `\.(innerHTML|outerHTML|location|href|write|writeln|src|location\.href)`,
+		"js-sinks":      `(eval|setTimeout|setInterval|Function)\(`,
+		"execs":         `exec\(`,
+		"slack-webhook": `https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}`,
+		"google-api":    `AIza[0-9A-Za-z-_]{35}`,
+		"stripe-api":    `sk_live_[0-9a-zA-Z]{24}`,
+		"db-connection": `(mongodb\+srv|postgres|mysql):\/\/[^\s"'` + "`" + `<>]+`,
+		"private-key":   `-----BEGIN [A-Z ]+ PRIVATE KEY-----`,
 	}
 
 	compiled := make(map[string][]*regexp.Regexp)
@@ -872,8 +957,13 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 				var localJSMatches []string
 				var localSecretMatches []string
 				foundSecret := false
+				matchCount := 0
+				maxMatches := 100
 
 				for _, line := range lines {
+					if matchCount >= maxMatches {
+						break
+					}
 					lineTrimmed := strings.TrimSpace(line)
 					if lineTrimmed == "" {
 						continue
@@ -881,23 +971,71 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 
 					// Scan JS patterns
 					for name, regexes := range jsPatterns {
+						if matchCount >= maxMatches {
+							break
+						}
 						for _, re := range regexes {
-							if re.MatchString(lineTrimmed) {
-								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+							indices := re.FindAllStringSubmatchIndex(lineTrimmed, -1)
+							for _, ind := range indices {
+								if len(ind) < 2 {
+									continue
+								}
+								start, end := ind[0], ind[1]
+								secretVal := lineTrimmed[start:end]
+								if len(ind) >= 4 {
+									gStart, gEnd := ind[2], ind[3]
+									if gStart >= 0 && gEnd >= 0 {
+										secretVal = lineTrimmed[gStart:gEnd]
+									}
+								}
+
+								if !isLikelySecret(name, secretVal) {
+									continue
+								}
+
+								contextStr := extractContext(lineTrimmed, start, end, 100)
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, contextStr)
 								localJSMatches = append(localJSMatches, matchLine)
-								break
+								matchCount++
+								if matchCount >= maxMatches {
+									break
+								}
 							}
 						}
 					}
 
 					// Scan Secret patterns
 					for name, regexes := range secretPatterns {
+						if matchCount >= maxMatches {
+							break
+						}
 						for _, re := range regexes {
-							if re.MatchString(lineTrimmed) {
-								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+							indices := re.FindAllStringSubmatchIndex(lineTrimmed, -1)
+							for _, ind := range indices {
+								if len(ind) < 2 {
+									continue
+								}
+								start, end := ind[0], ind[1]
+								secretVal := lineTrimmed[start:end]
+								if len(ind) >= 4 {
+									gStart, gEnd := ind[2], ind[3]
+									if gStart >= 0 && gEnd >= 0 {
+										secretVal = lineTrimmed[gStart:gEnd]
+									}
+								}
+
+								if !isLikelySecret(name, secretVal) {
+									continue
+								}
+
+								contextStr := extractContext(lineTrimmed, start, end, 100)
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, contextStr)
 								localSecretMatches = append(localSecretMatches, matchLine)
 								foundSecret = true
-								break
+								matchCount++
+								if matchCount >= maxMatches {
+									break
+								}
 							}
 						}
 					}
