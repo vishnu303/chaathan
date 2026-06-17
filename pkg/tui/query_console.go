@@ -92,7 +92,8 @@ func StartQueryConsole(presetScanID int64) error {
 	for i := 0; i < 6; i++ {
 		table := tview.NewTable().
 			SetBorders(false).
-			SetSelectable(true, false)
+			SetSelectable(true, false).
+			SetFixed(1, 0)
 		
 		table.SetBorder(true).
 			SetTitleColor(tcell.GetColor(ColorSapphire)).
@@ -383,6 +384,7 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 	table.Clear()
 
 	filter := strings.ToLower(q.FilterText)
+	rowIdx := 1
 
 	switch tabIndex {
 	case 0: // Subdomains
@@ -398,7 +400,7 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 			table.SetCell(0, col, cell)
 		}
 
-		rowIdx := 1
+		rowIdx = 1
 		for _, s := range q.subdomains {
 			if filter != "" && !strings.Contains(strings.ToLower(s.Domain), filter) &&
 				!strings.Contains(strings.ToLower(s.IPAddress), filter) &&
@@ -434,7 +436,7 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 			table.SetCell(0, col, cell)
 		}
 
-		rowIdx := 1
+		rowIdx = 1
 		for _, p := range q.ports {
 			portStr := fmt.Sprintf("%d", p.Port)
 			if filter != "" && !strings.Contains(strings.ToLower(p.Host), filter) &&
@@ -465,7 +467,7 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 			table.SetCell(0, col, cell)
 		}
 
-		rowIdx := 1
+		rowIdx = 1
 		for _, v := range q.vulns {
 			if filter != "" && !strings.Contains(strings.ToLower(v.Severity), filter) &&
 				!strings.Contains(strings.ToLower(v.Host), filter) &&
@@ -515,7 +517,7 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 			table.SetCell(0, col, cell)
 		}
 
-		rowIdx := 1
+		rowIdx = 1
 		for _, u := range q.urls {
 			statusStr := fmt.Sprintf("%d", u.StatusCode)
 			if filter != "" && !strings.Contains(statusStr, filter) &&
@@ -565,7 +567,7 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 			table.SetCell(0, col, cell)
 		}
 
-		rowIdx := 1
+		rowIdx = 1
 		for _, e := range q.endpoints {
 			if filter != "" && !strings.Contains(strings.ToLower(e.Method), filter) &&
 				!strings.Contains(strings.ToLower(e.Source), filter) &&
@@ -603,7 +605,7 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 			table.SetCell(0, col, cell)
 		}
 
-		rowIdx := 1
+		rowIdx = 1
 		for _, r := range q.roi {
 			scoreStr := fmt.Sprintf("%d", r.Score)
 			statusStr := fmt.Sprintf("%d", r.StatusCode)
@@ -651,9 +653,15 @@ func (q *QueryConsole) populateTable(tabIndex int) {
 			table.SetCell(rowIdx, 2, tview.NewTableCell(" "+statusStr).SetTextColor(statusColor).SetAlign(tview.AlignCenter))
 			table.SetCell(rowIdx, 3, tview.NewTableCell(" "+r.URL).SetTextColor(tcell.ColorWhite))
 			table.SetCell(rowIdx, 4, tview.NewTableCell(" "+surfaces).SetTextColor(tcell.GetColor(ColorGreen)))
-			rowIdx++
 		}
 	}
+
+	if rowIdx > 1 {
+		table.Select(1, 0)
+	} else {
+		table.Select(0, 0)
+	}
+	table.ScrollToBeginning()
 }
 
 // showDetailsPopup opens detailed overlay modal cards
