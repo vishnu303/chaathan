@@ -36,6 +36,11 @@ func init() {
 func runStatus(cmd *cobra.Command, args []string) {
 	if !showPlainStatus {
 		if err := tui.StartDashboard(); err != nil {
+			if resumeSig, ok := err.(tui.ResumeSignal); ok {
+				database.Close()
+				resumeScanByID(resumeSig.ScanID)
+				return
+			}
 			logger.Error("Failed to start TUI dashboard: %v", err)
 			// Fallback to plain text status on dashboard failure
 		} else {
