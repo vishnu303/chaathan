@@ -1,14 +1,14 @@
-// Phase 1 — Asset Discovery (Steps 1–5)
+// Phase 1 — Asset Discovery (Steps 2–6)
 //
 // Collects all possible subdomains/assets before any validation.
 // Wayback/GAU are intentionally excluded — they run in Phase 3
 // (Content Discovery) after live hosts are known.
 //
-//  1. Passive Subdomain Enumeration (Subfinder + Assetfinder + Sublist3r) [Parallel]
-//  2. Active Subdomain Enumeration (Amass) [Optional]
-//  3. GitHub Subdomain Discovery [Requires token]
-//  4. Search-Engine Dorking (Uncover) [Optional]
-//  5. JavaScript Crawling (Hakrawler) [Optional]
+//  2. Passive Subdomain Enumeration (Subfinder + Assetfinder + Sublist3r) [Parallel]
+//  3. Active Subdomain Enumeration (Amass) [Optional]
+//  4. GitHub Subdomain Discovery [Requires token]
+//  5. Search-Engine Dorking (Uncover) [Optional]
+//  6. JavaScript Crawling (Hakrawler) [Optional]
 package wildcard_flow
 
 import (
@@ -20,13 +20,13 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// Step 1 — Passive Subdomain Enumeration
+// Step 2 — Passive Subdomain Enumeration
 // ─────────────────────────────────────────────────────────────
 
 // stepPassiveEnum runs Subfinder, Assetfinder, and Sublist3r in parallel.
 // Returns true if the scan should be cancelled.
 func stepPassiveEnum(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("passive_enum", "Step 1: Passive Subdomain Enumeration"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("passive_enum", "Step 2: Passive Subdomain Enumeration"); skipped {
 		return cancelled
 	}
 	writeEmptyFile(c.F.SubfinderOut)
@@ -109,18 +109,18 @@ func stepPassiveEnum(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 2 — Active Subdomain Enumeration (Amass)
+// Step 3 — Active Subdomain Enumeration (Amass)
 // ─────────────────────────────────────────────────────────────
 
 // stepActiveEnum runs Amass unless --skip-amass is set.
 // Returns true if the scan should be cancelled.
 func stepActiveEnum(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("active_enum", "Step 2: Active Subdomain Enumeration (Amass)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("active_enum", "Step 3: Active Subdomain Enumeration (Amass)"); skipped {
 		return cancelled
 	}
 
 	if c.SkipAmass {
-		logger.StepHeader("Step 2: Skipping Amass (--skip-amass)")
+		logger.StepHeader("Step 3: Skipping Amass (--skip-amass)")
 		logger.FileDebug("amass skipped via --skip-amass flag")
 		c.StateMgr.MarkStepComplete(c.State, "active_enum")
 		return c.cancelled()
@@ -162,18 +162,18 @@ func stepActiveEnum(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 3 — GitHub Subdomain Discovery
+// Step 4 — GitHub Subdomain Discovery
 // ─────────────────────────────────────────────────────────────
 
 // stepGitHubRecon runs github-subdomains when a token is available.
 // Returns true if the scan should be cancelled.
 func stepGitHubRecon(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("github_recon", "Step 3: GitHub Subdomain Discovery"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("github_recon", "Step 4: GitHub Subdomain Discovery"); skipped {
 		return cancelled
 	}
 
 	if c.GitHubToken == "" {
-		logger.StepHeader("Step 3: Skipping GitHub Recon (no token provided)")
+		logger.StepHeader("Step 4: Skipping GitHub Recon (no token provided)")
 		logger.Warning("Set GITHUB_TOKEN env var or use --github-token for GitHub recon")
 		logger.FileDebug("github_recon skipped: no token provided")
 		c.StateMgr.MarkStepComplete(c.State, "github_recon")
@@ -218,18 +218,18 @@ func stepGitHubRecon(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 4 — Search-Engine Dorking (Uncover)
+// Step 5 — Search-Engine Dorking (Uncover)
 // ─────────────────────────────────────────────────────────────
 
 // stepSearchEngineRecon runs Uncover unless --skip-uncover is set.
 // Returns true if the scan should be cancelled.
 func stepSearchEngineRecon(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("search_engine_recon", "Step 4: Passive Search Engine Recon (Uncover)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("search_engine_recon", "Step 5: Passive Search Engine Recon (Uncover)"); skipped {
 		return cancelled
 	}
 
 	if c.SkipUncover {
-		logger.StepHeader("Step 4: Skipping Uncover (--skip-uncover)")
+		logger.StepHeader("Step 5: Skipping Uncover (--skip-uncover)")
 		c.StateMgr.MarkStepComplete(c.State, "search_engine_recon")
 		return c.cancelled()
 	}
@@ -275,18 +275,18 @@ func stepSearchEngineRecon(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 5 — JS Crawling (Hakrawler)
+// Step 6 — JS Crawling (Hakrawler)
 // ─────────────────────────────────────────────────────────────
 
 // stepJSSubdomains crawls the root domain with Hakrawler to surface additional links and subdomains.
 // Returns true if the scan should be cancelled.
 func stepJSSubdomains(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("js_subdomain_discovery", "Step 5: JS Crawling (Hakrawler)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("js_subdomain_discovery", "Step 6: JS Crawling (Hakrawler)"); skipped {
 		return cancelled
 	}
 
 	if c.SkipHakrawler {
-		logger.StepHeader("Step 5: Skipping Hakrawler (--skip-hakrawler)")
+		logger.StepHeader("Step 6: Skipping Hakrawler (--skip-hakrawler)")
 		c.StateMgr.MarkStepComplete(c.State, "js_subdomain_discovery")
 		return c.cancelled()
 	}

@@ -45,10 +45,10 @@ type Step struct {
 // Order matches the 5-phase execution sequence in pkg/wildcard_flow/flow.go:
 //
 //	Phase 1 (Asset Discovery):   passive_enum, active_enum, github_recon, search_engine_recon, js_subdomain_discovery
-//	Phase 2 (Validation):        dns_resolution, dns_bruteforce, http_probing, tls_analysis, port_scanning
+//	Phase 2 (Validation):        dns_resolution, dns_bruteforce, port_scanning, http_probing, tls_analysis
 //	Phase 3 (Content Discovery): url_discovery, web_crawling, js_analysis,
-//	                             param_discovery, url_consolidation, js_secret_scan, dir_fuzzing
-//	Phase 4 (Vuln Scanning):     vuln_scanning, vuln_scanning_urls, takeover_detection, xss_scanning
+//	                             dir_fuzzing, param_discovery, url_consolidation, js_secret_scan
+//	Phase 4 (Vuln Scanning):     takeover_detection, vuln_scanning, vuln_scanning_urls, xss_scanning
 //	Phase 5 (Fingerprinting):    tech_waf_fingerprinting
 var WildcardSteps = []Step{
 	// Phase 0 — Proxy Scraping
@@ -63,21 +63,21 @@ var WildcardSteps = []Step{
 	// Phase 2 — Validation & Fingerprint
 	{Name: "dns_resolution", Description: "Consolidation & DNS Resolution", Required: true, Tool: "dnsx"},
 	{Name: "dns_bruteforce", Description: "DNS Brute-force (ShuffleDNS)", Required: false, Tool: "shuffledns,massdns"},
+	{Name: "port_scanning", Description: "Port Scanning", Required: false, Tool: "naabu"},
 	{Name: "http_probing", Description: "HTTP Probing", Required: true, Tool: "httpx"},
 	{Name: "tls_analysis", Description: "TLS Certificate Analysis", Required: false, Tool: "tlsx"},
-	{Name: "port_scanning", Description: "Port Scanning", Required: false, Tool: "naabu"},
 	// Phase 3 — Content Discovery
 	{Name: "url_discovery", Description: "Historical URL Discovery", Required: false, Tool: "waybackurls,gau"},
 	{Name: "web_crawling", Description: "Web Crawling", Required: false, Tool: "katana,gospider"},
 	{Name: "js_analysis", Description: "JavaScript Analysis (GoLinkFinder)", Required: false, Tool: "GoLinkFinder"},
+	{Name: "dir_fuzzing", Description: "Directory Fuzzing", Required: false, Tool: "ffuf"},
 	{Name: "param_discovery", Description: "HTTP Parameter Discovery", Required: false, Tool: "arjun"},
 	{Name: "url_consolidation", Description: "URL Consolidation & Live Check", Required: false, Tool: "httpx"},
 	{Name: "js_secret_scan", Description: "JS File Secret Scan (gf)", Required: false, Tool: "httpx,gf"},
-	{Name: "dir_fuzzing", Description: "Directory Fuzzing", Required: false, Tool: "ffuf"},
 	// Phase 4 — Vulnerability Scanning
+	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "nuclei"},
 	{Name: "vuln_scanning", Description: "Vulnerability Scanning (Infra)", Required: false, Tool: "nuclei"},
 	{Name: "vuln_scanning_urls", Description: "Vulnerability Scanning (URLs)", Required: false, Tool: "nuclei"},
-	{Name: "takeover_detection", Description: "Subdomain Takeover Detection", Required: false, Tool: "nuclei"},
 	{Name: "xss_scanning", Description: "XSS Scanning", Required: false, Tool: "dalfox"},
 	// Phase 5 — Fingerprinting
 	{Name: "tech_waf_fingerprinting", Description: "Technology & WAF Fingerprinting", Required: false, Tool: "httpx,nuclei"},

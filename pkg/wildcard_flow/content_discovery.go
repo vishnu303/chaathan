@@ -1,16 +1,16 @@
-// Phase 3 — Content Discovery (Steps 11–17)
+// Phase 3 — Content Discovery (Steps 12–18)
 //
 // Discovers URLs, endpoints, and directories from live hosts.
 // Wayback/GAU run here (not in Phase 1) so URLs are collected
 // only for validated live hosts.
 //
-//  11. Historical URL Discovery (Waybackurls + GAU) [Parallel]
-//  12. Web Crawling (Katana + GoSpider) [Parallel, Optional]
-//  13. JavaScript Analysis — Endpoint Discovery (GoLinkFinder)
-//  14. HTTP Parameter Discovery (Arjun) [Optional]
-//  15. URL Consolidation & Live Check (httpx) + ROI metadata
-//  16. JS Secret Scan (gf JS + Secrets)
-//  17. Directory Fuzzing (ffuf) [Optional — requires --wordlist]
+//  12. Historical URL Discovery (Waybackurls + GAU) [Parallel]
+//  13. Web Crawling (Katana + GoSpider) [Parallel, Optional]
+//  14. JavaScript Analysis — Endpoint Discovery (GoLinkFinder)
+//  15. Directory Fuzzing (ffuf) [Optional — requires --wordlist]
+//  16. HTTP Parameter Discovery (Arjun) [Optional]
+//  17. URL Consolidation & Live Check (httpx) + ROI metadata
+//  18. JS Secret Scan (gf JS + Secrets)
 package wildcard_flow
 
 import (
@@ -43,7 +43,7 @@ import (
 // stepURLDiscovery runs Waybackurls and GAU in parallel on the target domain.
 // Returns true if the scan should be cancelled.
 func stepURLDiscovery(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("url_discovery", "Step 11: Historical URL Discovery"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("url_discovery", "Step 12: Historical URL Discovery"); skipped {
 		return cancelled
 	}
 	writeEmptyFile(c.F.WaybackOut)
@@ -148,12 +148,12 @@ func stepURLDiscovery(c *Ctx) bool {
 // stepWebCrawling runs Katana and GoSpider in parallel.
 // Returns true if the scan should be cancelled.
 func stepWebCrawling(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("web_crawling", "Step 12: Web Crawling"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("web_crawling", "Step 13: Web Crawling"); skipped {
 		return cancelled
 	}
 
 	if c.SkipCrawl {
-		logger.StepHeader("Step 12: Skipping Web Crawling (--skip-crawl)")
+		logger.StepHeader("Step 13: Skipping Web Crawling (--skip-crawl)")
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 		return c.cancelled()
 	}
@@ -265,7 +265,7 @@ func stepWebCrawling(c *Ctx) bool {
 // stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
 // Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("js_analysis", "Step 13: JavaScript Analysis"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("js_analysis", "Step 14: JavaScript Analysis"); skipped {
 		return cancelled
 	}
 	writeEmptyFile(c.F.GoLinkFinderOut)
@@ -273,7 +273,38 @@ func stepJSAnalysis(c *Ctx) bool {
 
 	var golinkfinderSkipped bool
 	if err := runWithSkip(c, "GoLinkFinder", func(sCtx context.Context) error {
-		return c.Tb.RunGoLinkFinder(sCtx, "https://"+c.Domain, c.F.GoLinkFinderOut)
+		liveHosts := loadLineSlice(c.F.HttpxLiveHosts, 50)
+		if len(liveHosts) == 0 {
+			liveHosts = []string{"https://" + c.Domain}
+		}
+
+		for _, host := range liveHosts {
+			select {
+			case <-sCtx.Done():
+				return sCtx.Err()
+			default:
+			}
+
+			target := host
+			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+				target = "https://" + target
+			}
+
+			tmpOut := filepath.Join(filepath.Dir(c.F.GoLinkFinderOut), fmt.Sprintf("golinkfinder_tmp_%d.txt", rand.IntN(1000000)))
+			// Ensure file is deleted afterwards
+			defer os.Remove(tmpOut)
+
+			if err := c.Tb.RunGoLinkFinder(sCtx, target, tmpOut); err == nil && utils.FileExists(tmpOut) {
+				if data, readErr := os.ReadFile(tmpOut); readErr == nil && len(data) > 0 {
+					fOut, openErr := os.OpenFile(c.F.GoLinkFinderOut, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+					if openErr == nil {
+						_, _ = fOut.Write(data)
+						fOut.Close()
+					}
+				}
+			}
+		}
+		return nil
 	}); err != nil {
 		if err == ErrToolSkipped {
 			golinkfinderSkipped = true
@@ -312,12 +343,12 @@ func stepJSAnalysis(c *Ctx) bool {
 // downstream scanners (Nuclei/Dalfox).
 // Returns true if the scan should be cancelled.
 func stepParamDiscovery(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("param_discovery", "Step 14: HTTP Parameter Discovery (Arjun)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("param_discovery", "Step 16: HTTP Parameter Discovery (Arjun)"); skipped {
 		return cancelled
 	}
 
 	if c.SkipArjun {
-		logger.StepHeader("Step 14: Skipping Arjun (--skip-arjun)")
+		logger.StepHeader("Step 16: Skipping Arjun (--skip-arjun)")
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		return c.cancelled()
 	}
@@ -332,10 +363,52 @@ func stepParamDiscovery(c *Ctx) bool {
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		return c.cancelled()
 	}
-	logger.SubStep("Running Arjun on live hosts...")
 
-	// Validate parameters wordlist if configured (same pattern as ffuf/shuffledns).
-	// If the file doesn't exist, run Arjun without -w so it uses its built-in default.
+		// Merge FfufDiscoveredURLs and high-signal endpoints into a temporary input file
+	arjunInputFile := filepath.Join(filepath.Dir(c.F.HttpxLiveHosts), "arjun_input.txt")
+	
+	var arjunTargets []string
+
+	// Add ffuf fuzzing results
+	if utils.FileExists(c.F.FfufDiscoveredURLs) {
+		arjunTargets = append(arjunTargets, loadLineSlice(c.F.FfufDiscoveredURLs, 0)...)
+	}
+
+	// Collect and add high-signal crawler endpoints (limit to 150 to keep it fast)
+	crawlerFiles := []string{
+		c.F.WaybackOut,
+		c.F.GauOut,
+		c.F.KatanaOut,
+		c.F.GospiderOut,
+		c.F.GoLinkFinderOut,
+	}
+	highSignal := collectHighSignalEndpoints(crawlerFiles, 150)
+	arjunTargets = append(arjunTargets, highSignal...)
+
+	// Deduplicate targets
+	arjunTargets = utils.DeduplicateSlice(arjunTargets)
+
+	if len(arjunTargets) == 0 {
+		logger.Warning("No targets found for parameter discovery — skipping Arjun")
+		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+		return c.cancelled()
+	}
+
+	// Write targets to arjunInputFile
+	if fIn, err := os.Create(arjunInputFile); err == nil {
+		for _, t := range arjunTargets {
+			_, _ = fIn.WriteString(t + "\n")
+		}
+		fIn.Close()
+	} else {
+		c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
+		logger.Error("Failed to prepare Arjun input: %v", err)
+		return c.cancelled()
+	}
+
+	logger.SubStep("Running Arjun on %d targets...", len(arjunTargets))
+
+	// Validate parameters wordlist if configured.
 	paramWordlist := ""
 	if c.Cfg != nil && c.Cfg.General.Wordlists.Parameters != "" {
 		if utils.FileExists(c.Cfg.General.Wordlists.Parameters) {
@@ -350,7 +423,7 @@ func stepParamDiscovery(c *Ctx) bool {
 
 	var arjunSkipped bool
 	if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
-		return c.Tb.RunArjunWithWordlist(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut, paramWordlist)
+		return c.Tb.RunArjunWithWordlist(sCtx, arjunInputFile, c.F.ArjunOut, paramWordlist)
 	}); err != nil {
 		if err == ErrToolSkipped {
 			arjunSkipped = true
@@ -381,6 +454,103 @@ func stepParamDiscovery(c *Ctx) bool {
 	return c.cancelled()
 }
 
+// collectHighSignalEndpoints reads raw URLs from crawler and discovery files,
+// filters for high-signal parameters/endpoints (dynamic extensions, API paths, interesting keywords),
+// deduplicates them by host+path, and returns a capped slice of URLs.
+func collectHighSignalEndpoints(files []string, limit int) []string {
+	seen := make(map[string]bool)
+	var endpoints []string
+
+	// Dynamic extensions to look for
+	extensions := []string{
+		".php", ".aspx", ".asp", ".jsp", ".jspx", ".do", ".action", ".cfm", ".pl", ".py", ".rb", ".cgi",
+	}
+
+	// Interesting API and functional paths
+	keywords := []string{
+		"/api/", "/v1/", "/v2/", "/v3/", "/rest/", "/graphql/", "/json",
+		"/login", "/register", "/auth", "/search", "/query", "/download", "/upload", "/file", "/admin", "/panel", "/debug", "/config",
+	}
+
+	for _, file := range files {
+		if !utils.FileExists(file) {
+			continue
+		}
+
+		f, err := os.Open(file)
+		if err != nil {
+			continue
+		}
+
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			// Clean line (strip GoSpider tags if present, or spaces)
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			rawURL := fields[0]
+
+			// Parse URL to validate and normalize
+			parsed, err := url.Parse(rawURL)
+			if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+				continue
+			}
+
+			// Clean/normalize path
+			pathLower := strings.ToLower(parsed.Path)
+
+			// Match criteria
+			isDynamic := false
+
+			// 1. Check extensions
+			for _, ext := range extensions {
+				if strings.HasSuffix(pathLower, ext) || strings.Contains(pathLower, ext+"/") {
+					isDynamic = true
+					break
+				}
+			}
+
+			// 2. Check keywords in path
+			if !isDynamic {
+				for _, kw := range keywords {
+					if strings.Contains(pathLower, kw) {
+						isDynamic = true
+						break
+					}
+				}
+			}
+
+			// 3. Check if it already has query parameters (high signal for dynamic behavior)
+			if !isDynamic && parsed.RawQuery != "" {
+				isDynamic = true
+			}
+
+			if isDynamic {
+				// Normalize to host+path for deduplication (strip query params and fragment)
+				dedupKey := parsed.Scheme + "://" + parsed.Host + parsed.Path
+				if !seen[dedupKey] {
+					seen[dedupKey] = true
+					// Keep the original URL
+					endpoints = append(endpoints, rawURL)
+					if limit > 0 && len(endpoints) >= limit {
+						f.Close()
+						return endpoints
+					}
+				}
+			}
+		}
+		f.Close()
+	}
+
+	return endpoints
+}
+
 // ─────────────────────────────────────────────────────────────
 // Step 15 — URL Consolidation & Live Check
 // ─────────────────────────────────────────────────────────────
@@ -389,7 +559,7 @@ func stepParamDiscovery(c *Ctx) bool {
 // and enriches ROI metadata for high-value targets.
 // Returns true if the scan should be cancelled.
 func stepURLConsolidation(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("url_consolidation", "Step 15: URL Consolidation & Live Check"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("url_consolidation", "Step 17: URL Consolidation & Live Check"); skipped {
 		return cancelled
 	}
 	writeEmptyFile(c.F.AllURLsRaw)
@@ -777,7 +947,7 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 }
 
 func stepJSSecretScan(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("js_secret_scan", "Step 16: JS Secret Scan (gf JS + Secrets)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("js_secret_scan", "Step 18: JS Secret Scan (gf JS + Secrets)"); skipped {
 		return cancelled
 	}
 
@@ -906,21 +1076,21 @@ func extractHostsFromURLFile(filePath string) []string {
 // stepDirFuzzing runs ffuf when a wordlist is provided via --wordlist.
 // Returns true if the scan should be cancelled.
 func stepDirFuzzing(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("dir_fuzzing", "Step 17: Directory Fuzzing (ffuf)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("dir_fuzzing", "Step 15: Directory Fuzzing (ffuf)"); skipped {
 		return cancelled
 	}
 
 	if c.WordlistPath == "" {
-		logger.StepHeader("Step 17: Skipping ffuf (no --wordlist provided)")
+		logger.StepHeader("Step 15: Skipping ffuf (no --wordlist provided)")
 		logger.Info("Provide --wordlist to enable ffuf")
 		c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
 		return c.cancelled()
 	}
 
 	writeEmptyFile(c.F.FfufOut)
+	writeEmptyFile(c.F.FfufDiscoveredURLs)
 
 	// Validate wordlist file exists before invoking ffuf.
-	// The path may come from config defaults (e.g. seclists) that aren't installed.
 	if !utils.FileExists(c.WordlistPath) {
 		logger.Warning("ffuf wordlist not found: %s", c.WordlistPath)
 		logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --wordlist path")
@@ -929,13 +1099,61 @@ func stepDirFuzzing(c *Ctx) bool {
 		return c.cancelled()
 	}
 
-	targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
-	logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
-	logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
+	liveHosts := loadLineSlice(c.F.HttpxLiveHosts, 25)
+	if len(liveHosts) == 0 {
+		// Fallback to root domain
+		liveHosts = []string{"https://" + c.Domain}
+	}
+
+	type localFfufResult struct {
+		Input  map[string]string `json:"input"`
+		URL    string            `json:"url"`
+		Status int               `json:"status"`
+	}
+
+	var allResults []localFfufResult
+	var resultsMu sync.Mutex
+
+	logger.SubStep("Running ffuf with wordlist on %d live hosts...", len(liveHosts))
 
 	var ffufSkipped bool
 	if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
-		return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
+		for _, host := range liveHosts {
+			select {
+			case <-sCtx.Done():
+				return sCtx.Err()
+			default:
+			}
+
+			target := host
+			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+				target = "https://" + target
+			}
+			targetURL := target
+			if !strings.HasSuffix(targetURL, "/") {
+				targetURL += "/"
+			}
+			targetURL += "FUZZ"
+
+			tmpFfufOut := filepath.Join(filepath.Dir(c.F.FfufOut), fmt.Sprintf("ffuf_tmp_%d.json", rand.IntN(1000000)))
+			defer os.Remove(tmpFfufOut)
+
+			logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, tmpFfufOut)
+			if err := c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, tmpFfufOut); err == nil && utils.FileExists(tmpFfufOut) {
+				// Parse and add to allResults
+				if data, readErr := os.ReadFile(tmpFfufOut); readErr == nil && len(data) > 0 {
+					var payload struct {
+						Results []localFfufResult `json:"results"`
+					}
+					if jsonErr := json.Unmarshal(data, &payload); jsonErr == nil {
+						resultsMu.Lock()
+						allResults = append(allResults, payload.Results...)
+						resultsMu.Unlock()
+					}
+				}
+			}
+		}
+		return nil
 	}); err != nil {
 		if err == ErrToolSkipped {
 			ffufSkipped = true
@@ -944,7 +1162,27 @@ func stepDirFuzzing(c *Ctx) bool {
 			logger.Warning("ffuf failed: %v", err)
 		}
 	} else {
-		logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
+		logger.SubStep("[Done] ffuf - Merged results size: %d", len(allResults))
+	}
+
+	// Write consolidated results to c.F.FfufOut
+	consolidatedPayload := struct {
+		Results []localFfufResult `json:"results"`
+	}{Results: allResults}
+	if jsData, err := json.Marshal(consolidatedPayload); err == nil {
+		_ = os.WriteFile(c.F.FfufOut, jsData, 0644)
+	}
+
+	// Write extracted URLs to c.F.FfufDiscoveredURLs
+	if len(allResults) > 0 {
+		if fUrls, err := os.Create(c.F.FfufDiscoveredURLs); err == nil {
+			for _, res := range allResults {
+				if strings.TrimSpace(res.URL) != "" {
+					_, _ = fUrls.WriteString(res.URL + "\n")
+				}
+			}
+			fUrls.Close()
+		}
 	}
 
 	if c.ScanID > 0 && utils.FileExists(c.F.FfufOut) {

@@ -99,6 +99,7 @@ type Files struct {
 	UncoverOut         string
 	UncoverHostsOut    string
 	ConsolidatedSubs   string
+	HttpxInput         string
 	DnsxOut            string
 	ShufflednsOut      string
 	HttpxOut           string
@@ -121,6 +122,7 @@ type Files struct {
 	GFSecretsFinal     string
 	ROIMetadataTargets string
 	FfufOut            string
+	FfufDiscoveredURLs string
 	NucleiOut          string
 	NucleiURLOut       string
 	NucleiURLTargets   string
@@ -158,6 +160,7 @@ func newFiles(dir string) Files {
 		UncoverOut:         j("uncover.json"),
 		UncoverHostsOut:    j("uncover_hosts.txt"),
 		ConsolidatedSubs:   j("all_subdomains.txt"),
+		HttpxInput:         j("httpx_input.txt"),
 		DnsxOut:            j("dnsx_resolved.json"),
 		ShufflednsOut:      j("shuffledns_bruteforce.txt"),
 		HttpxOut:           j("httpx_live.json"),
@@ -180,6 +183,7 @@ func newFiles(dir string) Files {
 		GFSecretsFinal:     jf("gf_secrets_findings.txt"),
 		ROIMetadataTargets: j("roi_metadata_targets.txt"),
 		FfufOut:            j("ffuf_results.json"),
+		FfufDiscoveredURLs: j("ffuf_discovered_urls.txt"),
 		// Nuclei JSON outputs go to final_files/ — they are product files
 		NucleiOut:        jf("nuclei_vulns.json"),
 		NucleiURLOut:     jf("nuclei_url_vulns.json"),
@@ -263,6 +267,7 @@ func (c *Ctx) urlSources() []string {
 		c.F.GospiderOut,
 		c.F.GoLinkFinderOut,
 		c.F.ArjunURLsOut,
+		c.F.FfufDiscoveredURLs,
 	}
 }
 
@@ -452,29 +457,29 @@ func Run(cfg RunConfig) error {
 		{"search_engine_recon", stepSearchEngineRecon},
 		{"js_subdomain_discovery", stepJSSubdomains},
 
-		// Phase 2 — Validation & Probing (Steps 6–10)
+		// Phase 2 — Validation & Probing (Steps 7–11)
 		{"dns_resolution", stepDNSConsolidation},
 		{"dns_bruteforce", stepDNSBruteforce},
+		{"port_scanning", stepPortScanning},
 		{"http_probing", stepHTTPProbing},
 		{"tls_analysis", stepTLSAnalysis},
-		{"port_scanning", stepPortScanning},
 
-		// Phase 3 — Content Discovery (Steps 11–17)
+		// Phase 3 — Content Discovery (Steps 12–18)
 		{"url_discovery", stepURLDiscovery},
 		{"web_crawling", stepWebCrawling},
 		{"js_analysis", stepJSAnalysis},
+		{"dir_fuzzing", stepDirFuzzing},
 		{"param_discovery", stepParamDiscovery},
 		{"url_consolidation", stepURLConsolidation},
 		{"js_secret_scan", stepJSSecretScan},
-		{"dir_fuzzing", stepDirFuzzing},
 
-		// Phase 4 — Vulnerability Scanning (Steps 18–21)
+		// Phase 4 — Vulnerability Scanning (Steps 19–22)
+		{"takeover_detection", stepTakeoverDetection},
 		{"vuln_scanning", stepVulnScanningInfra},
 		{"vuln_scanning_urls", stepVulnScanningURLs},
-		{"takeover_detection", stepTakeoverDetection},
 		{"xss_scanning", stepXSSScanning},
 
-		// Phase 5 — Fingerprinting (Step 22)
+		// Phase 5 — Fingerprinting (Step 23)
 		{"tech_waf_fingerprinting", stepFingerprinting},
 	}
 
