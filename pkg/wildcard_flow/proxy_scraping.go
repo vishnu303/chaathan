@@ -109,7 +109,7 @@ func (c *Ctx) isStepSkipped(stepName string) bool {
 		lines, err := utils.CountFileLines(c.F.HttpxLiveHosts)
 		return err != nil || lines == 0
 	case "param_discovery":
-		if c.SkipArjun {
+		if c.SkipX8 {
 			return true
 		}
 		lines, err := utils.CountFileLines(c.F.HttpxLiveHosts)

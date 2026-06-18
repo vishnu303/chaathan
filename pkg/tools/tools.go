@@ -209,36 +209,27 @@ func (t *ToolBox) appendGoSpiderUA(args []string) []string {
 	return append(args, "-u", t.getUA())
 }
 
-// appendArjunHeaders appends --headers for Arjun.
-// Arjun expects a newline-separated string for --headers, not the JSON format.
-// This method merges the User-Agent and any custom headers and cookies,
-// then joins them with actual newline characters.
-func (t *ToolBox) appendArjunHeaders(args []string) []string {
-	var headerLines []string
-
+// appendX8Headers appends headers for x8.
+// x8 expects repeated -H arguments: -H "Name: Value".
+func (t *ToolBox) appendX8Headers(args []string) []string {
 	// Add User-Agent
 	if t.uaEnabled() {
-		headerLines = append(headerLines, "User-Agent: "+t.getUA())
+		args = append(args, "-H", "User-Agent: "+t.getUA())
 	}
 
-	// Merge custom headers (from --header / -H CLI flags)
+	// Merge custom headers
 	for _, h := range t.CustomHeaders {
 		if strings.Contains(h, ":") {
-			headerLines = append(headerLines, h)
+			args = append(args, "-H", h)
 		}
 	}
 
-	// Merge custom cookie as a header
+	// Merge custom cookie
 	if t.CustomCookie != "" {
-		headerLines = append(headerLines, "Cookie: "+t.CustomCookie)
+		args = append(args, "-H", "Cookie: "+t.CustomCookie)
 	}
 
-	if len(headerLines) == 0 {
-		return args
-	}
-
-	// Format headers as newline-separated string for Arjun
-	return append(args, "--headers", strings.Join(headerLines, "\n"))
+	return args
 }
 
 // --- Proxy helpers ---
@@ -891,63 +882,27 @@ func (t *ToolBox) RunGoLinkFinder(ctx context.Context, url string, outputFile st
 	return err
 }
 
-// RunArjun discovers hidden HTTP parameters from a file of URLs (replaces single URL version)
-func (t *ToolBox) RunArjun(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
-	// Use configured parameters wordlist if available
-	if t.General != nil && t.General.Wordlists.Parameters != "" {
-		args = append(args, "-w", t.General.Wordlists.Parameters)
-	}
-	args = t.appendArjunHeaders(args)
-	var opts []runner.Option
-	if p := t.proxy(); p != "" {
-		opts = append(opts, runner.WithEnv(
-			"HTTP_PROXY="+p, "HTTPS_PROXY="+p,
-			"http_proxy="+p, "https_proxy="+p,
-			"ALL_PROXY="+p, "all_proxy="+p,
-		))
-	}
-	_, err := t.Runner.Run(ctx, "arjun", args, opts...)
-	return err
+// RunX8 discovers hidden HTTP parameters using x8.
+func (t *ToolBox) RunX8(ctx context.Context, inputFile string, outputFile string) error {
+	return t.RunX8WithWordlist(ctx, inputFile, outputFile, "")
 }
 
-// RunArjunWithWordlist discovers hidden HTTP parameters, using the given wordlist.
-// Pass an empty wordlist to let Arjun use its built-in default parameter list.
-func (t *ToolBox) RunArjunWithWordlist(ctx context.Context, inputFile string, outputFile string, wordlist string) error {
-	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
+// RunX8WithWordlist discovers hidden HTTP parameters using x8 and the given wordlist.
+func (t *ToolBox) RunX8WithWordlist(ctx context.Context, inputFile string, outputFile string, wordlist string) error {
+	args := []string{"-u", inputFile, "-o", outputFile, "-O", "json"}
 	if wordlist != "" {
 		args = append(args, "-w", wordlist)
-	}
-	args = t.appendArjunHeaders(args)
-	var opts []runner.Option
-	if p := t.proxy(); p != "" {
-		opts = append(opts, runner.WithEnv(
-			"HTTP_PROXY="+p, "HTTPS_PROXY="+p,
-			"http_proxy="+p, "https_proxy="+p,
-			"ALL_PROXY="+p, "all_proxy="+p,
-		))
-	}
-	_, err := t.Runner.Run(ctx, "arjun", args, opts...)
-	return err
-}
-
-// RunArjunFromFile discovers hidden HTTP parameters from a file of URLs
-func (t *ToolBox) RunArjunFromFile(ctx context.Context, inputFile string, outputFile string) error {
-	args := []string{"-i", inputFile, "-oJ", outputFile, "--stable"}
-	// Use configured parameters wordlist if available
-	if t.General != nil && t.General.Wordlists.Parameters != "" {
+	} else if t.General != nil && t.General.Wordlists.Parameters != "" {
 		args = append(args, "-w", t.General.Wordlists.Parameters)
 	}
-	args = t.appendArjunHeaders(args)
-	var opts []runner.Option
+
+	args = t.appendX8Headers(args)
+
 	if p := t.proxy(); p != "" {
-		opts = append(opts, runner.WithEnv(
-			"HTTP_PROXY="+p, "HTTPS_PROXY="+p,
-			"http_proxy="+p, "https_proxy="+p,
-			"ALL_PROXY="+p, "all_proxy="+p,
-		))
+		args = append(args, "-x", p)
 	}
-	_, err := t.Runner.Run(ctx, "arjun", args, opts...)
+
+	_, err := t.Runner.Run(ctx, "x8", args)
 	return err
 }
 

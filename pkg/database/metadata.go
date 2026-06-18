@@ -41,7 +41,7 @@ type URLMetadata struct {
 	FormCount        int       `json:"form_count"`
 	HasFileUpload    bool      `json:"has_file_upload"`
 	HiddenInputCount int       `json:"hidden_input_count"`
-	ArjunParamCount  int       `json:"arjun_param_count"`
+	ParamCount       int       `json:"param_count"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -109,7 +109,7 @@ func UpsertURLMetadata(scanID int64, meta URLMetadata) error {
 		`INSERT INTO url_metadata (
 			scan_id, url, host, headers_json, has_csp, has_cache_headers,
 			login_surface, response_bytes, form_count, has_file_upload,
-			hidden_input_count, arjun_param_count
+			hidden_input_count, param_count
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(scan_id, url) DO UPDATE SET
 			host = CASE
@@ -136,9 +136,9 @@ func UpsertURLMetadata(scanID int64, meta URLMetadata) error {
 				WHEN excluded.hidden_input_count > url_metadata.hidden_input_count THEN excluded.hidden_input_count
 				ELSE url_metadata.hidden_input_count
 			END,
-			arjun_param_count = CASE
-				WHEN excluded.arjun_param_count > url_metadata.arjun_param_count THEN excluded.arjun_param_count
-				ELSE url_metadata.arjun_param_count
+			param_count = CASE
+				WHEN excluded.param_count > url_metadata.param_count THEN excluded.param_count
+				ELSE url_metadata.param_count
 			END,
 			updated_at = CURRENT_TIMESTAMP`,
 		scanID,
@@ -152,7 +152,7 @@ func UpsertURLMetadata(scanID int64, meta URLMetadata) error {
 		meta.FormCount,
 		meta.HasFileUpload,
 		meta.HiddenInputCount,
-		meta.ArjunParamCount,
+		meta.ParamCount,
 	)
 	return err
 }
@@ -211,7 +211,7 @@ func GetURLMetadata(scanID int64) ([]URLMetadata, error) {
 	rows, err := DB.Query(
 		`SELECT scan_id, url, host, headers_json, has_csp, has_cache_headers,
 		        login_surface, response_bytes, form_count, has_file_upload,
-		        hidden_input_count, arjun_param_count, created_at, updated_at
+		        hidden_input_count, param_count, created_at, updated_at
 		 FROM url_metadata WHERE scan_id = ?`,
 		scanID,
 	)
@@ -235,7 +235,7 @@ func GetURLMetadata(scanID int64) ([]URLMetadata, error) {
 			&meta.FormCount,
 			&meta.HasFileUpload,
 			&meta.HiddenInputCount,
-			&meta.ArjunParamCount,
+			&meta.ParamCount,
 			&meta.CreatedAt,
 			&meta.UpdatedAt,
 		); err != nil {

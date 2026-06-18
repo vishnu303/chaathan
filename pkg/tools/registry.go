@@ -41,7 +41,7 @@ var AllTools = []ToolInfo{
 	// URL Discovery
 	{"waybackurls", "URLs", "Wayback Machine URL extraction", false, "github.com/tomnomnom/waybackurls@latest"},
 	{"gau", "URLs", "Historical URL discovery", false, "github.com/lc/gau/v2/cmd/gau@latest"},
-	{"arjun", "URLs", "Hidden HTTP parameter discovery (Python)", false, ""},
+	{"x8", "URLs", "Hidden HTTP parameter discovery (Rust)", false, ""},
 	{"katana", "Crawl", "Web crawling & spidering", false, "github.com/projectdiscovery/katana/cmd/katana@latest"},
 	{"gospider", "Crawl", "Web crawling & spidering", false, "github.com/jaeles-project/gospider@latest"},
 

@@ -19,7 +19,7 @@ All external tools configured in the application are cataloged in the static reg
   - **Subdomain Discovery:** subfinder, assetfinder, sublist3r, amass, github-subdomains.
   - **DNS Engines:** dnsx, shuffledns, massdns.
   - **Probing & Ports:** httpx, tlsx, naabu.
-  - **URL Gatherers:** waybackurls, gau, arjun.
+  - **URL Gatherers:** waybackurls, gau, x8.
   - **Crawlers:** katana, gospider, hakrawler.
   - **Security Audits:** nuclei, dalfox.
   - **Helpers:** anew, gf, proxy-scraper-checker, mubeng.

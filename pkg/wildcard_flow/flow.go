@@ -51,7 +51,7 @@ type RunConfig struct {
 	SkipDalfox        bool
 	SkipUncover       bool
 	SkipTlsx          bool
-	SkipArjun         bool
+	SkipX8            bool
 	SkipShuffleDNS    bool
 	SkipHakrawler     bool
 	SkipFingerprint   bool
@@ -110,8 +110,8 @@ type Files struct {
 	GospiderOut        string
 	GoLinkFinderOut    string
 	HakrawlerOut       string
-	ArjunOut           string
-	ArjunURLsOut       string
+	X8Out              string
+	X8URLsOut          string
 	AllURLsRaw         string
 	AllURLsLive        string
 	JSURLsFile         string
@@ -171,8 +171,8 @@ func newFiles(dir string) Files {
 		GospiderOut:        j("gospider_urls.txt"),
 		GoLinkFinderOut:    j("golinkfinder_endpoints.txt"),
 		HakrawlerOut:       j("hakrawler_crawl.txt"),
-		ArjunOut:           j("arjun_params.json"),
-		ArjunURLsOut:       j("arjun_urls.txt"),
+		X8Out:              j("x8_params.json"),
+		X8URLsOut:          j("x8_urls.txt"),
 		AllURLsRaw:         j("all_urls_raw.txt"),
 		AllURLsLive:        j("all_urls_live.txt"),
 		JSURLsFile:         j("js_urls.txt"),
@@ -266,7 +266,7 @@ func (c *Ctx) urlSources() []string {
 		c.F.KatanaOut,
 		c.F.GospiderOut,
 		c.F.GoLinkFinderOut,
-		c.F.ArjunURLsOut,
+		c.F.X8URLsOut,
 		c.F.FfufDiscoveredURLs,
 	}
 }
@@ -319,7 +319,7 @@ func Run(cfg RunConfig) error {
 		"skip_dalfox":        cfg.SkipDalfox,
 		"skip_uncover":       cfg.SkipUncover,
 		"skip_tlsx":          cfg.SkipTlsx,
-		"skip_arjun":         cfg.SkipArjun,
+		"skip_x8":            cfg.SkipX8,
 		"skip_shuffledns":    cfg.SkipShuffleDNS,
 		"skip_hakrawler":     cfg.SkipHakrawler,
 		"skip_fingerprint":   cfg.SkipFingerprint,
@@ -588,7 +588,7 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "js_subdomain_discovery":
 		return countLines(c.F.HakrawlerOut)
 	case "param_discovery":
-		return countLines(c.F.ArjunURLsOut)
+		return countLines(c.F.X8URLsOut)
 	case "url_consolidation":
 		return countLines(c.F.AllURLsLive)
 	case "js_secret_scan":

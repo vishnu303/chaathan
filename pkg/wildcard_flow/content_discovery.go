@@ -338,41 +338,41 @@ func stepJSAnalysis(c *Ctx) bool {
 // Step 14 — HTTP Parameter Discovery (Arjun)
 // ─────────────────────────────────────────────────────────────
 
-// stepParamDiscovery discovers HTTP parameters with Arjun (Step 14).
+// stepParamDiscovery discovers HTTP parameters with x8 (Step 16).
 // After a successful run it converts discovered params into parameterized URLs
-// (written to ArjunURLsOut) so they flow into Step 15 consolidation and
+// (written to X8URLsOut) so they flow into Step 17 consolidation and
 // downstream scanners (Nuclei/Dalfox).
 // Returns true if the scan should be cancelled.
 func stepParamDiscovery(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("param_discovery", "Step 16: HTTP Parameter Discovery (Arjun)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("param_discovery", "Step 16: HTTP Parameter Discovery (x8)"); skipped {
 		return cancelled
 	}
 
-	if c.SkipArjun {
-		logger.StepHeader("Step 16: Skipping Arjun (--skip-arjun)")
+	if c.SkipX8 {
+		logger.StepHeader("Step 16: Skipping x8 (--skip-x8)")
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		return c.cancelled()
 	}
 
-	writeEmptyFile(c.F.ArjunOut)
-	writeEmptyFile(c.F.ArjunURLsOut)
+	writeEmptyFile(c.F.X8Out)
+	writeEmptyFile(c.F.X8URLsOut)
 
 	// Preflight check
 	liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
 	if liveHostCount == 0 {
-		logger.Warning("No live hosts found — skipping Arjun parameter discovery")
+		logger.Warning("No live hosts found — skipping x8 parameter discovery")
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		return c.cancelled()
 	}
 
-		// Merge FfufDiscoveredURLs and high-signal endpoints into a temporary input file
-	arjunInputFile := filepath.Join(filepath.Dir(c.F.HttpxLiveHosts), "arjun_input.txt")
+	// Merge FfufDiscoveredURLs and high-signal endpoints into a temporary input file
+	x8InputFile := filepath.Join(filepath.Dir(c.F.HttpxLiveHosts), "x8_input.txt")
 	
-	var arjunTargets []string
+	var x8Targets []string
 
 	// Add ffuf fuzzing results
 	if utils.FileExists(c.F.FfufDiscoveredURLs) {
-		arjunTargets = append(arjunTargets, loadLineSlice(c.F.FfufDiscoveredURLs, 0)...)
+		x8Targets = append(x8Targets, loadLineSlice(c.F.FfufDiscoveredURLs, 0)...)
 	}
 
 	// Collect and add high-signal crawler endpoints (limit to 150 to keep it fast)
@@ -384,30 +384,30 @@ func stepParamDiscovery(c *Ctx) bool {
 		c.F.GoLinkFinderOut,
 	}
 	highSignal := collectHighSignalEndpoints(crawlerFiles, 150)
-	arjunTargets = append(arjunTargets, highSignal...)
+	x8Targets = append(x8Targets, highSignal...)
 
 	// Deduplicate targets
-	arjunTargets = utils.DeduplicateSlice(arjunTargets)
+	x8Targets = utils.DeduplicateSlice(x8Targets)
 
-	if len(arjunTargets) == 0 {
-		logger.Warning("No targets found for parameter discovery — skipping Arjun")
+	if len(x8Targets) == 0 {
+		logger.Warning("No targets found for parameter discovery — skipping x8")
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		return c.cancelled()
 	}
 
-	// Write targets to arjunInputFile
-	if fIn, err := os.Create(arjunInputFile); err == nil {
-		for _, t := range arjunTargets {
+	// Write targets to x8InputFile
+	if fIn, err := os.Create(x8InputFile); err == nil {
+		for _, t := range x8Targets {
 			_, _ = fIn.WriteString(t + "\n")
 		}
 		fIn.Close()
 	} else {
 		c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
-		logger.Error("Failed to prepare Arjun input: %v", err)
+		logger.Error("Failed to prepare x8 input: %v", err)
 		return c.cancelled()
 	}
 
-	logger.SubStep("Running Arjun on %d targets...", len(arjunTargets))
+	logger.SubStep("Running x8 on %d targets...", len(x8Targets))
 
 	// Validate parameters wordlist if configured.
 	paramWordlist := ""
@@ -415,39 +415,39 @@ func stepParamDiscovery(c *Ctx) bool {
 		if utils.FileExists(c.Cfg.General.Wordlists.Parameters) {
 			paramWordlist = c.Cfg.General.Wordlists.Parameters
 		} else {
-			logger.Warning("Arjun parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
+			logger.Warning("x8 parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
 			logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or set a valid wordlist in config.yaml")
-			logger.Info("  Falling back to Arjun's built-in parameter list")
-			logger.FileDebug("arjun: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
+			logger.Info("  Falling back to x8's built-in parameter list")
+			logger.FileDebug("x8: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
 		}
 	}
 
-	var arjunSkipped bool
-	if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
-		return c.Tb.RunArjunWithWordlist(sCtx, arjunInputFile, c.F.ArjunOut, paramWordlist)
+	var x8Skipped bool
+	if err := runWithSkip(c, "x8", func(sCtx context.Context) error {
+		return c.Tb.RunX8WithWordlist(sCtx, x8InputFile, c.F.X8Out, paramWordlist)
 	}); err != nil {
 		if err == ErrToolSkipped {
-			arjunSkipped = true
+			x8Skipped = true
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
-			logger.Warning("Arjun failed: %v", err)
+			logger.Warning("x8 failed: %v", err)
 		}
 	}
 
-	if c.ScanID > 0 && utils.FileExists(c.F.ArjunOut) {
-		count := convertArjunToURLs(c.F.ArjunOut, c.F.ArjunURLsOut)
-		stored := storeArjunParamCounts(c.ScanID, c.F.ArjunOut)
+	if c.ScanID > 0 && utils.FileExists(c.F.X8Out) {
+		count := convertX8ToURLs(c.F.X8Out, c.F.X8URLsOut)
+		stored := storeX8ParamCounts(c.ScanID, c.F.X8Out)
 		if count > 0 || stored > 0 {
 			label := ""
-			if arjunSkipped {
+			if x8Skipped {
 				label = " (partial)"
 			}
-			logger.Info("  Generated %d parameterized URLs from Arjun output%s", count, label)
-			logger.Info("  Stored Arjun param counts for %d URLs%s", stored, label)
-		} else if arjunSkipped {
-			logger.Info("  Arjun skipped — no parameters found")
+			logger.Info("  Generated %d parameterized URLs from x8 output%s", count, label)
+			logger.Info("  Stored x8 param counts for %d URLs%s", stored, label)
+		} else if x8Skipped {
+			logger.Info("  x8 skipped — no parameters found")
 		} else {
-			logger.Info("  Generated 0 parameterized URLs from Arjun output")
+			logger.Info("  Generated 0 parameterized URLs from x8 output")
 		}
 	}
 
@@ -1481,41 +1481,36 @@ func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, err
 }
 
 // ─────────────────────────────────────────────────────────────
-// convertArjunToURLs — Step 14 helper
+// convertX8ToURLs — Step 16 helper
 // ─────────────────────────────────────────────────────────────
 
-// arjunResult represents one entry in Arjun's -oJ output.
-// Arjun outputs a JSON array of objects, each with a URL and discovered params.
-type arjunResult struct {
-	URL    string   `json:"url"`
-	Method string   `json:"method"`
-	Params []string `json:"params"`
+// x8Result represents one entry in x8's -O json output.
+type x8Result struct {
+	Method      string             `json:"method"`
+	URL         string             `json:"url"`
+	FoundParams []x8FoundParameter `json:"found_params"`
 }
 
-// convertArjunToURLs parses Arjun's JSON output and writes parameterized URLs
-// to outputFile. For each entry it constructs a URL with all discovered params
-// as query parameters (e.g. https://example.com?id=1&page=1).
-// Returns the number of URLs written.
-func convertArjunToURLs(arjunJSON, outputFile string) int {
-	if !utils.FileExists(arjunJSON) {
+type x8FoundParameter struct {
+	Name string `json:"name"`
+}
+
+// convertX8ToURLs parses x8's JSON output and writes parameterized URLs
+// to outputFile.
+func convertX8ToURLs(x8JSON, outputFile string) int {
+	if !utils.FileExists(x8JSON) {
 		return 0
 	}
 
-	data, err := os.ReadFile(arjunJSON)
+	data, err := os.ReadFile(x8JSON)
 	if err != nil || len(data) == 0 {
 		return 0
 	}
 
-	// Arjun -oJ can output either a JSON array or a single object.
-	var results []arjunResult
+	var results []x8Result
 	if err := json.Unmarshal(data, &results); err != nil {
-		// Try single object
-		var single arjunResult
-		if err2 := json.Unmarshal(data, &single); err2 != nil {
-			logger.Warning("Failed to parse Arjun JSON: %v", err)
-			return 0
-		}
-		results = []arjunResult{single}
+		logger.Warning("Failed to parse x8 JSON: %v", err)
+		return 0
 	}
 
 	f, err := os.Create(outputFile)
@@ -1527,15 +1522,17 @@ func convertArjunToURLs(arjunJSON, outputFile string) int {
 
 	count := 0
 	for _, r := range results {
-		if r.URL == "" || len(r.Params) == 0 {
+		if r.URL == "" || len(r.FoundParams) == 0 {
 			continue
 		}
-		// Build parameterized URL preserving original Arjun parameter order.
-		// Using url.Values.Encode() would sort alphabetically, which changes
-		// the semantics for order-sensitive endpoints and WAFs.
 		var paramPairs []string
-		for _, p := range r.Params {
-			paramPairs = append(paramPairs, url.QueryEscape(p)+"=1")
+		for _, p := range r.FoundParams {
+			if p.Name != "" {
+				paramPairs = append(paramPairs, url.QueryEscape(p.Name)+"=1")
+			}
+		}
+		if len(paramPairs) == 0 {
+			continue
 		}
 		qs := strings.Join(paramPairs, "&")
 		base := r.URL
@@ -1551,30 +1548,26 @@ func convertArjunToURLs(arjunJSON, outputFile string) int {
 	return count
 }
 
-// storeArjunParamCounts parses Arjun's JSON output and stores the number of
-// discovered hidden parameters per URL in url_metadata for ROI scoring.
-func storeArjunParamCounts(scanID int64, arjunJSON string) int {
-	if !utils.FileExists(arjunJSON) {
+// storeX8ParamCounts parses x8's JSON output and stores the number of
+// discovered parameters per URL in url_metadata for ROI scoring.
+func storeX8ParamCounts(scanID int64, x8JSON string) int {
+	if !utils.FileExists(x8JSON) {
 		return 0
 	}
 
-	data, err := os.ReadFile(arjunJSON)
+	data, err := os.ReadFile(x8JSON)
 	if err != nil || len(data) == 0 {
 		return 0
 	}
 
-	var results []arjunResult
+	var results []x8Result
 	if err := json.Unmarshal(data, &results); err != nil {
-		var single arjunResult
-		if err2 := json.Unmarshal(data, &single); err2 != nil {
-			return 0
-		}
-		results = []arjunResult{single}
+		return 0
 	}
 
 	stored := 0
 	for _, r := range results {
-		if r.URL == "" || len(r.Params) == 0 {
+		if r.URL == "" || len(r.FoundParams) == 0 {
 			continue
 		}
 		parsed, parseErr := url.Parse(strings.TrimSpace(r.URL))
@@ -1582,12 +1575,12 @@ func storeArjunParamCounts(scanID int64, arjunJSON string) int {
 			continue
 		}
 		err := database.UpsertURLMetadata(scanID, database.URLMetadata{
-			URL:             r.URL,
-			Host:            strings.ToLower(parsed.Hostname()),
-			ArjunParamCount: len(r.Params),
+			URL:        r.URL,
+			Host:       strings.ToLower(parsed.Hostname()),
+			ParamCount: len(r.FoundParams),
 		})
 		if err != nil {
-			logger.Warning("Failed to store Arjun param count for %s: %v", r.URL, err)
+			logger.Warning("Failed to store x8 param count for %s: %v", r.URL, err)
 		} else {
 			stored++
 		}

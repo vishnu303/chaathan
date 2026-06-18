@@ -27,7 +27,8 @@ var (
 	skipDalfox        bool
 	skipUncover       bool
 	skipTlsx          bool
-	skipArjun         bool
+	skipArjun         bool // legacy alias
+	skipX8            bool
 	skipShuffleDNS    bool
 	skipHakrawler     bool
 	skipFingerprint   bool
@@ -80,7 +81,7 @@ organised into 6 clean phases:
   13. Web Crawling (Katana, GoSpider) [Parallel, --skip-crawl]
   14. JavaScript Analysis (GoLinkFinder)
   15. Directory Fuzzing (ffuf) [Requires --wordlist]
-  16. HTTP Parameter Discovery (Arjun) [Optional, --skip-arjun]
+  16. HTTP Parameter Discovery (x8) [Optional, --skip-x8]
   17. URL Consolidation & Live Check (httpx)
   18. JS Secret Scan (gf + httpx)
 
@@ -109,7 +110,9 @@ func init() {
 	wildcardCmd.Flags().BoolVar(&skipTakeovers, "skip-takeovers", false, "Skip subdomain takeover detection (Nuclei takeovers)")
 	wildcardCmd.Flags().BoolVar(&skipUncover, "skip-uncover", false, "Skip search engine dorking (Uncover)")
 	wildcardCmd.Flags().BoolVar(&skipTlsx, "skip-tlsx", false, "Skip TLS certificate analysis")
-	wildcardCmd.Flags().BoolVar(&skipArjun, "skip-arjun", false, "Skip Arjun parameter discovery")
+	wildcardCmd.Flags().BoolVar(&skipX8, "skip-x8", false, "Skip x8 parameter discovery")
+	wildcardCmd.Flags().BoolVar(&skipArjun, "skip-arjun", false, "Skip x8 parameter discovery (legacy alias)")
+	_ = wildcardCmd.Flags().MarkHidden("skip-arjun")
 	wildcardCmd.Flags().BoolVar(&skipShuffleDNS, "skip-shuffledns", false, "Skip ShuffleDNS brute-force")
 	wildcardCmd.Flags().BoolVar(&skipHakrawler, "skip-hakrawler", false, "Skip Hakrawler JS crawling")
 	wildcardCmd.Flags().BoolVar(&skipFingerprint, "skip-fingerprint", false, "Skip Technology & WAF Fingerprinting step")
@@ -190,7 +193,7 @@ func runWildcard(cmd *cobra.Command, args []string) {
 		SkipDalfox:        skipDalfox,
 		SkipUncover:       skipUncover,
 		SkipTlsx:          skipTlsx,
-		SkipArjun:         skipArjun,
+		SkipX8:            skipX8 || skipArjun,
 		SkipShuffleDNS:    skipShuffleDNS,
 		SkipHakrawler:     skipHakrawler,
 		SkipFingerprint:   skipFingerprint,

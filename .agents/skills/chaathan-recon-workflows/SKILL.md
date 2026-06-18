@@ -66,7 +66,7 @@ Phase 5: Fingerprinting (Step 23)      ──► Output: WAF/Tech JSON
 - **Step 13: `web_crawling`** (katana + gospider crawling; skip with `--skip-crawl`).
 - **Step 14: `js_analysis`** (GoLinkFinder parsing of JS links on all live hosts, capped at top 50).
 - **Step 15: `dir_fuzzing`** (ffuf directory fuzzing on up to 25 live hosts; requires `--wordlist`). Fuzzing results write to `ffuf_discovered_urls.txt`.
-- **Step 16: `param_discovery`** (arjun parameter discovery; skip with `--skip-arjun`). Natively routes through the rotating proxy using `HTTP_PROXY`/`HTTPS_PROXY` environment variables. Targets ONLY curated dynamic endpoints (up to 150 extracted from crawls) and fuzzed directory URLs, completely bypassing flat live hostlists.
+- **Step 16: `param_discovery`** (x8 parameter discovery; skip with `--skip-x8` or `--skip-arjun`). Natively routes through the rotating proxy using direct proxy arguments `-x`. Targets ONLY curated dynamic endpoints (up to 150 extracted from crawls) and fuzzed directory URLs, completely bypassing flat live hostlists.
 - **Step 17: `url_consolidation`** (httpx live URL validation and ROI metadata collection).
 - **Step 18: `js_secret_scan`** (downloads JS files, runs gf secret search pattern).
 
