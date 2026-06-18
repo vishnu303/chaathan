@@ -28,11 +28,16 @@ var jsGFPatterns = map[string]bool{
 }
 
 var secretGFPatterns = map[string]bool{
-	"api-keys": true,
-	"aws-keys": true,
-	"firebase": true,
-	"github":   true,
-	"jwt":      true,
+	"api-keys":      true,
+	"aws-keys":      true,
+	"firebase":      true,
+	"github":        true,
+	"jwt":           true,
+	"slack-webhook": true,
+	"google-api":    true,
+	"stripe-api":    true,
+	"db-connection": true,
+	"private-key":   true,
 }
 
 // ─────────────────────────────────────────────────────────────

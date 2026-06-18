@@ -63,7 +63,7 @@ type mergedMetadata struct {
 	HasInsecureCookies  bool
 	HasSessionCookie    bool
 	HasDangerousMethods bool
-	ArjunParamCount     int
+	ParamCount          int
 }
 
 // GetRankedURLs computes ROI scores from persisted scan data without requiring
@@ -393,9 +393,9 @@ func GetRankedURLs(scanID int64, limit int) ([]URLROI, error) {
 				addPoints(15, "dangerous HTTP methods (PUT/DELETE) allowed")
 			}
 
-			// Phase 4.4: Arjun Hidden Parameters
-			if meta.ArjunParamCount > 0 {
-				addPoints(min(25, meta.ArjunParamCount*5), fmt.Sprintf("%d hidden params discovered by Arjun", meta.ArjunParamCount))
+			// Phase 4.4: Hidden Parameters
+			if meta.ParamCount > 0 {
+				addPoints(min(25, meta.ParamCount*5), fmt.Sprintf("%d hidden params discovered by x8", meta.ParamCount))
 			}
 		}
 
@@ -762,7 +762,7 @@ func mergeMetadata(urlMeta URLMetadata, hostMeta HostMetadata) mergedMetadata {
 		HasInsecureCookies:  hostMeta.HasInsecureCookies,
 		HasSessionCookie:    hostMeta.HasSessionCookie,
 		HasDangerousMethods: hostMeta.HasDangerousMethods,
-		ArjunParamCount:     urlMeta.ArjunParamCount,
+		ParamCount:          urlMeta.ParamCount,
 	}
 }
 
@@ -1114,7 +1114,7 @@ func computeAttackSurfaces(roi *URLROI, meta mergedMetadata, gfPatterns []string
 	}
 
 	// Hidden content / discovery
-	if roi.FfufCount > 0 || meta.ArjunParamCount > 0 || meta.HiddenInputCount > 3 {
+	if roi.FfufCount > 0 || meta.ParamCount > 0 || meta.HiddenInputCount > 3 {
 		add("hidden-content")
 	}
 

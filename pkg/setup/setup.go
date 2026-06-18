@@ -93,6 +93,11 @@ func Run(cfg RunConfig) {
 	totalSkipped += int32(s)
 	totalFailed += int32(f)
 
+	i, s, f = installX8Section(ctx)
+	totalInstalled += int32(i)
+	totalSkipped += int32(s)
+	totalFailed += int32(f)
+
 	i, s, f = installMassDNSSection(ctx)
 	totalInstalled += int32(i)
 	totalSkipped += int32(s)

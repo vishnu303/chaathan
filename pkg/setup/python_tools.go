@@ -19,7 +19,6 @@ var pyTools = []struct {
 }{
 	{"cloud_enum", "git+https://github.com/initstring/cloud_enum.git", "cloud_enum.py", "cloud_enum"},
 	{"sublist3r", "sublist3r", "sublist3r", "sublist3r"},
-	{"arjun", "arjun", "arjun", "arjun"},
 }
 
 // installPythonToolsSection checks and installs Python-based tools sequentially.
@@ -67,12 +66,12 @@ func installPythonToolsSection(ctx *SetupContext) (installed, skipped, failed in
 			continue
 		}
 
-		// sublist3r and arjun depend on requests/urllib3, but urllib3 v2.x dropped
-		// urllib3.packages.six.moves, which both tools rely on. A constraint in the
+		// sublist3r depends on requests/urllib3, but urllib3 v2.x dropped
+		// urllib3.packages.six.moves, which it relies on. A constraint in the
 		// install command above is insufficient when urllib3 v2 is already globally
 		// installed — pip won't downgrade an already-satisfied dependency. Force a
 		// separate reinstall to guarantee the working 1.26.x series is on disk.
-		if t.name == "sublist3r" || t.name == "arjun" {
+		if t.name == "sublist3r" {
 			pinArgs := []string{"install", "--break-system-packages", "--upgrade", "requests", "urllib3"}
 			pinErr := ctx.RunCommand(t.name+" (urllib3/requests upgrade)", pip, pinArgs...)
 			if pinErr != nil {

@@ -15,19 +15,19 @@ import (
 	"github.com/vishnu303/chaathan/utils"
 )
 
-// Phase 5 — Fingerprinting (Step 22)
+// Phase 5 — Fingerprinting (Step 23)
 //
 // Runs technology fingerprinting and WAF detection safely at the very end
 // to prevent WAF blocks from affecting prior discovery or vulnerability scanning.
 
 // stepFingerprinting runs httpx for tech-detect and nuclei for WAF detection.
 func stepFingerprinting(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("tech_waf_fingerprinting", "Step 22: Technology & WAF Fingerprinting"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("tech_waf_fingerprinting", "Step 23: Technology & WAF Fingerprinting"); skipped {
 		return cancelled
 	}
 
 	if c.SkipFingerprint {
-		logger.StepHeader("Step 22: Skipping Fingerprinting (--skip-fingerprint)")
+		logger.StepHeader("Step 23: Skipping Fingerprinting (--skip-fingerprint)")
 		c.StateMgr.MarkStepComplete(c.State, "tech_waf_fingerprinting")
 		return c.cancelled()
 	}

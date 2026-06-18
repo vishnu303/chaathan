@@ -68,7 +68,7 @@ func TestToolBoxOptionsAndHelpers(t *testing.T) {
 	}
 }
 
-func TestArjunHeaders(t *testing.T) {
+func TestX8Headers(t *testing.T) {
 	dr := &DummyRunner{}
 	tb := tools.New(dr)
 
@@ -77,36 +77,34 @@ func TestArjunHeaders(t *testing.T) {
 	tb.WithGeneral(&config.GeneralConfig{UARotation: false})
 
 	ctx := context.Background()
-	err := tb.RunArjun(ctx, "in.txt", "out.json")
+	err := tb.RunX8(ctx, "in.txt", "out.json")
 	if err != nil {
-		t.Fatalf("unexpected error running Arjun: %v", err)
+		t.Fatalf("unexpected error running x8: %v", err)
 	}
 
-	if dr.LastCmd != "arjun" {
-		t.Errorf("expected command 'arjun', got %q", dr.LastCmd)
+	if dr.LastCmd != "x8" {
+		t.Errorf("expected command 'x8', got %q", dr.LastCmd)
 	}
 
-	// Verify that "--headers" is followed by a valid newline-separated string containing our headers
-	foundHeaders := false
+	// Verify that "-H" arguments are present with correct values
+	foundCookie := false
+	foundCustomHeader := false
 	for i, arg := range dr.LastArgs {
-		if arg == "--headers" && i+1 < len(dr.LastArgs) {
-			foundHeaders = true
-			headerStr := dr.LastArgs[i+1]
-			if !strings.Contains(headerStr, "Cookie: my_cookie_val") {
-				t.Errorf("expected headers to contain Cookie, got %q", headerStr)
+		if arg == "-H" && i+1 < len(dr.LastArgs) {
+			val := dr.LastArgs[i+1]
+			if strings.Contains(val, "Cookie: my_cookie_val") {
+				foundCookie = true
 			}
-			if !strings.Contains(headerStr, "X-My-Header: header_val") {
-				t.Errorf("expected headers to contain X-My-Header, got %q", headerStr)
+			if strings.Contains(val, "X-My-Header: header_val") {
+				foundCustomHeader = true
 			}
-			// Verify that multiple headers are separated by a newline
-			if !strings.Contains(headerStr, "\n") {
-				t.Errorf("expected headers to be separated by newline, got %q", headerStr)
-			}
-			break
 		}
 	}
-	if !foundHeaders {
-		t.Error("expected --headers argument in Arjun command")
+	if !foundCookie {
+		t.Error("expected -H 'Cookie: my_cookie_val' argument in x8 command")
+	}
+	if !foundCustomHeader {
+		t.Error("expected -H 'X-My-Header: header_val' argument in x8 command")
 	}
 }
 

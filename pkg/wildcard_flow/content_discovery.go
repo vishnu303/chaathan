@@ -1,16 +1,16 @@
-// Phase 3 — Content Discovery (Steps 11–17)
+// Phase 3 — Content Discovery (Steps 12–18)
 //
 // Discovers URLs, endpoints, and directories from live hosts.
 // Wayback/GAU run here (not in Phase 1) so URLs are collected
 // only for validated live hosts.
 //
-//  11. Historical URL Discovery (Waybackurls + GAU) [Parallel]
-//  12. Web Crawling (Katana + GoSpider) [Parallel, Optional]
-//  13. JavaScript Analysis — Endpoint Discovery (GoLinkFinder)
-//  14. HTTP Parameter Discovery (Arjun) [Optional]
-//  15. URL Consolidation & Live Check (httpx) + ROI metadata
-//  16. JS Secret Scan (gf JS + Secrets)
-//  17. Directory Fuzzing (ffuf) [Optional — requires --wordlist]
+//  12. Historical URL Discovery (Waybackurls + GAU) [Parallel]
+//  13. Web Crawling (Katana + GoSpider) [Parallel, Optional]
+//  14. JavaScript Analysis — Endpoint Discovery (GoLinkFinder)
+//  15. Directory Fuzzing (ffuf) [Optional — requires --wordlist]
+//  16. HTTP Parameter Discovery (Arjun) [Optional]
+//  17. URL Consolidation & Live Check (httpx) + ROI metadata
+//  18. JS Secret Scan (gf JS + Secrets)
 package wildcard_flow
 
 import (
@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
@@ -26,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,7 +45,7 @@ import (
 // stepURLDiscovery runs Waybackurls and GAU in parallel on the target domain.
 // Returns true if the scan should be cancelled.
 func stepURLDiscovery(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("url_discovery", "Step 11: Historical URL Discovery"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("url_discovery", "Step 12: Historical URL Discovery"); skipped {
 		return cancelled
 	}
 	writeEmptyFile(c.F.WaybackOut)
@@ -148,12 +150,12 @@ func stepURLDiscovery(c *Ctx) bool {
 // stepWebCrawling runs Katana and GoSpider in parallel.
 // Returns true if the scan should be cancelled.
 func stepWebCrawling(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("web_crawling", "Step 12: Web Crawling"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("web_crawling", "Step 13: Web Crawling"); skipped {
 		return cancelled
 	}
 
 	if c.SkipCrawl {
-		logger.StepHeader("Step 12: Skipping Web Crawling (--skip-crawl)")
+		logger.StepHeader("Step 13: Skipping Web Crawling (--skip-crawl)")
 		c.StateMgr.MarkStepComplete(c.State, "web_crawling")
 		return c.cancelled()
 	}
@@ -264,8 +266,94 @@ func stepWebCrawling(c *Ctx) bool {
 
 // stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
 // Returns true if the scan should be cancelled.
+// filterAndDeduplicateHosts filters live hosts to standard ports 80/443,
+// maps bare host:port pairs to their proper scheme based on port,
+// and deduplicates by hostname, preferring HTTPS (443) over HTTP (80).
+func filterAndDeduplicateHosts(hosts []string) []string {
+	type hostPref struct {
+		target   string
+		priority int // 2 for https (443), 1 for http (80)
+	}
+	bestUrls := make(map[string]hostPref)
+
+	for _, h := range hosts {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+
+		target := h
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			port := ""
+			if idx := strings.LastIndex(target, ":"); idx != -1 {
+				pPart := target[idx+1:]
+				if _, err := strconv.Atoi(pPart); err == nil {
+					port = pPart
+				}
+			}
+
+			// Issue 2: map TLS ports to https://, others to http://
+			if port == "443" || port == "8443" {
+				target = "https://" + target
+			} else if port != "" {
+				target = "http://" + target
+			} else {
+				target = "https://" + target
+			}
+		}
+
+		parsed, err := url.Parse(target)
+		if err != nil {
+			continue
+		}
+
+		hostname := strings.ToLower(parsed.Hostname())
+		if hostname == "" {
+			continue
+		}
+
+		port := parsed.Port()
+		scheme := strings.ToLower(parsed.Scheme)
+
+		if port == "" {
+			if scheme == "https" {
+				port = "443"
+			} else {
+				port = "80"
+			}
+		}
+
+		// Filter to standard ports 80/443 only (Issue 1)
+		if port != "80" && port != "443" {
+			continue
+		}
+
+		priority := 1
+		if scheme == "https" && port == "443" {
+			priority = 2
+		}
+
+		existing, exists := bestUrls[hostname]
+		if !exists || priority > existing.priority {
+			bestUrls[hostname] = hostPref{
+				target:   target,
+				priority: priority,
+			}
+		}
+	}
+
+	var result []string
+	for _, pref := range bestUrls {
+		result = append(result, pref.target)
+	}
+	slices.Sort(result) // Ensure deterministic order
+	return result
+}
+
+// stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
+// Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("js_analysis", "Step 13: JavaScript Analysis"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("js_analysis", "Step 14: JavaScript Analysis"); skipped {
 		return cancelled
 	}
 	writeEmptyFile(c.F.GoLinkFinderOut)
@@ -273,7 +361,66 @@ func stepJSAnalysis(c *Ctx) bool {
 
 	var golinkfinderSkipped bool
 	if err := runWithSkip(c, "GoLinkFinder", func(sCtx context.Context) error {
-		return c.Tb.RunGoLinkFinder(sCtx, "https://"+c.Domain, c.F.GoLinkFinderOut)
+		liveHosts := loadLineSlice(c.F.HttpxLiveHosts, 50)
+		if len(liveHosts) == 0 {
+			liveHosts = []string{"https://" + c.Domain}
+		}
+
+		// Filter standard ports 80/443 and deduplicate by hostname
+		filteredHosts := filterAndDeduplicateHosts(liveHosts)
+		if len(filteredHosts) == 0 {
+			logger.Info("  No live hosts match standard ports 80/443. Skipping GoLinkFinder.")
+			return nil
+		}
+
+		concurrency := 5
+		sem := make(chan struct{}, concurrency)
+		var wg sync.WaitGroup
+		var writeMu sync.Mutex
+		var loopErr error
+
+		for _, host := range filteredHosts {
+			select {
+			case <-sCtx.Done():
+				loopErr = sCtx.Err()
+				break
+			default:
+			}
+			if loopErr != nil {
+				break
+			}
+
+			sem <- struct{}{}
+			wg.Add(1)
+
+			go func(target string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				// Issue 1: Add a per-host timeout of 15s (total, not just HTTP)
+				hostCtx, hostCancel := context.WithTimeout(sCtx, 15*time.Second)
+				defer hostCancel()
+
+				tmpOut := filepath.Join(filepath.Dir(c.F.GoLinkFinderOut), fmt.Sprintf("golinkfinder_tmp_%d_%d.txt", os.Getpid(), rand.IntN(1000000)))
+				// Issue 7: Clean up temp file immediately (replaces defer in outer loop)
+				defer os.Remove(tmpOut)
+
+				if err := c.Tb.RunGoLinkFinder(hostCtx, target, tmpOut); err == nil && utils.FileExists(tmpOut) {
+					if data, readErr := os.ReadFile(tmpOut); readErr == nil && len(data) > 0 {
+						writeMu.Lock()
+						fOut, openErr := os.OpenFile(c.F.GoLinkFinderOut, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+						if openErr == nil {
+							_, _ = fOut.Write(data)
+							fOut.Close()
+						}
+						writeMu.Unlock()
+					}
+				}
+			}(host)
+		}
+
+		wg.Wait()
+		return loopErr
 	}); err != nil {
 		if err == ErrToolSkipped {
 			golinkfinderSkipped = true
@@ -306,79 +453,218 @@ func stepJSAnalysis(c *Ctx) bool {
 // Step 14 — HTTP Parameter Discovery (Arjun)
 // ─────────────────────────────────────────────────────────────
 
-// stepParamDiscovery discovers HTTP parameters with Arjun (Step 14).
+// stepParamDiscovery discovers HTTP parameters with x8 (Step 16).
 // After a successful run it converts discovered params into parameterized URLs
-// (written to ArjunURLsOut) so they flow into Step 15 consolidation and
+// (written to X8URLsOut) so they flow into Step 17 consolidation and
 // downstream scanners (Nuclei/Dalfox).
 // Returns true if the scan should be cancelled.
 func stepParamDiscovery(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("param_discovery", "Step 14: HTTP Parameter Discovery (Arjun)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("param_discovery", "Step 16: HTTP Parameter Discovery (x8)"); skipped {
 		return cancelled
 	}
 
-	if c.SkipArjun {
-		logger.StepHeader("Step 14: Skipping Arjun (--skip-arjun)")
+	if c.SkipX8 {
+		logger.StepHeader("Step 16: Skipping x8 (--skip-x8)")
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		return c.cancelled()
 	}
 
-	writeEmptyFile(c.F.ArjunOut)
-	writeEmptyFile(c.F.ArjunURLsOut)
+	writeEmptyFile(c.F.X8Out)
+	writeEmptyFile(c.F.X8URLsOut)
 
 	// Preflight check
 	liveHostCount, _ := utils.CountFileLines(c.F.HttpxLiveHosts)
 	if liveHostCount == 0 {
-		logger.Warning("No live hosts found — skipping Arjun parameter discovery")
+		logger.Warning("No live hosts found — skipping x8 parameter discovery")
 		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
 		return c.cancelled()
 	}
-	logger.SubStep("Running Arjun on live hosts...")
 
-	// Validate parameters wordlist if configured (same pattern as ffuf/shuffledns).
-	// If the file doesn't exist, run Arjun without -w so it uses its built-in default.
+	// Merge FfufDiscoveredURLs and high-signal endpoints into a temporary input file
+	x8InputFile := filepath.Join(filepath.Dir(c.F.HttpxLiveHosts), "x8_input.txt")
+	
+	var x8Targets []string
+
+	// Add ffuf fuzzing results
+	if utils.FileExists(c.F.FfufDiscoveredURLs) {
+		x8Targets = append(x8Targets, loadLineSlice(c.F.FfufDiscoveredURLs, 0)...)
+	}
+
+	// Collect and add high-signal crawler endpoints (limit to 150 to keep it fast)
+	crawlerFiles := []string{
+		c.F.WaybackOut,
+		c.F.GauOut,
+		c.F.KatanaOut,
+		c.F.GospiderOut,
+		c.F.GoLinkFinderOut,
+	}
+	highSignal := collectHighSignalEndpoints(crawlerFiles, 150)
+	x8Targets = append(x8Targets, highSignal...)
+
+	// Deduplicate targets
+	x8Targets = utils.DeduplicateSlice(x8Targets)
+
+	if len(x8Targets) == 0 {
+		logger.Warning("No targets found for parameter discovery — skipping x8")
+		c.StateMgr.MarkStepComplete(c.State, "param_discovery")
+		return c.cancelled()
+	}
+
+	// Write targets to x8InputFile
+	if fIn, err := os.Create(x8InputFile); err == nil {
+		for _, t := range x8Targets {
+			_, _ = fIn.WriteString(t + "\n")
+		}
+		fIn.Close()
+	} else {
+		c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
+		logger.Error("Failed to prepare x8 input: %v", err)
+		return c.cancelled()
+	}
+
+	logger.SubStep("Running x8 on %d targets...", len(x8Targets))
+
+	// Validate parameters wordlist if configured.
 	paramWordlist := ""
 	if c.Cfg != nil && c.Cfg.General.Wordlists.Parameters != "" {
 		if utils.FileExists(c.Cfg.General.Wordlists.Parameters) {
 			paramWordlist = c.Cfg.General.Wordlists.Parameters
 		} else {
-			logger.Warning("Arjun parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
+			logger.Warning("x8 parameters wordlist not found: %s", c.Cfg.General.Wordlists.Parameters)
 			logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or set a valid wordlist in config.yaml")
-			logger.Info("  Falling back to Arjun's built-in parameter list")
-			logger.FileDebug("arjun: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
+			logger.Info("  Falling back to x8's built-in parameter list")
+			logger.FileDebug("x8: configured wordlist does not exist at %s — using built-in default", c.Cfg.General.Wordlists.Parameters)
 		}
 	}
 
-	var arjunSkipped bool
-	if err := runWithSkip(c, "arjun", func(sCtx context.Context) error {
-		return c.Tb.RunArjunWithWordlist(sCtx, c.F.HttpxLiveHosts, c.F.ArjunOut, paramWordlist)
+	var x8Skipped bool
+	if err := runWithSkip(c, "x8", func(sCtx context.Context) error {
+		return c.Tb.RunX8WithWordlist(sCtx, x8InputFile, c.F.X8Out, paramWordlist)
 	}); err != nil {
 		if err == ErrToolSkipped {
-			arjunSkipped = true
+			x8Skipped = true
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "param_discovery", err)
-			logger.Warning("Arjun failed: %v", err)
+			logger.Warning("x8 failed: %v", err)
 		}
 	}
 
-	if c.ScanID > 0 && utils.FileExists(c.F.ArjunOut) {
-		count := convertArjunToURLs(c.F.ArjunOut, c.F.ArjunURLsOut)
-		stored := storeArjunParamCounts(c.ScanID, c.F.ArjunOut)
+	if c.ScanID > 0 && utils.FileExists(c.F.X8Out) {
+		count := convertX8ToURLs(c.F.X8Out, c.F.X8URLsOut)
+		stored := storeX8ParamCounts(c.ScanID, c.F.X8Out)
 		if count > 0 || stored > 0 {
 			label := ""
-			if arjunSkipped {
+			if x8Skipped {
 				label = " (partial)"
 			}
-			logger.Info("  Generated %d parameterized URLs from Arjun output%s", count, label)
-			logger.Info("  Stored Arjun param counts for %d URLs%s", stored, label)
-		} else if arjunSkipped {
-			logger.Info("  Arjun skipped — no parameters found")
+			logger.Info("  Generated %d parameterized URLs from x8 output%s", count, label)
+			logger.Info("  Stored x8 param counts for %d URLs%s", stored, label)
+		} else if x8Skipped {
+			logger.Info("  x8 skipped — no parameters found")
 		} else {
-			logger.Info("  Generated 0 parameterized URLs from Arjun output")
+			logger.Info("  Generated 0 parameterized URLs from x8 output")
 		}
 	}
 
 	c.markStepCompleteIfNoFailure("param_discovery")
 	return c.cancelled()
+}
+
+// collectHighSignalEndpoints reads raw URLs from crawler and discovery files,
+// filters for high-signal parameters/endpoints (dynamic extensions, API paths, interesting keywords),
+// deduplicates them by host+path, and returns a capped slice of URLs.
+func collectHighSignalEndpoints(files []string, limit int) []string {
+	seen := make(map[string]bool)
+	var endpoints []string
+
+	// Dynamic extensions to look for
+	extensions := []string{
+		".php", ".aspx", ".asp", ".jsp", ".jspx", ".do", ".action", ".cfm", ".pl", ".py", ".rb", ".cgi",
+	}
+
+	// Interesting API and functional paths
+	keywords := []string{
+		"/api/", "/v1/", "/v2/", "/v3/", "/rest/", "/graphql/", "/json",
+		"/login", "/register", "/auth", "/search", "/query", "/download", "/upload", "/file", "/admin", "/panel", "/debug", "/config",
+	}
+
+	for _, file := range files {
+		if !utils.FileExists(file) {
+			continue
+		}
+
+		f, err := os.Open(file)
+		if err != nil {
+			continue
+		}
+
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			// Clean line (strip GoSpider tags if present, or spaces)
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			rawURL := fields[0]
+
+			// Parse URL to validate and normalize
+			parsed, err := url.Parse(rawURL)
+			if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+				continue
+			}
+
+			// Clean/normalize path
+			pathLower := strings.ToLower(parsed.Path)
+
+			// Match criteria
+			isDynamic := false
+
+			// 1. Check extensions
+			for _, ext := range extensions {
+				if strings.HasSuffix(pathLower, ext) || strings.Contains(pathLower, ext+"/") {
+					isDynamic = true
+					break
+				}
+			}
+
+			// 2. Check keywords in path
+			if !isDynamic {
+				for _, kw := range keywords {
+					if strings.Contains(pathLower, kw) {
+						isDynamic = true
+						break
+					}
+				}
+			}
+
+			// 3. Check if it already has query parameters (high signal for dynamic behavior)
+			if !isDynamic && parsed.RawQuery != "" {
+				isDynamic = true
+			}
+
+			if isDynamic {
+				// Normalize to host+path for deduplication (strip query params and fragment)
+				dedupKey := parsed.Scheme + "://" + parsed.Host + parsed.Path
+				if !seen[dedupKey] {
+					seen[dedupKey] = true
+					// Keep the original URL
+					endpoints = append(endpoints, rawURL)
+					if limit > 0 && len(endpoints) >= limit {
+						f.Close()
+						return endpoints
+					}
+				}
+			}
+		}
+		f.Close()
+	}
+
+	return endpoints
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -389,7 +675,7 @@ func stepParamDiscovery(c *Ctx) bool {
 // and enriches ROI metadata for high-value targets.
 // Returns true if the scan should be cancelled.
 func stepURLConsolidation(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("url_consolidation", "Step 15: URL Consolidation & Live Check"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("url_consolidation", "Step 17: URL Consolidation & Live Check"); skipped {
 		return cancelled
 	}
 	writeEmptyFile(c.F.AllURLsRaw)
@@ -552,17 +838,101 @@ func loadGFPatterns(allowlist map[string]bool) (map[string][]*regexp.Regexp, err
 	return compiledPatterns, nil
 }
 
+// shannonEntropy calculates the Shannon entropy of a string.
+func shannonEntropy(s string) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	counts := make(map[rune]float64)
+	for _, r := range s {
+		counts[r]++
+	}
+	var entropy float64
+	length := float64(len(s))
+	for _, count := range counts {
+		p := count / length
+		entropy -= p * math.Log2(p)
+	}
+	return entropy
+}
+
+// isLikelySecret checks if a string is likely to be a real secret.
+func isLikelySecret(patternName, val string) bool {
+	valLower := strings.ToLower(val)
+	// Blacklist common placeholder patterns
+	placeholders := []string{"placeholder", "undefined", "null", "false", "true", "your_token", "your_secret", "api_key_here"}
+	for _, ph := range placeholders {
+		if valLower == ph {
+			return false
+		}
+	}
+	// Basic entropy check for generic api-keys
+	if patternName == "api-keys" {
+		if len(val) < 8 {
+			return false
+		}
+		entropy := shannonEntropy(val)
+		if entropy < 3.0 {
+			return false
+		}
+		// Filter out simple repeating sequences (e.g. "aaaaaaaaaa")
+		if len(val) >= 10 {
+			allSame := true
+			for i := 1; i < len(val); i++ {
+				if val[i] != val[0] {
+					allSame = false
+					break
+				}
+			}
+			if allSame {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// extractContext returns the matched text with a snippet of context before and after.
+func extractContext(line string, start, end, contextSize int) string {
+	lineLen := len(line)
+	if start < 0 || end > lineLen || start > end {
+		return ""
+	}
+	ctxStart := start - contextSize
+	if ctxStart < 0 {
+		ctxStart = 0
+	}
+	ctxEnd := end + contextSize
+	if ctxEnd > lineLen {
+		ctxEnd = lineLen
+	}
+	prefix := ""
+	if ctxStart > 0 {
+		prefix = "..."
+	}
+	suffix := ""
+	if ctxEnd < lineLen {
+		suffix = "..."
+	}
+	return fmt.Sprintf("%s%s%s", prefix, strings.TrimSpace(line[ctxStart:ctxEnd]), suffix)
+}
+
 // getFallbackGFPatterns returns hardcoded regexes for offline execution or when ~/.gf is empty.
 func getFallbackGFPatterns(allowlist map[string]bool) map[string][]*regexp.Regexp {
 	fallbacks := map[string]string{
-		"aws-keys": `(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}`,
-		"api-keys": `(?i)(api_key|apikey|secret|token|auth|password|key|credentials)[=:]["'][a-zA-Z0-9_\-\.\~]{10,80}["']`,
-		"jwt":      `eyJhbGciOi`,
-		"firebase": `firebaseio\.com`,
-		"github":   `(?i)github_token[=:]["'][a-zA-Z0-9]{35,40}["']`,
-		"domxss":   `\.(innerHTML|outerHTML|location|href|write|writeln|src|location\.href)`,
-		"js-sinks": `(eval|setTimeout|setInterval|Function)\(`,
-		"execs":    `exec\(`,
+		"aws-keys":      `(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}`,
+		"api-keys":      `(?i)(?:api_key|apikey|secret|token|auth|password|key|credentials)[=:]["']([a-zA-Z0-9_\-\.\~]{10,80})["']`,
+		"jwt":           `eyJhbGciOi`,
+		"firebase":      `firebaseio\.com`,
+		"github":        `(?i)github_token[=:]["']([a-zA-Z0-9]{35,40})["']`,
+		"domxss":        `\.(innerHTML|outerHTML|location|href|write|writeln|src|location\.href)`,
+		"js-sinks":      `(eval|setTimeout|setInterval|Function)\(`,
+		"execs":         `exec\(`,
+		"slack-webhook": `https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}`,
+		"google-api":    `AIza[0-9A-Za-z-_]{35}`,
+		"stripe-api":    `sk_live_[0-9a-zA-Z]{24}`,
+		"db-connection": `(mongodb\+srv|postgres|mysql):\/\/[^\s"'` + "`" + `<>]+`,
+		"private-key":   `-----BEGIN [A-Z ]+ PRIVATE KEY-----`,
 	}
 
 	compiled := make(map[string][]*regexp.Regexp)
@@ -702,8 +1072,13 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 				var localJSMatches []string
 				var localSecretMatches []string
 				foundSecret := false
+				matchCount := 0
+				maxMatches := 100
 
 				for _, line := range lines {
+					if matchCount >= maxMatches {
+						break
+					}
 					lineTrimmed := strings.TrimSpace(line)
 					if lineTrimmed == "" {
 						continue
@@ -711,23 +1086,71 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 
 					// Scan JS patterns
 					for name, regexes := range jsPatterns {
+						if matchCount >= maxMatches {
+							break
+						}
 						for _, re := range regexes {
-							if re.MatchString(lineTrimmed) {
-								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+							indices := re.FindAllStringSubmatchIndex(lineTrimmed, -1)
+							for _, ind := range indices {
+								if len(ind) < 2 {
+									continue
+								}
+								start, end := ind[0], ind[1]
+								secretVal := lineTrimmed[start:end]
+								if len(ind) >= 4 {
+									gStart, gEnd := ind[2], ind[3]
+									if gStart >= 0 && gEnd >= 0 {
+										secretVal = lineTrimmed[gStart:gEnd]
+									}
+								}
+
+								if !isLikelySecret(name, secretVal) {
+									continue
+								}
+
+								contextStr := extractContext(lineTrimmed, start, end, 100)
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, contextStr)
 								localJSMatches = append(localJSMatches, matchLine)
-								break
+								matchCount++
+								if matchCount >= maxMatches {
+									break
+								}
 							}
 						}
 					}
 
 					// Scan Secret patterns
 					for name, regexes := range secretPatterns {
+						if matchCount >= maxMatches {
+							break
+						}
 						for _, re := range regexes {
-							if re.MatchString(lineTrimmed) {
-								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, lineTrimmed)
+							indices := re.FindAllStringSubmatchIndex(lineTrimmed, -1)
+							for _, ind := range indices {
+								if len(ind) < 2 {
+									continue
+								}
+								start, end := ind[0], ind[1]
+								secretVal := lineTrimmed[start:end]
+								if len(ind) >= 4 {
+									gStart, gEnd := ind[2], ind[3]
+									if gStart >= 0 && gEnd >= 0 {
+										secretVal = lineTrimmed[gStart:gEnd]
+									}
+								}
+
+								if !isLikelySecret(name, secretVal) {
+									continue
+								}
+
+								contextStr := extractContext(lineTrimmed, start, end, 100)
+								matchLine := fmt.Sprintf("[%s] [%s] %s", target, name, contextStr)
 								localSecretMatches = append(localSecretMatches, matchLine)
 								foundSecret = true
-								break
+								matchCount++
+								if matchCount >= maxMatches {
+									break
+								}
 							}
 						}
 					}
@@ -777,7 +1200,7 @@ func runInMemoryJSSecretScan(ctx context.Context, c *Ctx, urls []string, jsPatte
 }
 
 func stepJSSecretScan(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("js_secret_scan", "Step 16: JS Secret Scan (gf JS + Secrets)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("js_secret_scan", "Step 18: JS Secret Scan (gf JS + Secrets)"); skipped {
 		return cancelled
 	}
 
@@ -906,21 +1329,21 @@ func extractHostsFromURLFile(filePath string) []string {
 // stepDirFuzzing runs ffuf when a wordlist is provided via --wordlist.
 // Returns true if the scan should be cancelled.
 func stepDirFuzzing(c *Ctx) bool {
-	if skipped, cancelled := c.resumeOrSkip("dir_fuzzing", "Step 17: Directory Fuzzing (ffuf)"); skipped {
+	if skipped, cancelled := c.resumeOrSkip("dir_fuzzing", "Step 15: Directory Fuzzing (ffuf)"); skipped {
 		return cancelled
 	}
 
 	if c.WordlistPath == "" {
-		logger.StepHeader("Step 17: Skipping ffuf (no --wordlist provided)")
+		logger.StepHeader("Step 15: Skipping ffuf (no --wordlist provided)")
 		logger.Info("Provide --wordlist to enable ffuf")
 		c.StateMgr.MarkStepComplete(c.State, "dir_fuzzing")
 		return c.cancelled()
 	}
 
 	writeEmptyFile(c.F.FfufOut)
+	writeEmptyFile(c.F.FfufDiscoveredURLs)
 
 	// Validate wordlist file exists before invoking ffuf.
-	// The path may come from config defaults (e.g. seclists) that aren't installed.
 	if !utils.FileExists(c.WordlistPath) {
 		logger.Warning("ffuf wordlist not found: %s", c.WordlistPath)
 		logger.Info("  Install seclists (apt install seclists / pacman -S seclists) or provide a valid --wordlist path")
@@ -929,13 +1352,61 @@ func stepDirFuzzing(c *Ctx) bool {
 		return c.cancelled()
 	}
 
-	targetURL := fmt.Sprintf("https://%s/FUZZ", c.Domain)
-	logger.SubStep("Running ffuf with wordlist: %s", c.WordlistPath)
-	logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, c.F.FfufOut)
+	liveHosts := loadLineSlice(c.F.HttpxLiveHosts, 25)
+	if len(liveHosts) == 0 {
+		// Fallback to root domain
+		liveHosts = []string{"https://" + c.Domain}
+	}
+
+	type localFfufResult struct {
+		Input  map[string]string `json:"input"`
+		URL    string            `json:"url"`
+		Status int               `json:"status"`
+	}
+
+	var allResults []localFfufResult
+	var resultsMu sync.Mutex
+
+	logger.SubStep("Running ffuf with wordlist on %d live hosts...", len(liveHosts))
 
 	var ffufSkipped bool
 	if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
-		return c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, c.F.FfufOut)
+		for _, host := range liveHosts {
+			select {
+			case <-sCtx.Done():
+				return sCtx.Err()
+			default:
+			}
+
+			target := host
+			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+				target = "https://" + target
+			}
+			targetURL := target
+			if !strings.HasSuffix(targetURL, "/") {
+				targetURL += "/"
+			}
+			targetURL += "FUZZ"
+
+			tmpFfufOut := filepath.Join(filepath.Dir(c.F.FfufOut), fmt.Sprintf("ffuf_tmp_%d.json", rand.IntN(1000000)))
+			defer os.Remove(tmpFfufOut)
+
+			logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, tmpFfufOut)
+			if err := c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, tmpFfufOut); err == nil && utils.FileExists(tmpFfufOut) {
+				// Parse and add to allResults
+				if data, readErr := os.ReadFile(tmpFfufOut); readErr == nil && len(data) > 0 {
+					var payload struct {
+						Results []localFfufResult `json:"results"`
+					}
+					if jsonErr := json.Unmarshal(data, &payload); jsonErr == nil {
+						resultsMu.Lock()
+						allResults = append(allResults, payload.Results...)
+						resultsMu.Unlock()
+					}
+				}
+			}
+		}
+		return nil
 	}); err != nil {
 		if err == ErrToolSkipped {
 			ffufSkipped = true
@@ -944,7 +1415,27 @@ func stepDirFuzzing(c *Ctx) bool {
 			logger.Warning("ffuf failed: %v", err)
 		}
 	} else {
-		logger.SubStep("[Done] ffuf - Results: %s", c.F.FfufOut)
+		logger.SubStep("[Done] ffuf - Merged results size: %d", len(allResults))
+	}
+
+	// Write consolidated results to c.F.FfufOut
+	consolidatedPayload := struct {
+		Results []localFfufResult `json:"results"`
+	}{Results: allResults}
+	if jsData, err := json.Marshal(consolidatedPayload); err == nil {
+		_ = os.WriteFile(c.F.FfufOut, jsData, 0644)
+	}
+
+	// Write extracted URLs to c.F.FfufDiscoveredURLs
+	if len(allResults) > 0 {
+		if fUrls, err := os.Create(c.F.FfufDiscoveredURLs); err == nil {
+			for _, res := range allResults {
+				if strings.TrimSpace(res.URL) != "" {
+					_, _ = fUrls.WriteString(res.URL + "\n")
+				}
+			}
+			fUrls.Close()
+		}
 	}
 
 	if c.ScanID > 0 && utils.FileExists(c.F.FfufOut) {
@@ -1105,41 +1596,36 @@ func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, err
 }
 
 // ─────────────────────────────────────────────────────────────
-// convertArjunToURLs — Step 14 helper
+// convertX8ToURLs — Step 16 helper
 // ─────────────────────────────────────────────────────────────
 
-// arjunResult represents one entry in Arjun's -oJ output.
-// Arjun outputs a JSON array of objects, each with a URL and discovered params.
-type arjunResult struct {
-	URL    string   `json:"url"`
-	Method string   `json:"method"`
-	Params []string `json:"params"`
+// x8Result represents one entry in x8's -O json output.
+type x8Result struct {
+	Method      string             `json:"method"`
+	URL         string             `json:"url"`
+	FoundParams []x8FoundParameter `json:"found_params"`
 }
 
-// convertArjunToURLs parses Arjun's JSON output and writes parameterized URLs
-// to outputFile. For each entry it constructs a URL with all discovered params
-// as query parameters (e.g. https://example.com?id=1&page=1).
-// Returns the number of URLs written.
-func convertArjunToURLs(arjunJSON, outputFile string) int {
-	if !utils.FileExists(arjunJSON) {
+type x8FoundParameter struct {
+	Name string `json:"name"`
+}
+
+// convertX8ToURLs parses x8's JSON output and writes parameterized URLs
+// to outputFile.
+func convertX8ToURLs(x8JSON, outputFile string) int {
+	if !utils.FileExists(x8JSON) {
 		return 0
 	}
 
-	data, err := os.ReadFile(arjunJSON)
+	data, err := os.ReadFile(x8JSON)
 	if err != nil || len(data) == 0 {
 		return 0
 	}
 
-	// Arjun -oJ can output either a JSON array or a single object.
-	var results []arjunResult
+	var results []x8Result
 	if err := json.Unmarshal(data, &results); err != nil {
-		// Try single object
-		var single arjunResult
-		if err2 := json.Unmarshal(data, &single); err2 != nil {
-			logger.Warning("Failed to parse Arjun JSON: %v", err)
-			return 0
-		}
-		results = []arjunResult{single}
+		logger.Warning("Failed to parse x8 JSON: %v", err)
+		return 0
 	}
 
 	f, err := os.Create(outputFile)
@@ -1151,15 +1637,17 @@ func convertArjunToURLs(arjunJSON, outputFile string) int {
 
 	count := 0
 	for _, r := range results {
-		if r.URL == "" || len(r.Params) == 0 {
+		if r.URL == "" || len(r.FoundParams) == 0 {
 			continue
 		}
-		// Build parameterized URL preserving original Arjun parameter order.
-		// Using url.Values.Encode() would sort alphabetically, which changes
-		// the semantics for order-sensitive endpoints and WAFs.
 		var paramPairs []string
-		for _, p := range r.Params {
-			paramPairs = append(paramPairs, url.QueryEscape(p)+"=1")
+		for _, p := range r.FoundParams {
+			if p.Name != "" {
+				paramPairs = append(paramPairs, url.QueryEscape(p.Name)+"=1")
+			}
+		}
+		if len(paramPairs) == 0 {
+			continue
 		}
 		qs := strings.Join(paramPairs, "&")
 		base := r.URL
@@ -1175,30 +1663,26 @@ func convertArjunToURLs(arjunJSON, outputFile string) int {
 	return count
 }
 
-// storeArjunParamCounts parses Arjun's JSON output and stores the number of
-// discovered hidden parameters per URL in url_metadata for ROI scoring.
-func storeArjunParamCounts(scanID int64, arjunJSON string) int {
-	if !utils.FileExists(arjunJSON) {
+// storeX8ParamCounts parses x8's JSON output and stores the number of
+// discovered parameters per URL in url_metadata for ROI scoring.
+func storeX8ParamCounts(scanID int64, x8JSON string) int {
+	if !utils.FileExists(x8JSON) {
 		return 0
 	}
 
-	data, err := os.ReadFile(arjunJSON)
+	data, err := os.ReadFile(x8JSON)
 	if err != nil || len(data) == 0 {
 		return 0
 	}
 
-	var results []arjunResult
+	var results []x8Result
 	if err := json.Unmarshal(data, &results); err != nil {
-		var single arjunResult
-		if err2 := json.Unmarshal(data, &single); err2 != nil {
-			return 0
-		}
-		results = []arjunResult{single}
+		return 0
 	}
 
 	stored := 0
 	for _, r := range results {
-		if r.URL == "" || len(r.Params) == 0 {
+		if r.URL == "" || len(r.FoundParams) == 0 {
 			continue
 		}
 		parsed, parseErr := url.Parse(strings.TrimSpace(r.URL))
@@ -1206,12 +1690,12 @@ func storeArjunParamCounts(scanID int64, arjunJSON string) int {
 			continue
 		}
 		err := database.UpsertURLMetadata(scanID, database.URLMetadata{
-			URL:             r.URL,
-			Host:            strings.ToLower(parsed.Hostname()),
-			ArjunParamCount: len(r.Params),
+			URL:        r.URL,
+			Host:       strings.ToLower(parsed.Hostname()),
+			ParamCount: len(r.FoundParams),
 		})
 		if err != nil {
-			logger.Warning("Failed to store Arjun param count for %s: %v", r.URL, err)
+			logger.Warning("Failed to store x8 param count for %s: %v", r.URL, err)
 		} else {
 			stored++
 		}

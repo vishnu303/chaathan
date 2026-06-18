@@ -51,7 +51,7 @@ type RunConfig struct {
 	SkipDalfox        bool
 	SkipUncover       bool
 	SkipTlsx          bool
-	SkipArjun         bool
+	SkipX8            bool
 	SkipShuffleDNS    bool
 	SkipHakrawler     bool
 	SkipFingerprint   bool
@@ -99,6 +99,7 @@ type Files struct {
 	UncoverOut         string
 	UncoverHostsOut    string
 	ConsolidatedSubs   string
+	HttpxInput         string
 	DnsxOut            string
 	ShufflednsOut      string
 	HttpxOut           string
@@ -109,8 +110,8 @@ type Files struct {
 	GospiderOut        string
 	GoLinkFinderOut    string
 	HakrawlerOut       string
-	ArjunOut           string
-	ArjunURLsOut       string
+	X8Out              string
+	X8URLsOut          string
 	AllURLsRaw         string
 	AllURLsLive        string
 	JSURLsFile         string
@@ -121,6 +122,7 @@ type Files struct {
 	GFSecretsFinal     string
 	ROIMetadataTargets string
 	FfufOut            string
+	FfufDiscoveredURLs string
 	NucleiOut          string
 	NucleiURLOut       string
 	NucleiURLTargets   string
@@ -158,6 +160,7 @@ func newFiles(dir string) Files {
 		UncoverOut:         j("uncover.json"),
 		UncoverHostsOut:    j("uncover_hosts.txt"),
 		ConsolidatedSubs:   j("all_subdomains.txt"),
+		HttpxInput:         j("httpx_input.txt"),
 		DnsxOut:            j("dnsx_resolved.json"),
 		ShufflednsOut:      j("shuffledns_bruteforce.txt"),
 		HttpxOut:           j("httpx_live.json"),
@@ -168,8 +171,8 @@ func newFiles(dir string) Files {
 		GospiderOut:        j("gospider_urls.txt"),
 		GoLinkFinderOut:    j("golinkfinder_endpoints.txt"),
 		HakrawlerOut:       j("hakrawler_crawl.txt"),
-		ArjunOut:           j("arjun_params.json"),
-		ArjunURLsOut:       j("arjun_urls.txt"),
+		X8Out:              j("x8_params.json"),
+		X8URLsOut:          j("x8_urls.txt"),
 		AllURLsRaw:         j("all_urls_raw.txt"),
 		AllURLsLive:        j("all_urls_live.txt"),
 		JSURLsFile:         j("js_urls.txt"),
@@ -180,6 +183,7 @@ func newFiles(dir string) Files {
 		GFSecretsFinal:     jf("gf_secrets_findings.txt"),
 		ROIMetadataTargets: j("roi_metadata_targets.txt"),
 		FfufOut:            j("ffuf_results.json"),
+		FfufDiscoveredURLs: j("ffuf_discovered_urls.txt"),
 		// Nuclei JSON outputs go to final_files/ — they are product files
 		NucleiOut:        jf("nuclei_vulns.json"),
 		NucleiURLOut:     jf("nuclei_url_vulns.json"),
@@ -262,7 +266,8 @@ func (c *Ctx) urlSources() []string {
 		c.F.KatanaOut,
 		c.F.GospiderOut,
 		c.F.GoLinkFinderOut,
-		c.F.ArjunURLsOut,
+		c.F.X8URLsOut,
+		c.F.FfufDiscoveredURLs,
 	}
 }
 
@@ -314,7 +319,7 @@ func Run(cfg RunConfig) error {
 		"skip_dalfox":        cfg.SkipDalfox,
 		"skip_uncover":       cfg.SkipUncover,
 		"skip_tlsx":          cfg.SkipTlsx,
-		"skip_arjun":         cfg.SkipArjun,
+		"skip_x8":            cfg.SkipX8,
 		"skip_shuffledns":    cfg.SkipShuffleDNS,
 		"skip_hakrawler":     cfg.SkipHakrawler,
 		"skip_fingerprint":   cfg.SkipFingerprint,
@@ -413,6 +418,9 @@ func Run(cfg RunConfig) error {
 		c.Proxy = cfg.Cfg.General.Proxy
 	}
 
+	_ = c.SetupResolvers()
+
+
 	// Wire notification logging (FileDebug no-ops if --log is inactive)
 	if c.Notifier != nil {
 		c.Notifier.LogFunc = logger.FileDebug
@@ -452,29 +460,29 @@ func Run(cfg RunConfig) error {
 		{"search_engine_recon", stepSearchEngineRecon},
 		{"js_subdomain_discovery", stepJSSubdomains},
 
-		// Phase 2 — Validation & Probing (Steps 6–10)
+		// Phase 2 — Validation & Probing (Steps 7–11)
 		{"dns_resolution", stepDNSConsolidation},
 		{"dns_bruteforce", stepDNSBruteforce},
+		{"port_scanning", stepPortScanning},
 		{"http_probing", stepHTTPProbing},
 		{"tls_analysis", stepTLSAnalysis},
-		{"port_scanning", stepPortScanning},
 
-		// Phase 3 — Content Discovery (Steps 11–17)
+		// Phase 3 — Content Discovery (Steps 12–18)
 		{"url_discovery", stepURLDiscovery},
 		{"web_crawling", stepWebCrawling},
 		{"js_analysis", stepJSAnalysis},
+		{"dir_fuzzing", stepDirFuzzing},
 		{"param_discovery", stepParamDiscovery},
 		{"url_consolidation", stepURLConsolidation},
 		{"js_secret_scan", stepJSSecretScan},
-		{"dir_fuzzing", stepDirFuzzing},
 
-		// Phase 4 — Vulnerability Scanning (Steps 18–21)
+		// Phase 4 — Vulnerability Scanning (Steps 19–22)
+		{"takeover_detection", stepTakeoverDetection},
 		{"vuln_scanning", stepVulnScanningInfra},
 		{"vuln_scanning_urls", stepVulnScanningURLs},
-		{"takeover_detection", stepTakeoverDetection},
 		{"xss_scanning", stepXSSScanning},
 
-		// Phase 5 — Fingerprinting (Step 22)
+		// Phase 5 — Fingerprinting (Step 23)
 		{"tech_waf_fingerprinting", stepFingerprinting},
 	}
 
@@ -583,7 +591,7 @@ func countFindingsForStep(c *Ctx, stepName string) int {
 	case "js_subdomain_discovery":
 		return countLines(c.F.HakrawlerOut)
 	case "param_discovery":
-		return countLines(c.F.ArjunURLsOut)
+		return countLines(c.F.X8URLsOut)
 	case "url_consolidation":
 		return countLines(c.F.AllURLsLive)
 	case "js_secret_scan":
@@ -703,4 +711,24 @@ func finalizeScan(c *Ctx, status string) {
 		}
 		logger.NextSteps(hints)
 	}
+}
+
+// SetupResolvers ensures that a valid resolvers file exists.
+// If c.ResolversPath is empty, it writes a default set of public DNS resolvers
+// directly to the scan's intermediate directory and sets c.ResolversPath to that file.
+func (c *Ctx) SetupResolvers() error {
+	if c.ResolversPath == "" {
+		destPath := filepath.Join(filepath.Dir(c.F.ConsolidatedSubs), "resolvers.txt")
+		if !utils.FileExists(destPath) {
+			defaultResolvers := "1.1.1.1\n1.0.0.1\n8.8.8.8\n8.8.4.4\n9.9.9.9\n149.112.112.112\n"
+			_ = os.MkdirAll(filepath.Dir(destPath), 0755)
+			if err := os.WriteFile(destPath, []byte(defaultResolvers), 0644); err != nil {
+				logger.Warning("Failed to create default resolvers file: %v", err)
+				return err
+			}
+			logger.FileDebug("Created default resolvers file at: %s", destPath)
+		}
+		c.ResolversPath = destPath
+	}
+	return nil
 }

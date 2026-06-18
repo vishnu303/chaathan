@@ -98,6 +98,9 @@ func installPrerequisites(ctx *SetupContext) {
 
 	prereqs := []prereq{
 		{"pip3", "pip3", "python3-pip", "python-pip", "", ""},
+		{"Cargo", "cargo", "cargo", "rust", "", ""},
+		{"pkg-config", "pkg-config", "pkg-config", "pkgconf", "", ""},
+		{"libssl-dev", "", "libssl-dev", "openssl", "libssl-dev", "openssl"},
 		{"Git", "git", "git", "git", "", ""},
 		{"Make", "make", "make", "make", "", ""},
 		{"GCC", "gcc", "gcc", "gcc", "", ""},

@@ -204,7 +204,7 @@ func createTables() error {
 		form_count INTEGER DEFAULT 0,
 		has_file_upload BOOLEAN DEFAULT FALSE,
 		hidden_input_count INTEGER DEFAULT 0,
-		arjun_param_count INTEGER DEFAULT 0,
+		param_count INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (scan_id, url),
@@ -281,12 +281,13 @@ func runMigrations() {
 	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN has_file_upload BOOLEAN DEFAULT FALSE`)
 	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN hidden_input_count INTEGER DEFAULT 0`)
 
-	// Phase 4 columns — CORS, cookie security, dangerous methods, Arjun params.
+	// Phase 4 columns — CORS, cookie security, dangerous methods, parameter counts.
 	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN cors_wildcard BOOLEAN DEFAULT FALSE`)
 	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN has_insecure_cookies BOOLEAN DEFAULT FALSE`)
 	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN has_session_cookie BOOLEAN DEFAULT FALSE`)
 	_, _ = DB.Exec(`ALTER TABLE host_metadata ADD COLUMN has_dangerous_methods BOOLEAN DEFAULT FALSE`)
 	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN arjun_param_count INTEGER DEFAULT 0`)
+	_, _ = DB.Exec(`ALTER TABLE url_metadata ADD COLUMN param_count INTEGER DEFAULT 0`)
 }
 
 // Close closes the database connection
