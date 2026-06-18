@@ -418,6 +418,9 @@ func Run(cfg RunConfig) error {
 		c.Proxy = cfg.Cfg.General.Proxy
 	}
 
+	_ = c.SetupResolvers()
+
+
 	// Wire notification logging (FileDebug no-ops if --log is inactive)
 	if c.Notifier != nil {
 		c.Notifier.LogFunc = logger.FileDebug
@@ -708,4 +711,24 @@ func finalizeScan(c *Ctx, status string) {
 		}
 		logger.NextSteps(hints)
 	}
+}
+
+// SetupResolvers ensures that a valid resolvers file exists.
+// If c.ResolversPath is empty, it writes a default set of public DNS resolvers
+// directly to the scan's intermediate directory and sets c.ResolversPath to that file.
+func (c *Ctx) SetupResolvers() error {
+	if c.ResolversPath == "" {
+		destPath := filepath.Join(filepath.Dir(c.F.ConsolidatedSubs), "resolvers.txt")
+		if !utils.FileExists(destPath) {
+			defaultResolvers := "1.1.1.1\n1.0.0.1\n8.8.8.8\n8.8.4.4\n9.9.9.9\n149.112.112.112\n"
+			_ = os.MkdirAll(filepath.Dir(destPath), 0755)
+			if err := os.WriteFile(destPath, []byte(defaultResolvers), 0644); err != nil {
+				logger.Warning("Failed to create default resolvers file: %v", err)
+				return err
+			}
+			logger.FileDebug("Created default resolvers file at: %s", destPath)
+		}
+		c.ResolversPath = destPath
+	}
+	return nil
 }

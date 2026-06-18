@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -265,6 +266,92 @@ func stepWebCrawling(c *Ctx) bool {
 
 // stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
 // Returns true if the scan should be cancelled.
+// filterAndDeduplicateHosts filters live hosts to standard ports 80/443,
+// maps bare host:port pairs to their proper scheme based on port,
+// and deduplicates by hostname, preferring HTTPS (443) over HTTP (80).
+func filterAndDeduplicateHosts(hosts []string) []string {
+	type hostPref struct {
+		target   string
+		priority int // 2 for https (443), 1 for http (80)
+	}
+	bestUrls := make(map[string]hostPref)
+
+	for _, h := range hosts {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+
+		target := h
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			port := ""
+			if idx := strings.LastIndex(target, ":"); idx != -1 {
+				pPart := target[idx+1:]
+				if _, err := strconv.Atoi(pPart); err == nil {
+					port = pPart
+				}
+			}
+
+			// Issue 2: map TLS ports to https://, others to http://
+			if port == "443" || port == "8443" {
+				target = "https://" + target
+			} else if port != "" {
+				target = "http://" + target
+			} else {
+				target = "https://" + target
+			}
+		}
+
+		parsed, err := url.Parse(target)
+		if err != nil {
+			continue
+		}
+
+		hostname := strings.ToLower(parsed.Hostname())
+		if hostname == "" {
+			continue
+		}
+
+		port := parsed.Port()
+		scheme := strings.ToLower(parsed.Scheme)
+
+		if port == "" {
+			if scheme == "https" {
+				port = "443"
+			} else {
+				port = "80"
+			}
+		}
+
+		// Filter to standard ports 80/443 only (Issue 1)
+		if port != "80" && port != "443" {
+			continue
+		}
+
+		priority := 1
+		if scheme == "https" && port == "443" {
+			priority = 2
+		}
+
+		existing, exists := bestUrls[hostname]
+		if !exists || priority > existing.priority {
+			bestUrls[hostname] = hostPref{
+				target:   target,
+				priority: priority,
+			}
+		}
+	}
+
+	var result []string
+	for _, pref := range bestUrls {
+		result = append(result, pref.target)
+	}
+	slices.Sort(result) // Ensure deterministic order
+	return result
+}
+
+// stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
+// Returns true if the scan should be cancelled.
 func stepJSAnalysis(c *Ctx) bool {
 	if skipped, cancelled := c.resumeOrSkip("js_analysis", "Step 14: JavaScript Analysis"); skipped {
 		return cancelled
@@ -279,33 +366,61 @@ func stepJSAnalysis(c *Ctx) bool {
 			liveHosts = []string{"https://" + c.Domain}
 		}
 
-		for _, host := range liveHosts {
+		// Filter standard ports 80/443 and deduplicate by hostname
+		filteredHosts := filterAndDeduplicateHosts(liveHosts)
+		if len(filteredHosts) == 0 {
+			logger.Info("  No live hosts match standard ports 80/443. Skipping GoLinkFinder.")
+			return nil
+		}
+
+		concurrency := 5
+		sem := make(chan struct{}, concurrency)
+		var wg sync.WaitGroup
+		var writeMu sync.Mutex
+		var loopErr error
+
+		for _, host := range filteredHosts {
 			select {
 			case <-sCtx.Done():
-				return sCtx.Err()
+				loopErr = sCtx.Err()
+				break
 			default:
 			}
-
-			target := host
-			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-				target = "https://" + target
+			if loopErr != nil {
+				break
 			}
 
-			tmpOut := filepath.Join(filepath.Dir(c.F.GoLinkFinderOut), fmt.Sprintf("golinkfinder_tmp_%d.txt", rand.IntN(1000000)))
-			// Ensure file is deleted afterwards
-			defer os.Remove(tmpOut)
+			sem <- struct{}{}
+			wg.Add(1)
 
-			if err := c.Tb.RunGoLinkFinder(sCtx, target, tmpOut); err == nil && utils.FileExists(tmpOut) {
-				if data, readErr := os.ReadFile(tmpOut); readErr == nil && len(data) > 0 {
-					fOut, openErr := os.OpenFile(c.F.GoLinkFinderOut, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-					if openErr == nil {
-						_, _ = fOut.Write(data)
-						fOut.Close()
+			go func(target string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				// Issue 1: Add a per-host timeout of 15s (total, not just HTTP)
+				hostCtx, hostCancel := context.WithTimeout(sCtx, 15*time.Second)
+				defer hostCancel()
+
+				tmpOut := filepath.Join(filepath.Dir(c.F.GoLinkFinderOut), fmt.Sprintf("golinkfinder_tmp_%d_%d.txt", os.Getpid(), rand.IntN(1000000)))
+				// Issue 7: Clean up temp file immediately (replaces defer in outer loop)
+				defer os.Remove(tmpOut)
+
+				if err := c.Tb.RunGoLinkFinder(hostCtx, target, tmpOut); err == nil && utils.FileExists(tmpOut) {
+					if data, readErr := os.ReadFile(tmpOut); readErr == nil && len(data) > 0 {
+						writeMu.Lock()
+						fOut, openErr := os.OpenFile(c.F.GoLinkFinderOut, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+						if openErr == nil {
+							_, _ = fOut.Write(data)
+							fOut.Close()
+						}
+						writeMu.Unlock()
 					}
 				}
-			}
+			}(host)
 		}
-		return nil
+
+		wg.Wait()
+		return loopErr
 	}); err != nil {
 		if err == ErrToolSkipped {
 			golinkfinderSkipped = true
