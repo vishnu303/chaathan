@@ -1370,10 +1370,17 @@ func stepDirFuzzing(c *Ctx) bool {
 
 	var ffufSkipped bool
 	if err := runWithSkip(c, "ffuf", func(sCtx context.Context) error {
+		timeoutCtx, cancel := context.WithTimeout(sCtx, 3*time.Hour)
+		defer cancel()
+
 		for _, host := range liveHosts {
 			select {
-			case <-sCtx.Done():
-				return sCtx.Err()
+			case <-timeoutCtx.Done():
+				if timeoutCtx.Err() == context.DeadlineExceeded {
+					logger.Warning("Fuzzing step reached 3 hour time limit \u2014 stopping early")
+					return nil
+				}
+				return timeoutCtx.Err()
 			default:
 			}
 
@@ -1390,7 +1397,7 @@ func stepDirFuzzing(c *Ctx) bool {
 			tmpFfufOut := filepath.Join(filepath.Dir(c.F.FfufOut), fmt.Sprintf("ffuf_tmp_%d.json", rand.IntN(1000000)))
 
 			logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, tmpFfufOut)
-			if err := c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, tmpFfufOut); err == nil && utils.FileExists(tmpFfufOut) {
+			if err := c.Tb.RunFfufWithFUZZ(timeoutCtx, targetURL, c.WordlistPath, tmpFfufOut); err == nil && utils.FileExists(tmpFfufOut) {
 				// Parse and add to allResults
 				if data, readErr := os.ReadFile(tmpFfufOut); readErr == nil && len(data) > 0 {
 					var payload struct {
