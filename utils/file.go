@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"maps"
 	"os"
 	"slices"
@@ -29,6 +30,57 @@ func MergeAndDeduplicate(inputFiles []string, outputFile string) error {
 		return fmt.Errorf("failed to write output file %s: %w", outputFile, err)
 	}
 	return nil
+}
+
+// MergeAndDeduplicateStreaming merges unique non-empty lines from multiple files in a memory-efficient streaming manner and writes them to outputFile without sorting.
+func MergeAndDeduplicateStreaming(inputFiles []string, outputFile string) error {
+	out, err := os.Create(outputFile)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	writer := bufio.NewWriter(out)
+	defer writer.Flush()
+
+	seen := make(map[uint64]struct{})
+
+	for _, file := range inputFiles {
+		if err := readAndWriteUniqueLines(file, seen, writer); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func readAndWriteUniqueLines(path string, seen map[uint64]struct{}, w *bufio.Writer) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // missing files are silently skipped
+		}
+		return fmt.Errorf("failed to open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	h64 := fnv.New64a()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			h64.Reset()
+			_, _ = h64.Write([]byte(line))
+			h := h64.Sum64()
+			if _, ok := seen[h]; !ok {
+				seen[h] = struct{}{}
+				if _, err := w.WriteString(line + "\n"); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return scanner.Err()
 }
 
 // readFileInto reads non-empty lines from a single file into the dest map.

@@ -6,8 +6,9 @@ import (
 	"strconv"
 )
 
-// domainRegex validates a standard domain name format
-var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$`)
+// domainRegex validates a standard domain name format.
+// It supports standard domains, IDN TLDs (e.g. .xn--p1ai), and internal domains with numbers.
+var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$`)
 
 // ValidateDomain checks if the given string is a valid domain name.
 // Rejects empty strings, strings with path traversal, whitespace, and

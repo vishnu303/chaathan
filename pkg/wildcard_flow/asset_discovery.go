@@ -34,6 +34,9 @@ func stepPassiveEnum(c *Ctx) bool {
 	writeEmptyFile(c.F.Sublist3rOut)
 
 	var passiveSkipped bool
+	var subfinderOk, assetfinderOk, sublist3rOk bool
+	var subfinderErr, assetfinderErr, sublist3rErr error
+
 	err := runWithSkip(c, "passive enum", func(sCtx context.Context) error {
 		var wg sync.WaitGroup
 		wg.Add(3)
@@ -42,11 +45,12 @@ func stepPassiveEnum(c *Ctx) bool {
 			defer wg.Done()
 			logger.SubStep("[Start] Subfinder")
 			logger.FileDebug("subfinder input: domain=%s out=%s", c.Domain, c.F.SubfinderOut)
-			if err := c.Tb.RunSubfinder(sCtx, c.Domain, c.F.SubfinderOut); err != nil {
+			if subfinderErr = c.Tb.RunSubfinder(sCtx, c.Domain, c.F.SubfinderOut); subfinderErr != nil {
 				if sCtx.Err() == nil {
-					logger.Error("Subfinder failed: %v", err)
+					logger.Error("Subfinder failed: %v", subfinderErr)
 				}
 			} else {
+				subfinderOk = true
 				logger.SubStep("[Done] Subfinder")
 			}
 		}()
@@ -55,11 +59,12 @@ func stepPassiveEnum(c *Ctx) bool {
 			defer wg.Done()
 			logger.SubStep("[Start] Assetfinder")
 			logger.FileDebug("assetfinder input: domain=%s out=%s", c.Domain, c.F.AssetfinderOut)
-			if err := c.Tb.RunAssetfinder(sCtx, c.Domain, c.F.AssetfinderOut); err != nil {
+			if assetfinderErr = c.Tb.RunAssetfinder(sCtx, c.Domain, c.F.AssetfinderOut); assetfinderErr != nil {
 				if sCtx.Err() == nil {
-					logger.Error("Assetfinder failed: %v", err)
+					logger.Error("Assetfinder failed: %v", assetfinderErr)
 				}
 			} else {
+				assetfinderOk = true
 				logger.SubStep("[Done] Assetfinder")
 			}
 		}()
@@ -68,12 +73,13 @@ func stepPassiveEnum(c *Ctx) bool {
 			defer wg.Done()
 			logger.SubStep("[Start] Sublist3r")
 			logger.FileDebug("sublist3r input: domain=%s out=%s", c.Domain, c.F.Sublist3rOut)
-			if err := c.Tb.RunSublist3r(sCtx, c.Domain, c.F.Sublist3rOut); err != nil {
+			if sublist3rErr = c.Tb.RunSublist3r(sCtx, c.Domain, c.F.Sublist3rOut); sublist3rErr != nil {
 				if c.Verbose && sCtx.Err() == nil {
-					logger.Warning("Sublist3r failed: %v", err)
+					logger.Warning("Sublist3r failed: %v", sublist3rErr)
 				}
-				logger.FileDebug("sublist3r failed: %v", err)
+				logger.FileDebug("sublist3r failed: %v", sublist3rErr)
 			} else {
+				sublist3rOk = true
 				logger.SubStep("[Done] Sublist3r")
 			}
 		}()
@@ -86,11 +92,12 @@ func stepPassiveEnum(c *Ctx) bool {
 		passiveSkipped = true
 	}
 
+	var totalPassive int
 	if c.ScanID > 0 {
 		subfinderCount, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.SubfinderOut, "subfinder")
 		assetfinderCount, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.AssetfinderOut, "assetfinder")
 		sublist3rCount, _ := utils.ParseSubdomainsFile(c.ScanID, c.F.Sublist3rOut, "sublist3r")
-		totalPassive := subfinderCount + assetfinderCount + sublist3rCount
+		totalPassive = subfinderCount + assetfinderCount + sublist3rCount
 		if totalPassive > 0 {
 			label := ""
 			if passiveSkipped {
@@ -104,7 +111,25 @@ func stepPassiveEnum(c *Ctx) bool {
 		}
 	}
 
-	c.StateMgr.MarkStepComplete(c.State, "passive_enum")
+	allFailed := !subfinderOk && !assetfinderOk && !sublist3rOk
+
+	if err != nil && err != ErrToolSkipped {
+		c.StateMgr.MarkStepFailed(c.State, "passive_enum", err)
+	} else if allFailed && totalPassive == 0 && err != ErrToolSkipped {
+		var combinedErr error
+		if subfinderErr != nil {
+			combinedErr = subfinderErr
+		} else if assetfinderErr != nil {
+			combinedErr = assetfinderErr
+		} else if sublist3rErr != nil {
+			combinedErr = sublist3rErr
+		} else {
+			combinedErr = fmt.Errorf("all passive tools failed")
+		}
+		c.StateMgr.MarkStepFailed(c.State, "passive_enum", combinedErr)
+	}
+
+	c.markStepCompleteIfNoFailure("passive_enum")
 	return c.cancelled()
 }
 
@@ -303,6 +328,10 @@ func stepJSSubdomains(c *Ctx) bool {
 		} else {
 			c.StateMgr.MarkStepFailed(c.State, "js_subdomain_discovery", err)
 			logger.Warning("Hakrawler failed: %v", err)
+		}
+	} else {
+		if n := extractHostsFromURLFileAndWrite(c.F.HakrawlerOut, c.F.HakrawlerHostsOut); n > 0 {
+			logger.FileDebug("Extracted %d unique hosts from Hakrawler output", n)
 		}
 	}
 

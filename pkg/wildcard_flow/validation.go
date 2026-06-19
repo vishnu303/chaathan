@@ -26,7 +26,7 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// Step 6 — Consolidation & DNS Resolution
+// Step 7 — Consolidation & DNS Resolution
 // ─────────────────────────────────────────────────────────────
 
 // stepDNSConsolidation merges all passive sources and resolves them with DNSx.
@@ -43,7 +43,7 @@ func stepDNSConsolidation(c *Ctx) bool {
 		c.F.Sublist3rOut,
 		c.F.AmassOut,
 		c.F.GithubSubsOut,
-		c.F.HakrawlerOut,
+		c.F.HakrawlerHostsOut,
 		c.F.UncoverHostsOut, // hostnames extracted from uncover.json in Step 4
 	)
 	logger.FileDebug("dns_consolidation: %d passive source files available (subfinder, assetfinder, sublist3r, amass, github, hakrawler, uncover_hosts)", len(passiveSources))
@@ -115,7 +115,7 @@ func stepDNSConsolidation(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 7 — DNS Brute-force (ShuffleDNS)
+// Step 8 — DNS Brute-force (ShuffleDNS)
 // ─────────────────────────────────────────────────────────────
 
 // stepDNSBruteforce runs ShuffleDNS when a dns-wordlist is provided.
@@ -204,7 +204,7 @@ func stepDNSBruteforce(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 8 — Live Web Server Probing (Httpx)
+// Step 10 — Live Web Server Probing (Httpx)
 // ─────────────────────────────────────────────────────────────
 
 // stepHTTPProbing probes all consolidated subdomains with Httpx.
@@ -268,7 +268,7 @@ func stepHTTPProbing(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 9 — TLS Certificate Analysis (tlsx) + host metadata
+// Step 11 — TLS Certificate Analysis (tlsx) + host metadata
 // ─────────────────────────────────────────────────────────────
 
 // stepTLSAnalysis examines TLS certificates and enriches host metadata.
@@ -366,8 +366,12 @@ func stepTLSAnalysis(c *Ctx) bool {
 							}
 							fSan.Close()
 
-							// Run httpx on the new SAN subs
-							if err := c.Tb.RunHttpx(c.GoCtx, sanSubsInputFile, sanHttpxOutFile); err == nil {
+							// Run httpx on the new SAN subs using runWithSkip
+							_ = runWithSkip(c, "httpx (SAN re-probe)", func(sCtx context.Context) error {
+								return c.Tb.RunHttpx(sCtx, sanSubsInputFile, sanHttpxOutFile)
+							})
+
+							if utils.FileExists(sanHttpxOutFile) {
 								// Parse httpx results into database
 								if _, err := utils.ParseHttpxOutput(c.ScanID, sanHttpxOutFile); err != nil {
 									logger.Warning("Failed to parse SAN httpx output: %v", err)
@@ -434,7 +438,7 @@ func stepTLSAnalysis(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 10 — Port Scanning (Naabu)
+// Step 9 — Port Scanning (Naabu)
 // ─────────────────────────────────────────────────────────────
 
 // stepPortScanning runs Naabu against all discovered subdomains.

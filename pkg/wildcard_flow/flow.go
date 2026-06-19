@@ -110,6 +110,7 @@ type Files struct {
 	GospiderOut        string
 	GoLinkFinderOut    string
 	HakrawlerOut       string
+	HakrawlerHostsOut  string
 	X8Out              string
 	X8URLsOut          string
 	AllURLsRaw         string
@@ -171,6 +172,7 @@ func newFiles(dir string) Files {
 		GospiderOut:        j("gospider_urls.txt"),
 		GoLinkFinderOut:    j("golinkfinder_endpoints.txt"),
 		HakrawlerOut:       j("hakrawler_crawl.txt"),
+		HakrawlerHostsOut:  j("hakrawler_hosts.txt"),
 		X8Out:              j("x8_params.json"),
 		X8URLsOut:          j("x8_urls.txt"),
 		AllURLsRaw:         j("all_urls_raw.txt"),
@@ -309,33 +311,61 @@ func Run(cfg RunConfig) error {
 		}
 	}()
 
-	// ── Database record ──────────────────────────────────────
-	configJSON, _ := json.Marshal(map[string]any{
-		"skip_amass":         cfg.SkipAmass,
-		"skip_nuclei":        cfg.SkipNuclei,
-		"skip_naabu":         cfg.SkipNaabu,
-		"skip_crawl":         cfg.SkipCrawl,
-		"skip_takeovers":     cfg.SkipTakeovers,
-		"skip_dalfox":        cfg.SkipDalfox,
-		"skip_uncover":       cfg.SkipUncover,
-		"skip_tlsx":          cfg.SkipTlsx,
-		"skip_x8":            cfg.SkipX8,
-		"skip_shuffledns":    cfg.SkipShuffleDNS,
-		"skip_hakrawler":     cfg.SkipHakrawler,
-		"skip_fingerprint":   cfg.SkipFingerprint,
-		"wordlist":           cfg.WordlistPath,
-		"dns_wordlist":       cfg.DNSWordlistPath,
-		"github":             cfg.GitHubToken != "",
-		"auto_proxy":         cfg.AutoProxy,
-	})
+	// ── Scan state & database initialization ───────────────────
+	stateMgr := scan.NewManager(paths.StateDir())
+	var scanState *scan.State
+	var scanID int64
+	var configJSON []byte
 
-	dbScan, err := database.CreateScan(cfg.Domain, "wildcard", cfg.ResultDir, string(configJSON))
-	if err != nil {
-		logger.Warning("Failed to create scan record: %v", err)
-	}
-	scanID := int64(0)
-	if dbScan != nil {
-		scanID = dbScan.ID
+	if cfg.ResumeScanID > 0 {
+		var err error
+		scanState, err = stateMgr.LoadState(cfg.ResumeScanID)
+		if err != nil {
+			return fmt.Errorf("cannot resume scan #%d: %w", cfg.ResumeScanID, err)
+		}
+		cfg.ResultDir = scanState.ResultDir
+		cfg.Domain = scanState.Target
+		scanID = cfg.ResumeScanID
+		logger.Info("Resuming scan #%d (%.1f%% complete, %d/%d steps done)",
+			scanID, scanState.Progress(), len(scanState.CompletedSteps), scanState.TotalSteps)
+	} else {
+		// Fresh scan: Create DB scan row and state file
+		configJSON, _ = json.Marshal(map[string]any{
+			"skip_amass":         cfg.SkipAmass,
+			"skip_nuclei":        cfg.SkipNuclei,
+			"skip_naabu":         cfg.SkipNaabu,
+			"skip_crawl":         cfg.SkipCrawl,
+			"skip_takeovers":     cfg.SkipTakeovers,
+			"skip_dalfox":        cfg.SkipDalfox,
+			"skip_uncover":       cfg.SkipUncover,
+			"skip_tlsx":          cfg.SkipTlsx,
+			"skip_x8":            cfg.SkipX8,
+			"skip_shuffledns":    cfg.SkipShuffleDNS,
+			"skip_hakrawler":     cfg.SkipHakrawler,
+			"skip_fingerprint":   cfg.SkipFingerprint,
+			"wordlist":           cfg.WordlistPath,
+			"dns_wordlist":       cfg.DNSWordlistPath,
+			"github":             cfg.GitHubToken != "",
+			"auto_proxy":         cfg.AutoProxy,
+			"resolvers":          cfg.ResolversPath,
+			"save_log":           cfg.SaveLog,
+			"custom_cookie":      cfg.CustomCookie,
+			"custom_headers":     cfg.CustomHeaders,
+			"custom_token":       cfg.CustomToken,
+		})
+
+		dbScan, err := database.CreateScan(cfg.Domain, "wildcard", cfg.ResultDir, string(configJSON))
+		if err != nil {
+			logger.Warning("Failed to create scan record: %v", err)
+		}
+		if dbScan != nil {
+			scanID = dbScan.ID
+		}
+
+		scanState, err = stateMgr.CreateState(scanID, cfg.Domain, "wildcard", cfg.ResultDir, len(scan.WildcardSteps), json.RawMessage(configJSON))
+		if err != nil {
+			logger.Warning("Failed to create scan state: %v", err)
+		}
 	}
 
 	// ── File logging ──────────────────────────────────────
@@ -356,25 +386,9 @@ func Run(cfg RunConfig) error {
 		}
 	}
 
-	// ── Scan header & state ──────────────────────────────────
+	// ── Scan header & progress UI ───────────────────────────
 	logger.ScanHeader("Wildcard", cfg.Domain, scanID)
 	logger.InitScanUI(len(scan.WildcardSteps))
-
-	stateMgr := scan.NewManager(paths.StateDir())
-
-	var scanState *scan.State
-	if cfg.ResumeScanID > 0 {
-		existingState, err := stateMgr.LoadState(cfg.ResumeScanID)
-		if err != nil {
-			return fmt.Errorf("cannot resume scan #%d: %w", cfg.ResumeScanID, err)
-		}
-		scanState = existingState
-		scanID = cfg.ResumeScanID
-		logger.Info("Resuming scan #%d (%.1f%% complete, %d/%d steps done)",
-			scanID, scanState.Progress(), len(scanState.CompletedSteps), scanState.TotalSteps)
-	} else {
-		scanState, _ = stateMgr.CreateState(scanID, cfg.Domain, "wildcard", cfg.ResultDir, len(scan.WildcardSteps), configJSON)
-	}
 
 	// ── Runner, ToolBox & Notifier ──────────────────────────
 	infra := orchestrate.NewInfra(cfg.Mode, cfg.Verbose, cfg.Cfg)
@@ -494,7 +508,11 @@ func Run(cfg RunConfig) error {
 		}
 	}
 
-	finalizeScan(c, "completed")
+	status := "completed"
+	if c.State != nil && len(c.State.FailedSteps) > 0 {
+		status = "failed"
+	}
+	finalizeScan(c, status)
 	return nil
 }
 
@@ -650,16 +668,22 @@ func finalizeScan(c *Ctx, status string) {
 				stats["Vuln ("+label+")"] = fmt.Sprintf("%d", count)
 			}
 
+			totalVulns := 0
+			for _, count := range dbStats.Vulnerabilities {
+				totalVulns += count
+			}
+
 			if c.Notifier != nil {
 				if err := c.Notifier.SendScanComplete(notify.ScanComplete{
 					Target:   c.Domain,
 					ScanID:   c.ScanID,
 					Duration: duration,
 					Stats: map[string]int{
-						"subdomains": dbStats.TotalSubdomains,
-						"ports":      dbStats.TotalPorts,
-						"vulns":      len(dbStats.Vulnerabilities),
+						"subdomains":      dbStats.TotalSubdomains,
+						"ports":           dbStats.TotalPorts,
+						"vulnerabilities": totalVulns,
 					},
+					Status: status,
 				}); err != nil {
 					logger.Warning("Failed to send scan complete notification: %v", err)
 				}

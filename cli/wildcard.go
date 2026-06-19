@@ -129,7 +129,6 @@ func init() {
 	wildcardCmd.Flags().StringSliceVarP(&customHeaders, "header", "H", nil, "Custom request header (can be repeated, e.g. -H 'Authorization: Bearer token')")
 	wildcardCmd.Flags().StringVar(&customToken, "token", "", "Bearer token shorthand (injects 'Authorization: Bearer <token>')")
 	wildcardCmd.Flags().BoolVar(&autoProxy, "auto-proxy", false, "Auto-scrape free proxies, validate against target, and rotate IPs during scan")
-	wildcardCmd.MarkFlagRequired("domain")
 	rootCmd.AddCommand(wildcardCmd)
 }
 
@@ -138,6 +137,17 @@ func init() {
 // ─────────────────────────────────────────────────────────────
 
 func runWildcard(cmd *cobra.Command, args []string) {
+	if resumeScanID > 0 {
+		resumeScanByID(resumeScanID)
+		return
+	}
+
+	if targetDomain == "" {
+		logger.Error("Error: required flag(s) \"domain\" not set")
+		_ = cmd.Usage()
+		return
+	}
+
 	// Validate the target domain before doing anything
 	if err := utils.ValidateDomain(targetDomain); err != nil {
 		logger.Error("Invalid target: %v", err)

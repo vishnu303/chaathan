@@ -17,6 +17,8 @@ func TestValidateDomain(t *testing.T) {
 		{"example.com", false},
 		{"sub.example.com", false},
 		{"sub-domain.example.co.uk", false},
+		{"example.xn--p1ai", false}, // IDN TLD
+		{"intranet.corp1", false},   // Numbered TLD
 		{"invalid_domain.com", true}, // contains underscore
 		{"", true},
 		{"example", true}, // no TLD

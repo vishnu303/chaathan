@@ -227,6 +227,15 @@ func resumeScanByID(scanID int64) {
 		return v
 	}
 
+	var customHeaders []string
+	if val, ok := opts["custom_headers"].([]interface{}); ok {
+		for _, h := range val {
+			if s, ok := h.(string); ok {
+				customHeaders = append(customHeaders, s)
+			}
+		}
+	}
+
 	switch state.Type {
 	case "wildcard":
 		// Resolve GitHub token from config file (token not stored in state for security)
@@ -253,11 +262,19 @@ func resumeScanByID(scanID int64) {
 			SkipTlsx:          boolOpt("skip_tlsx"),
 			SkipX8:            boolOpt("skip_x8") || boolOpt("skip_arjun"),
 			SkipShuffleDNS:    boolOpt("skip_shuffledns"),
+			SkipHakrawler:     boolOpt("skip_hakrawler"),
+			SkipFingerprint:   boolOpt("skip_fingerprint"),
 			WordlistPath:      strOpt("wordlist"),
 			DNSWordlistPath:   strOpt("dns_wordlist"),
+			ResolversPath:     strOpt("resolvers"),
 			GitHubToken:       token,
 			ResumeScanID:      scanID,
 			GenerateReport:    true,
+			SaveLog:           boolOpt("save_log"),
+			CustomCookie:      strOpt("custom_cookie"),
+			CustomHeaders:     customHeaders,
+			CustomToken:       strOpt("custom_token"),
+			AutoProxy:         boolOpt("auto_proxy"),
 		}); err != nil {
 			logger.Error("Resume failed: %v", err)
 		}

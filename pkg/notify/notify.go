@@ -83,6 +83,7 @@ type ScanComplete struct {
 	Duration   time.Duration  `json:"duration"`
 	Stats      map[string]int `json:"stats"`
 	ReportPath string         `json:"report_path,omitempty"`
+	Status     string         `json:"status,omitempty"` // "completed", "failed", "cancelled"
 }
 
 // StepComplete represents a completed workflow step notification
@@ -351,10 +352,24 @@ func (n *Notifier) sendDiscordScanComplete(scan ScanComplete) error {
 		})
 	}
 
+	title := "Scan Completed"
+	desc := fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target)
+	color := 0x00FF00 // Green
+
+	if scan.Status == "failed" {
+		title = "Scan Failed / Partial"
+		desc = fmt.Sprintf("Scan #%d for `%s` has failed or ended with errors", scan.ScanID, scan.Target)
+		color = 0xFF0000 // Red
+	} else if scan.Status == "cancelled" {
+		title = "Scan Cancelled"
+		desc = fmt.Sprintf("Scan #%d for `%s` was cancelled", scan.ScanID, scan.Target)
+		color = 0xFFFF00 // Yellow
+	}
+
 	embed := map[string]any{
-		"title":       "Scan Completed",
-		"description": fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target),
-		"color":       0x00FF00, // Green
+		"title":       title,
+		"description": desc,
+		"color":       color,
 		"fields":      fields,
 		"footer": map[string]string{
 			"text": "Chaathan Security Scanner",
@@ -439,10 +454,24 @@ func (n *Notifier) sendSlackScanComplete(scan ScanComplete) error {
 		})
 	}
 
+	color := "good"
+	title := "Scan Completed"
+	textMsg := fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target)
+
+	if scan.Status == "failed" {
+		color = "danger"
+		title = "Scan Failed / Partial"
+		textMsg = fmt.Sprintf("Scan #%d for `%s` has failed or ended with errors", scan.ScanID, scan.Target)
+	} else if scan.Status == "cancelled" {
+		color = "warning"
+		title = "Scan Cancelled"
+		textMsg = fmt.Sprintf("Scan #%d for `%s` was cancelled", scan.ScanID, scan.Target)
+	}
+
 	attachment := map[string]any{
-		"color":  "good",
-		"title":  "Scan Completed",
-		"text":   fmt.Sprintf("Scan #%d for `%s` has completed", scan.ScanID, scan.Target),
+		"color":  color,
+		"title":  title,
+		"text":   textMsg,
 		"fields": fields,
 		"footer": "Chaathan Security Scanner",
 	}
@@ -520,13 +549,21 @@ func (n *Notifier) sendTelegram(finding Finding) error {
 }
 
 func (n *Notifier) sendTelegramScanComplete(scan ScanComplete) error {
+	header := "🏁 *Scan Completed*"
+	if scan.Status == "failed" {
+		header = "⚠️ *Scan Failed / Partial*"
+	} else if scan.Status == "cancelled" {
+		header = "🛑 *Scan Cancelled*"
+	}
+
 	text := fmt.Sprintf(
-		"🏁 *Scan Completed*\n\n"+
+		"%s\n\n"+
 			"━━━━━━━━━━━━━━━━━━━━\n"+
 			"🎯 *Target*    %s\n"+
 			"🔢 *Scan ID*    %d\n"+
 			"━━━━━━━━━━━━━━━━━━━━\n"+
 			"📊 *Results*\n",
+		header,
 		EscapeMarkdown(scan.Target),
 		scan.ScanID,
 	)

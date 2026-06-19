@@ -32,15 +32,21 @@ func stepFingerprinting(c *Ctx) bool {
 		return c.cancelled()
 	}
 
+	var techErr, wafErr error
+	var techSkipped, wafSkipped bool
+
 	// 1. HTTPX Tech Detection
 	if utils.FileExists(c.F.HttpxLiveHosts) {
 		writeEmptyFile(c.F.HttpxTechOut)
 		logger.SubStep("Running HTTPX Tech Detection on live hosts...")
-		if err := runWithSkip(c, "httpx-tech", func(sCtx context.Context) error {
+		techErr = runWithSkip(c, "httpx-tech", func(sCtx context.Context) error {
 			return c.Tb.RunHttpxFingerprint(sCtx, c.F.HttpxLiveHosts, c.F.HttpxTechOut)
-		}); err != nil {
-			if err != ErrToolSkipped {
-				logger.Warning("HTTPX Tech Detection failed: %v", err)
+		})
+		if techErr != nil {
+			if techErr == ErrToolSkipped {
+				techSkipped = true
+			} else {
+				logger.Warning("HTTPX Tech Detection failed: %v", techErr)
 			}
 		}
 	} else {
@@ -56,14 +62,14 @@ func stepFingerprinting(c *Ctx) bool {
 		// Snapshot known vulnerabilities to avoid duplicate notifications on resume
 		knownVulnIDs := snapshotVulnIDs(c.ScanID)
 
-		var wafSkipped bool
-		if err := runWithSkip(c, "nuclei-waf", func(sCtx context.Context) error {
+		wafErr = runWithSkip(c, "nuclei-waf", func(sCtx context.Context) error {
 			return c.Tb.RunNucleiWAF(sCtx, c.F.HttpxLiveHosts, c.F.NucleiWafOut)
-		}); err != nil {
-			if err == ErrToolSkipped {
+		})
+		if wafErr != nil {
+			if wafErr == ErrToolSkipped {
 				wafSkipped = true
 			} else {
-				logger.Warning("Nuclei WAF Detection failed: %v", err)
+				logger.Warning("Nuclei WAF Detection failed: %v", wafErr)
 			}
 		}
 
@@ -94,7 +100,20 @@ func stepFingerprinting(c *Ctx) bool {
 	// 3. Log detailed findings summary
 	logFingerprintSummary(c)
 
-	c.StateMgr.MarkStepComplete(c.State, "tech_waf_fingerprinting")
+	anyFailed := (techErr != nil && techErr != ErrToolSkipped) || (wafErr != nil && wafErr != ErrToolSkipped)
+	hasOutput := utils.FileExists(c.F.HttpxTechOut) || utils.FileExists(c.F.NucleiWafOut)
+
+	if anyFailed && !hasOutput {
+		var combinedErr error
+		if techErr != nil && techErr != ErrToolSkipped {
+			combinedErr = techErr
+		} else {
+			combinedErr = wafErr
+		}
+		c.StateMgr.MarkStepFailed(c.State, "tech_waf_fingerprinting", combinedErr)
+	}
+
+	c.markStepCompleteIfNoFailure("tech_waf_fingerprinting")
 	return c.cancelled()
 }
 

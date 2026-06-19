@@ -109,8 +109,8 @@ func sanitizeTarget(name string) string {
 	// Clean the path (resolves .., removes trailing slashes)
 	name = filepath.Base(filepath.Clean(name))
 
-	// Strip leading dots (prevents hidden directories)
-	name = strings.TrimLeft(name, ".")
+	// Strip leading dots and hyphens (prevents hidden directories and flag injection)
+	name = strings.TrimLeft(name, ".-")
 
 	// Collapse internal whitespace to single space, trim edges
 	fields := strings.Fields(name)

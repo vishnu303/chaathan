@@ -140,6 +140,22 @@ func existingFiles(paths ...string) []string {
 	return out
 }
 
+// extractHostsFromURLFileAndWrite reads a URL file, extracts unique hostnames,
+// and writes them to outputFile. Returns the number of hostnames written.
+func extractHostsFromURLFileAndWrite(inputFile, outputFile string) int {
+	hosts := extractHostsFromURLFile(inputFile)
+	out, err := os.Create(outputFile)
+	if err != nil {
+		return 0
+	}
+	defer out.Close()
+
+	for _, host := range hosts {
+		fmt.Fprintln(out, host)
+	}
+	return len(hosts)
+}
+
 // copyFile copies src to dst using memory-efficient io.Copy.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
@@ -432,6 +448,10 @@ func extractUncoverHosts(uncoverJSON, outputFile string) int {
 		}
 		host = strings.ToLower(strings.TrimSpace(host))
 		if host == "" || seen[host] {
+			continue
+		}
+		// Skip garbage data that Uncover sometimes outputs (e.g., "108.177.125.0/24 (Netblock) --> contains --> 108.177.125.26 (IPAddress)")
+		if strings.Contains(host, " ") || strings.Contains(host, "-->") || strings.Contains(host, "(") {
 			continue
 		}
 		seen[host] = true

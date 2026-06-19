@@ -8,7 +8,7 @@
 //  13. Web Crawling (Katana + GoSpider) [Parallel, Optional]
 //  14. JavaScript Analysis — Endpoint Discovery (GoLinkFinder)
 //  15. Directory Fuzzing (ffuf) [Optional — requires --wordlist]
-//  16. HTTP Parameter Discovery (Arjun) [Optional]
+//  16. HTTP Parameter Discovery (x8) [Optional]
 //  17. URL Consolidation & Live Check (httpx) + ROI metadata
 //  18. JS Secret Scan (gf JS + Secrets)
 package wildcard_flow
@@ -39,7 +39,7 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────
-// Step 11 — Historical URL Discovery (Waybackurls + GAU)
+// Step 12 — Historical URL Discovery (Waybackurls + GAU)
 // ─────────────────────────────────────────────────────────────
 
 // stepURLDiscovery runs Waybackurls and GAU in parallel on the target domain.
@@ -144,7 +144,7 @@ func stepURLDiscovery(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 12 — Web Crawling (Katana + GoSpider)
+// Step 13 — Web Crawling (Katana + GoSpider)
 // ─────────────────────────────────────────────────────────────
 
 // stepWebCrawling runs Katana and GoSpider in parallel.
@@ -261,7 +261,7 @@ func stepWebCrawling(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 13 — JavaScript Analysis (GoLinkFinder)
+// Step 14 — JavaScript Analysis (GoLinkFinder)
 // ─────────────────────────────────────────────────────────────
 
 // stepJSAnalysis extracts endpoints from JavaScript files with GoLinkFinder.
@@ -450,7 +450,7 @@ func stepJSAnalysis(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 14 — HTTP Parameter Discovery (Arjun)
+// Step 16 — HTTP Parameter Discovery (x8)
 // ─────────────────────────────────────────────────────────────
 
 // stepParamDiscovery discovers HTTP parameters with x8 (Step 16).
@@ -668,7 +668,7 @@ func collectHighSignalEndpoints(files []string, limit int) []string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 15 — URL Consolidation & Live Check
+// Step 17 — URL Consolidation & Live Check
 // ─────────────────────────────────────────────────────────────
 
 // stepURLConsolidation merges all URL sources, live-checks them with Httpx,
@@ -684,7 +684,7 @@ func stepURLConsolidation(c *Ctx) bool {
 	sources := c.urlSources()
 	logger.SubStep("Merging URLs from %d sources...", len(sources))
 	logger.FileDebug("url_consolidation sources: %v", sources)
-	if err := utils.MergeAndDeduplicate(sources, c.F.AllURLsRaw); err != nil {
+	if err := utils.MergeAndDeduplicateStreaming(sources, c.F.AllURLsRaw); err != nil {
 		c.StateMgr.MarkStepFailed(c.State, "url_consolidation", err)
 		logger.Warning("URL merge failed: %v", err)
 		return c.cancelled()
@@ -758,7 +758,7 @@ func stepURLConsolidation(c *Ctx) bool {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 16 — JS Secret Scan (gf JS + Secrets)
+// Step 18 — JS Secret Scan (gf JS + Secrets)
 // ─────────────────────────────────────────────────────────────
 
 // stepJSSecretScan downloads a capped set of JS files, scans their content
@@ -1323,7 +1323,7 @@ func extractHostsFromURLFile(filePath string) []string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Step 17 — Directory Fuzzing (ffuf)
+// Step 15 — Directory Fuzzing (ffuf)
 // ─────────────────────────────────────────────────────────────
 
 // stepDirFuzzing runs ffuf when a wordlist is provided via --wordlist.

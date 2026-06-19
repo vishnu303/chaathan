@@ -158,6 +158,8 @@ func RunHarvest(ctx context.Context, cfg HarvestConfig) (*HarvestResult, error) 
 	cmd.Stderr = logFile
 	cmd.Stdin = nil
 
+	logger.FileDebug("Mubeng check logs saved at: %s", logPath)
+
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

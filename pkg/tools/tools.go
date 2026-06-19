@@ -11,8 +11,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"net/url"
 
 	"github.com/vishnu303/chaathan/pkg/config"
+	"github.com/vishnu303/chaathan/pkg/logger"
 	"github.com/vishnu303/chaathan/pkg/runner"
 )
 
@@ -505,7 +507,6 @@ func (t *ToolBox) RunAmass(ctx context.Context, domain string, outputFile string
 
 func (t *ToolBox) RunGau(ctx context.Context, domain string, outputFile string) error {
 	args := []string{domain, "--providers", "wayback", "--subs", "--o", outputFile}
-	args = t.appendProxy(args, "--proxy")
 	_, err := t.Runner.Run(ctx, "gau", args)
 	return err
 }
@@ -681,12 +682,23 @@ func (t *ToolBox) RunFfufWithFUZZ(ctx context.Context, baseURL string, wordlist 
 		return fmt.Errorf("ffuf requires a wordlist path")
 	}
 	// Ensure FUZZ is in URL
-	url := baseURL
-	if !strings.Contains(url, "FUZZ") {
-		url = baseURL + "/FUZZ"
+	targetURL := baseURL
+	if !strings.Contains(targetURL, "FUZZ") {
+		if parsed, err := url.Parse(baseURL); err == nil && parsed.Host != "" {
+			if !strings.HasSuffix(parsed.Path, "/") {
+				parsed.Path += "/"
+			}
+			parsed.Path += "FUZZ"
+			targetURL = parsed.String()
+		} else {
+			if !strings.HasSuffix(targetURL, "/") {
+				targetURL += "/"
+			}
+			targetURL += "FUZZ"
+		}
 	}
 	args := []string{
-		"-u", url,
+		"-u", targetURL,
 		"-w", wordlist,
 		"-mc", t.ffufMatchCodes(),
 		"-o", outputFile,
@@ -799,9 +811,13 @@ func (t *ToolBox) RunCloudEnum(ctx context.Context, keyword string, outputFile s
 	return err
 }
 
-func runBypassedCmd(ctx context.Context, cmd *exec.Cmd) error {
+func runBypassedCmd(ctx context.Context, cmd *exec.Cmd, command string, args []string, stderr *bytes.Buffer) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmdStr := fmt.Sprintf("%s %s", command, strings.Join(args, " "))
+	logger.LogCommand(cmdStr)
+
 	if err := cmd.Start(); err != nil {
+		logger.LogToolFailure(command, cmdStr, "", err)
 		return err
 	}
 
@@ -812,11 +828,19 @@ func runBypassedCmd(ctx context.Context, cmd *exec.Cmd) error {
 
 	select {
 	case err := <-done:
+		if err != nil {
+			stderrStr := ""
+			if stderr != nil {
+				stderrStr = stderr.String()
+			}
+			logger.LogToolFailure(command, cmdStr, stderrStr, err)
+		}
 		return err
 	case <-ctx.Done():
 		if cmd.Process != nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
+		logger.LogToolSkipped(command, cmdStr)
 		// Wait up to 2 seconds for clean exit
 		select {
 		case err := <-done:
@@ -845,7 +869,7 @@ func (t *ToolBox) RunHakrawler(ctx context.Context, url string, outputFile strin
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := runBypassedCmd(ctx, cmd)
+	err := runBypassedCmd(ctx, cmd, "hakrawler", args, &stderr)
 	if stdout.Len() > 0 {
 		_ = writeToFile(outputFile, stdout.String())
 	}
@@ -1020,7 +1044,7 @@ func (t *ToolBox) RunGFPattern(ctx context.Context, pattern string, inputFile st
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := runBypassedCmd(ctx, cmd)
+	err := runBypassedCmd(ctx, cmd, "gf", []string{pattern, inputFile}, &stderr)
 	if err != nil {
 		if stderr.Len() > 0 {
 			return fmt.Errorf("%v: %s", err, stderr.String())
