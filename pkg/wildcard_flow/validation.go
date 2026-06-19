@@ -325,7 +325,11 @@ func stepTLSAnalysis(c *Ctx) bool {
 
 					// 2. Read tlsx output and find unique new SANs
 					var newSANs []string
-					if f, err := os.Open(c.F.TlsxOut); err == nil {
+					func() {
+						f, err := os.Open(c.F.TlsxOut)
+						if err != nil {
+							return
+						}
 						defer f.Close()
 						type tlsxJSON struct {
 							SANs      []string `json:"san"`
@@ -352,7 +356,7 @@ func stepTLSAnalysis(c *Ctx) bool {
 								}
 							}
 						}
-					}
+					}()
 
 					if len(newSANs) > 0 {
 						logger.SubStep("Re-probing %d new SAN-discovered subdomains...", len(newSANs))

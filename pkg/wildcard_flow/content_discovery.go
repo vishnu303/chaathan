@@ -383,7 +383,6 @@ func stepJSAnalysis(c *Ctx) bool {
 			select {
 			case <-sCtx.Done():
 				loopErr = sCtx.Err()
-				break
 			default:
 			}
 			if loopErr != nil {
@@ -1389,7 +1388,6 @@ func stepDirFuzzing(c *Ctx) bool {
 			targetURL += "FUZZ"
 
 			tmpFfufOut := filepath.Join(filepath.Dir(c.F.FfufOut), fmt.Sprintf("ffuf_tmp_%d.json", rand.IntN(1000000)))
-			defer os.Remove(tmpFfufOut)
 
 			logger.FileDebug("ffuf input: target=%s wordlist=%s out=%s", targetURL, c.WordlistPath, tmpFfufOut)
 			if err := c.Tb.RunFfufWithFUZZ(sCtx, targetURL, c.WordlistPath, tmpFfufOut); err == nil && utils.FileExists(tmpFfufOut) {
@@ -1405,6 +1403,8 @@ func stepDirFuzzing(c *Ctx) bool {
 					}
 				}
 			}
+			// Clean up temp file immediately after each iteration (not deferred)
+			os.Remove(tmpFfufOut)
 		}
 		return nil
 	}); err != nil {
@@ -1543,57 +1543,7 @@ func isJavaScriptURL(raw string) bool {
 	return strings.HasSuffix(strings.ToLower(raw), ".js")
 }
 
-// concatenateDownloadedFiles merges all files under downloadDir into outputFile.
-func concatenateDownloadedFiles(downloadDir, outputFile string) (int, int64, error) {
-	var files []string
-	err := filepath.Walk(downloadDir, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info == nil || info.IsDir() {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-	if err != nil {
-		return 0, 0, err
-	}
 
-	slices.Sort(files)
-	out, err := os.Create(outputFile)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer out.Close()
-
-	var totalBytes int64
-	writtenFiles := 0
-	for _, path := range files {
-		data, err := os.ReadFile(path)
-		if err != nil || len(data) == 0 {
-			os.Remove(path) // also clean up empty files to save space
-			continue
-		}
-		n, err := out.Write(data)
-		if err != nil {
-			return writtenFiles, totalBytes, err
-		}
-		totalBytes += int64(n)
-		if _, err := io.WriteString(out, "\n"); err != nil {
-			return writtenFiles, totalBytes, err
-		}
-		writtenFiles++
-
-		// Destructive merge: immediately delete the original file to keep storage flat
-		os.Remove(path)
-	}
-	
-	// Remove the now-empty download directory completely
-	os.RemoveAll(downloadDir)
-
-	return writtenFiles, totalBytes, nil
-}
 
 // ─────────────────────────────────────────────────────────────
 // convertX8ToURLs — Step 16 helper

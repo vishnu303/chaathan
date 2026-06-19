@@ -33,7 +33,7 @@ func stepFingerprinting(c *Ctx) bool {
 	}
 
 	var techErr, wafErr error
-	var techSkipped, wafSkipped bool
+	var wafSkipped bool
 
 	// 1. HTTPX Tech Detection
 	if utils.FileExists(c.F.HttpxLiveHosts) {
@@ -43,9 +43,7 @@ func stepFingerprinting(c *Ctx) bool {
 			return c.Tb.RunHttpxFingerprint(sCtx, c.F.HttpxLiveHosts, c.F.HttpxTechOut)
 		})
 		if techErr != nil {
-			if techErr == ErrToolSkipped {
-				techSkipped = true
-			} else {
+			if techErr != ErrToolSkipped {
 				logger.Warning("HTTPX Tech Detection failed: %v", techErr)
 			}
 		}

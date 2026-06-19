@@ -93,7 +93,14 @@ func retryRun(ctx context.Context, command string, maxRetries int, retryDelay ti
 			}
 			logger.Warning("[Retry %d/%d] %s failed: %v — retrying in %s...",
 				attempt, maxRetries, command, err, delay)
-			time.Sleep(delay)
+			// Context-aware sleep: abort immediately if cancelled during delay
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return "", fmt.Errorf("cancelled during retry delay: %w", lastErr)
+			}
 		}
 	}
 

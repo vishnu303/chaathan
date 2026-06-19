@@ -214,7 +214,7 @@ func EnsureGoInstalled(ctx *SetupContext) (bool, error) {
 	// Verify new Go path resolutions
 	okVerify, newVer := CheckGoInstalledAndAtLeast126()
 	if !okVerify {
-		return false, fmt.Errorf("Go installation completed but verification failed (version check resolved: %s)", newVer)
+		return false, fmt.Errorf("go installation completed but verification failed (version check resolved: %s)", newVer)
 	}
 
 	progress.ItemOK(fmt.Sprintf("Go version %s successfully installed", newVer))
